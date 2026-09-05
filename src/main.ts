@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { ValidationPipe } from '@nestjs/common';
+import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -8,10 +9,18 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  app.use(helmet());
+
   const configService = app.get(ConfigService);
 
   const port = configService.get<number>('app.port', 3000);
   const apiPrefix = configService.get<string>('app.apiPrefix', 'api');
+  const frontendUrl = configService.get<string>('app.frontendUrl');
+
+  app.enableCors({
+    origin: frontendUrl ? [frontendUrl] : [],
+    credentials: true,
+  });
 
   app.setGlobalPrefix(apiPrefix);
 

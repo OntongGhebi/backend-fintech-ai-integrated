@@ -5,4 +5,5 @@ export default registerAs('app', () => ({
   port: Number(process.env.PORT ?? 3000),
   apiPrefix: process.env.API_PREFIX || 'api/v1',
   timezone: process.env.APP_TIMEZONE ?? 'Asia/Jakarta',
+  frontendUrl: process.env.FRONTEND_URL,
 }));

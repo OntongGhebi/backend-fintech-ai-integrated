@@ -24,6 +24,10 @@ class EnvironmentVariables {
   @IsString()
   APP_TIMEZONE?: string;
 
+  @IsOptional()
+  @IsString()
+  FRONTEND_URL?: string;
+
   @IsString()
   DATABASE_URL!: string;
 
