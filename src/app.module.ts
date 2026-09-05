@@ -5,6 +5,8 @@ import {
   RequestMethod,
 } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 // import { DatabaseModule } from './database/database.module';
 import { validateEnvironment } from './config/env.validation';
 import appConfig from './config/app.config';
@@ -22,6 +24,19 @@ import { RequestLoggerMiddleware } from './common/middlewares/request-logger.mid
       validate: validateEnvironment,
       load: [appConfig, databaseConfig, redisConfig, jwtConfig],
     }),
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: 60_000,
+        limit: 100,
+      },
+    ]),
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule implements NestModule {
