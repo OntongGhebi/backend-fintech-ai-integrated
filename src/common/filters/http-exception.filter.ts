@@ -4,6 +4,7 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { RequestWithId } from '../middlewares/request-id.middleware';
@@ -20,6 +21,7 @@ interface ErrorResponse {
 
 @Catch(HttpException)
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpExceptionFilter.name);
   catch(exception: HttpException, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
 
@@ -33,6 +35,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
       exceptionResponse,
       statusCode,
       request,
+    );
+
+    this.logger.warn(
+      `[${request.requestId}] ${request.method} ${request.originalUrl} ${statusCode}`,
     );
 
     response.status(statusCode).json(errorResponse);

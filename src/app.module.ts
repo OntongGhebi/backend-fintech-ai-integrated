@@ -1,4 +1,9 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import {
+  MiddlewareConsumer,
+  Module,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 // import { DatabaseModule } from './database/database.module';
 import { validateEnvironment } from './config/env.validation';
@@ -7,6 +12,7 @@ import jwtConfig from './config/jwt.config';
 import redisConfig from './config/redis.config';
 import databaseConfig from './config/database.config';
 import { RequestMiddleware } from './common/middlewares/request-id.middleware';
+import { RequestLoggerMiddleware } from './common/middlewares/request-logger.middleware';
 
 @Module({
   imports: [
@@ -20,6 +26,8 @@ import { RequestMiddleware } from './common/middlewares/request-id.middleware';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(RequestMiddleware).forRoutes('*');
+    consumer
+      .apply(RequestMiddleware, RequestLoggerMiddleware)
+      .forRoutes({ path: '{*path}', method: RequestMethod.ALL });
   }
 }
