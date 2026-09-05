@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 // import { DatabaseModule } from './database/database.module';
 import { validateEnvironment } from './config/env.validation';
@@ -6,6 +6,7 @@ import appConfig from './config/app.config';
 import jwtConfig from './config/jwt.config';
 import redisConfig from './config/redis.config';
 import databaseConfig from './config/database.config';
+import { RequestMiddleware } from './common/middlewares/request-id.middleware';
 
 @Module({
   imports: [
@@ -17,4 +18,8 @@ import databaseConfig from './config/database.config';
     }),
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestMiddleware).forRoutes('*');
+  }
+}

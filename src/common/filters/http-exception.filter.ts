@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { RequestWithId } from '../middlewares/request-id.middleware';
 
 interface ErrorResponse {
   success: false;
@@ -13,6 +14,7 @@ interface ErrorResponse {
   message: string | string[];
   error: string;
   path: string;
+  requestId: string;
   timestamp: string;
 }
 
@@ -22,7 +24,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
 
     const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request>();
+    const request = ctx.getRequest<RequestWithId>();
 
     const statusCode = exception.getStatus();
     const exceptionResponse = exception.getResponse();
@@ -39,7 +41,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
   private buildErrorResponse(
     exceptionResponse: string | object,
     statusCode: number,
-    request: Request,
+    request: RequestWithId,
   ): ErrorResponse {
     let message: string | string[] = 'An error occurred';
     let error = HttpStatus[statusCode] ?? 'Error';
@@ -69,6 +71,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message,
       error,
       path: request.url,
+      requestId: request.requestId,
       timestamp: new Date().toISOString(),
     };
   }
