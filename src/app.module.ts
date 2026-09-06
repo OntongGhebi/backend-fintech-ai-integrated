@@ -18,6 +18,8 @@ import { RequestLoggerMiddleware } from './common/middlewares/request-logger.mid
 import { RedisModule } from 'docker/redis/redis.module';
 import bullmqConfig from './config/bullmq.config';
 import { QueueModule } from './queue/queue.module';
+import { DatabaseModule } from './database/database.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -35,8 +37,10 @@ import { QueueModule } from './queue/queue.module';
       },
     ]),
 
+    DatabaseModule,
     RedisModule,
     QueueModule,
+    HealthModule,
   ],
   providers: [
     {
