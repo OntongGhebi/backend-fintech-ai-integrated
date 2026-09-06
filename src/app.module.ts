@@ -20,6 +20,7 @@ import bullmqConfig from './config/bullmq.config';
 import { QueueModule } from './queue/queue.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { HealthModule } from './health/health.module';
     RedisModule,
     QueueModule,
     HealthModule,
+    AuthModule,
   ],
   providers: [
     {
