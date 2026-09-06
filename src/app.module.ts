@@ -16,6 +16,8 @@ import databaseConfig from './config/database.config';
 import { RequestMiddleware } from './common/middlewares/request-id.middleware';
 import { RequestLoggerMiddleware } from './common/middlewares/request-logger.middleware';
 import { RedisModule } from 'docker/redis/redis.module';
+import bullmqConfig from './config/bullmq.config';
+import { QueueModule } from './queue/queue.module';
 
 @Module({
   imports: [
@@ -23,7 +25,7 @@ import { RedisModule } from 'docker/redis/redis.module';
       isGlobal: true,
       cache: true,
       validate: validateEnvironment,
-      load: [appConfig, databaseConfig, redisConfig, jwtConfig],
+      load: [appConfig, databaseConfig, redisConfig, jwtConfig, bullmqConfig],
     }),
     ThrottlerModule.forRoot([
       {
@@ -34,6 +36,7 @@ import { RedisModule } from 'docker/redis/redis.module';
     ]),
 
     RedisModule,
+    QueueModule,
   ],
   providers: [
     {
