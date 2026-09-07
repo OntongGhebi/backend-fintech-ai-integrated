@@ -3,10 +3,13 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { QueueService } from './queue.service';
 import { SystemProcessor } from './processors/system.processor';
+import { EmailProcessor } from './processors/email.processor';
+import { EmailModule } from '../integrations/email/email.module';
 // import { QueueController } from './queue.controller';
 
 @Module({
   imports: [
+    EmailModule,
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -21,12 +24,10 @@ import { SystemProcessor } from './processors/system.processor';
       }),
     }),
 
-    BullModule.registerQueue({
-      name: 'system',
-    }),
+    BullModule.registerQueue({ name: 'system' }, { name: 'email' }),
   ],
-  providers: [QueueService, SystemProcessor],
+  providers: [QueueService, SystemProcessor, EmailProcessor],
   //   controllers: [QueueController],
-  exports: [BullModule],
+  exports: [BullModule, QueueService],
 })
 export class QueueModule {}

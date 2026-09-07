@@ -4,10 +4,16 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { EmailVerificationService } from './services/email-verification.service';
+
 @ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly emailVerificationService: EmailVerificationService,
+  ) {}
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
@@ -28,5 +34,30 @@ export class AuthController {
   })
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
+  }
+
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify user email address',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Email successfully verified',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Invalid verification token',
+  })
+  @ApiResponse({
+    status: HttpStatus.CONFLICT,
+    description: 'Verification token is expired or already used',
+  })
+  async verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
+    await this.emailVerificationService.verifyEmail(verifyEmailDto.token);
+
+    return {
+      message: 'Email verified successfully',
+    };
   }
 }

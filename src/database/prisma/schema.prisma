@@ -160,97 +160,119 @@ enum WebhookEventStatus {
   FAILED
 }
 
-
 // ============================================================
 // 1. USERS
 // ============================================================
 
 model User {
-  id                String     @id @default(uuid()) @db.Uuid
-  email             String     @unique @db.VarChar(255)
-  passwordHash      String     @db.VarChar(255)
-  name              String     @db.VarChar(100)
-  avatarUrl         String?
-  emailVerifiedAt   DateTime?  @db.Timestamptz(6)
-  status            UserStatus @default(ACTIVE)
+  id              String     @id @default(uuid()) @db.Uuid
+  email           String     @unique @db.VarChar(255)
+  passwordHash    String     @db.VarChar(255)
+  name            String     @db.VarChar(100)
+  avatarUrl       String?
+  emailVerifiedAt DateTime?  @db.Timestamptz(6)
+  status          UserStatus @default(ACTIVE)
 
-  createdAt         DateTime   @default(now()) @db.Timestamptz(6)
-  updatedAt         DateTime   @updatedAt @db.Timestamptz(6)
-  deletedAt         DateTime?  @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt DateTime? @db.Timestamptz(6)
 
   // Relations
-  preferences           UserPreference?
-  sessions              Session[]
-  accounts              Account[]
-  categories            Category[]
-  transactions          Transaction[]
-  budgets               Budget[]
-  recurringTransactions  RecurringTransaction[]
+  preferences             UserPreference?
+  emailVerificationTokens EmailVerificationToken[]
+  sessions                Session[]
+  accounts                Account[]
+  categories              Category[]
+  transactions            Transaction[]
+  budgets                 Budget[]
+  recurringTransactions   RecurringTransaction[]
 
-  subscriptions         Subscription[]
-  payments              Payment[]
-  usageRecords          UsageRecord[]
+  subscriptions Subscription[]
+  payments      Payment[]
+  usageRecords  UsageRecord[]
 
-  telegramAccounts      TelegramAccount[]
+  telegramAccounts TelegramAccount[]
 
-  aiConversations       AIConversation[]
-  aiUsage               AIUsage[]
+  aiConversations AIConversation[]
+  aiUsage         AIUsage[]
 
-  notifications         Notification[]
+  notifications          Notification[]
   notificationPreference NotificationPreference?
 
-  auditLogs             AuditLog[]
+  auditLogs AuditLog[]
 
   @@index([status])
   @@index([deletedAt])
   @@map("users")
 }
 
-
 // ============================================================
 // 2. USER PREFERENCES
 // ============================================================
 
 model UserPreference {
-  id             String   @id @default(uuid()) @db.Uuid
-  userId         String   @unique @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @db.Uuid
 
-  currency       String   @default("IDR") @db.Char(3)
-  timezone       String   @default("Asia/Jakarta") @db.VarChar(64)
-  locale         String   @default("id-ID") @db.VarChar(10)
-  dateFormat     String?  @db.VarChar(30)
-  weekStartsOn   Int      @default(1) @db.SmallInt
+  currency     String  @default("IDR") @db.Char(3)
+  timezone     String  @default("Asia/Jakarta") @db.VarChar(64)
+  locale       String  @default("id-ID") @db.VarChar(10)
+  dateFormat   String? @db.VarChar(30)
+  weekStartsOn Int     @default(1) @db.SmallInt
 
-  createdAt      DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt      DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_preferences")
 }
 
+// ============================================================
+// EMAIL VERIFICATION TOKENS
+// ============================================================
+
+model EmailVerificationToken {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+
+  tokenHash String @unique @db.VarChar(64)
+
+  expiresAt DateTime  @db.Timestamptz(6)
+  usedAt    DateTime? @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([userId, usedAt])
+  @@map("email_verification_tokens")
+}
 
 // ============================================================
 // 3. SESSIONS
 // ============================================================
 
 model Session {
-  id               String    @id @default(uuid()) @db.Uuid
-  userId           String    @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
 
   refreshTokenHash String    @db.VarChar(255)
   expiresAt        DateTime  @db.Timestamptz(6)
   revokedAt        DateTime? @db.Timestamptz(6)
   lastUsedAt       DateTime? @db.Timestamptz(6)
 
-  ipAddress        String?   @db.Inet
-  userAgent        String?
+  ipAddress String? @db.Inet
+  userAgent String?
 
-  createdAt        DateTime  @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
@@ -258,30 +280,29 @@ model Session {
   @@map("sessions")
 }
 
-
 // ============================================================
 // 4. ACCOUNTS
 // ============================================================
 
 model Account {
-  id              String      @id @default(uuid()) @db.Uuid
-  userId          String      @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
 
-  name            String      @db.VarChar(100)
-  type            AccountType
+  name String      @db.VarChar(100)
+  type AccountType
 
-  openingBalance  Decimal     @default(0) @db.Decimal(19, 4)
-  currency        String      @default("IDR") @db.Char(3)
+  openingBalance Decimal @default(0) @db.Decimal(19, 4)
+  currency       String  @default("IDR") @db.Char(3)
 
-  isActive        Boolean     @default(true)
+  isActive Boolean @default(true)
 
-  createdAt       DateTime    @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime    @updatedAt @db.Timestamptz(6)
-  deletedAt       DateTime?   @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt DateTime? @db.Timestamptz(6)
 
   // Relations
-  user            User        @relation(fields: [userId], references: [id], onDelete: Restrict)
-  transactions    Transaction[]
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  transactions          Transaction[]
   recurringTransactions RecurringTransaction[]
 
   @@index([userId])
@@ -290,32 +311,31 @@ model Account {
   @@map("accounts")
 }
 
-
 // ============================================================
 // 5. CATEGORIES
 // ============================================================
 
 model Category {
-  id          String       @id @default(uuid()) @db.Uuid
-  userId      String       @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
 
-  name        String       @db.VarChar(100)
-  type        CategoryType
+  name String       @db.VarChar(100)
+  type CategoryType
 
-  icon        String?      @db.VarChar(50)
-  color       String?      @db.VarChar(20)
+  icon  String? @db.VarChar(50)
+  color String? @db.VarChar(20)
 
-  isSystem    Boolean      @default(false)
-  isActive    Boolean      @default(true)
+  isSystem Boolean @default(false)
+  isActive Boolean @default(true)
 
-  createdAt   DateTime     @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime     @updatedAt @db.Timestamptz(6)
-  deletedAt   DateTime?    @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt DateTime? @db.Timestamptz(6)
 
   // Relations
-  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
-  transactions Transaction[]
-  budgets     Budget[]
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  transactions          Transaction[]
+  budgets               Budget[]
   recurringTransactions RecurringTransaction[]
 
   @@index([userId])
@@ -325,40 +345,39 @@ model Category {
   @@map("categories")
 }
 
-
 // ============================================================
 // 6. TRANSACTIONS
 // ============================================================
 
 model Transaction {
-  id              String             @id @default(uuid()) @db.Uuid
-  userId          String             @db.Uuid
-  accountId       String             @db.Uuid
-  categoryId      String?            @db.Uuid
+  id         String  @id @default(uuid()) @db.Uuid
+  userId     String  @db.Uuid
+  accountId  String  @db.Uuid
+  categoryId String? @db.Uuid
 
-  type            TransactionType
-  amount          Decimal            @db.Decimal(19, 4)
-  currency        String             @default("IDR") @db.Char(3)
+  type     TransactionType
+  amount   Decimal         @db.Decimal(19, 4)
+  currency String          @default("IDR") @db.Char(3)
 
-  description     String?            @db.VarChar(500)
-  transactionDate DateTime           @db.Timestamptz(6)
+  description     String?  @db.VarChar(500)
+  transactionDate DateTime @db.Timestamptz(6)
 
-  source          TransactionSource
-  status          TransactionStatus  @default(ACTIVE)
+  source TransactionSource
+  status TransactionStatus @default(ACTIVE)
 
   // Same UUID is shared by the two sides of a transfer.
-  transferGroupId String?            @db.Uuid
+  transferGroupId String? @db.Uuid
 
-  metadata        Json?              @db.JsonB
+  metadata Json? @db.JsonB
 
-  createdAt       DateTime            @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime            @updatedAt @db.Timestamptz(6)
-  deletedAt       DateTime?           @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt DateTime? @db.Timestamptz(6)
 
   // Relations
-  user            User               @relation(fields: [userId], references: [id], onDelete: Restrict)
-  account         Account            @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  category        Category?          @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  account  Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
   @@index([userId, transactionDate])
   @@index([userId, type, transactionDate])
@@ -370,33 +389,32 @@ model Transaction {
   @@map("transactions")
 }
 
-
 // ============================================================
 // 7. BUDGETS
 // ============================================================
 
 model Budget {
-  id          String       @id @default(uuid()) @db.Uuid
-  userId      String       @db.Uuid
-  categoryId  String?      @db.Uuid
+  id         String  @id @default(uuid()) @db.Uuid
+  userId     String  @db.Uuid
+  categoryId String? @db.Uuid
 
-  name        String       @db.VarChar(100)
-  amount      Decimal      @db.Decimal(19, 4)
+  name   String  @db.VarChar(100)
+  amount Decimal @db.Decimal(19, 4)
 
-  period      BudgetPeriod
-  startDate   DateTime     @db.Date
-  endDate     DateTime?    @db.Date
+  period    BudgetPeriod
+  startDate DateTime     @db.Date
+  endDate   DateTime?    @db.Date
 
-  status      BudgetStatus @default(ACTIVE)
+  status BudgetStatus @default(ACTIVE)
 
-  createdAt   DateTime     @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime     @updatedAt @db.Timestamptz(6)
-  deletedAt   DateTime?    @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt DateTime? @db.Timestamptz(6)
 
   // Relations
-  user        User         @relation(fields: [userId], references: [id], onDelete: Restrict)
-  category    Category?    @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  alerts      BudgetAlert[]
+  user     User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  category Category?     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  alerts   BudgetAlert[]
 
   @@index([userId])
   @@index([userId, status])
@@ -404,158 +422,153 @@ model Budget {
   @@map("budgets")
 }
 
-
 // ============================================================
 // 8. BUDGET ALERTS
 // ============================================================
 
 model BudgetAlert {
-  id                   String               @id @default(uuid()) @db.Uuid
-  budgetId             String               @db.Uuid
+  id       String @id @default(uuid()) @db.Uuid
+  budgetId String @db.Uuid
 
-  thresholdPercentage  Int                  @db.SmallInt
-  channel              NotificationChannel
+  thresholdPercentage Int                 @db.SmallInt
+  channel             NotificationChannel
 
-  isEnabled             Boolean             @default(true)
+  isEnabled Boolean @default(true)
 
-  createdAt             DateTime             @default(now()) @db.Timestamptz(6)
-  updatedAt             DateTime             @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  budget               Budget               @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
 
   @@index([budgetId])
   @@index([budgetId, isEnabled])
   @@map("budget_alerts")
 }
 
-
 // ============================================================
 // 9. RECURRING TRANSACTIONS
 // ============================================================
 
 model RecurringTransaction {
-  id              String              @id @default(uuid()) @db.Uuid
-  userId          String              @db.Uuid
-  accountId       String              @db.Uuid
-  categoryId      String?             @db.Uuid
+  id         String  @id @default(uuid()) @db.Uuid
+  userId     String  @db.Uuid
+  accountId  String  @db.Uuid
+  categoryId String? @db.Uuid
 
-  type            TransactionType
-  amount          Decimal             @db.Decimal(19, 4)
-  description     String?             @db.VarChar(500)
+  type        TransactionType
+  amount      Decimal         @db.Decimal(19, 4)
+  description String?         @db.VarChar(500)
 
-  frequency       RecurringFrequency
-  startDate       DateTime            @db.Date
-  endDate         DateTime?           @db.Date
+  frequency RecurringFrequency
+  startDate DateTime           @db.Date
+  endDate   DateTime?          @db.Date
 
-  nextRunAt       DateTime            @db.Timestamptz(6)
-  lastRunAt       DateTime?           @db.Timestamptz(6)
+  nextRunAt DateTime  @db.Timestamptz(6)
+  lastRunAt DateTime? @db.Timestamptz(6)
 
-  isActive        Boolean             @default(true)
+  isActive Boolean @default(true)
 
-  createdAt       DateTime            @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime            @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  user            User                @relation(fields: [userId], references: [id], onDelete: Restrict)
-  account         Account             @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  category        Category?           @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  account  Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
   @@index([userId, nextRunAt])
   @@index([userId, isActive])
   @@map("recurring_transactions")
 }
 
-
 // ============================================================
 // 10. PLANS
 // ============================================================
 
 model Plan {
-  id              String             @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-  code            String             @unique @db.VarChar(50)
-  name            String             @db.VarChar(100)
-  description     String?
+  code        String  @unique @db.VarChar(50)
+  name        String  @db.VarChar(100)
+  description String?
 
-  price           Decimal            @db.Decimal(19, 4)
-  currency        String             @default("IDR") @db.Char(3)
+  price           Decimal         @db.Decimal(19, 4)
+  currency        String          @default("IDR") @db.Char(3)
   billingInterval BillingInterval
 
-  isActive        Boolean            @default(true)
+  isActive Boolean @default(true)
 
-  createdAt       DateTime            @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime            @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  features        PlanFeature[]
-  subscriptions   Subscription[]
+  features      PlanFeature[]
+  subscriptions Subscription[]
 
   @@index([isActive])
   @@map("plans")
 }
-
 
 // ============================================================
 // 11. PLAN FEATURES
 // ============================================================
 
 model PlanFeature {
-  id           String       @id @default(uuid()) @db.Uuid
-  planId       String       @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  planId String @db.Uuid
 
-  featureCode  String       @db.VarChar(100)
-  enabled      Boolean      @default(true)
+  featureCode String  @db.VarChar(100)
+  enabled     Boolean @default(true)
 
-  limitValue   Int?
-  limitPeriod  UsagePeriod?
+  limitValue  Int?
+  limitPeriod UsagePeriod?
 
-  createdAt    DateTime     @default(now()) @db.Timestamptz(6)
-  updatedAt    DateTime     @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  plan         Plan         @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   @@unique([planId, featureCode])
   @@index([featureCode])
   @@map("plan_features")
 }
 
-
 // ============================================================
 // 12. SUBSCRIPTIONS
 // ============================================================
 
 model Subscription {
-  id                    String             @id @default(uuid()) @db.Uuid
-  userId                String             @db.Uuid
-  planId                String             @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  planId String @db.Uuid
 
-  status                SubscriptionStatus
-  billingInterval       BillingInterval
+  status          SubscriptionStatus
+  billingInterval BillingInterval
 
-  trialStartedAt        DateTime?          @db.Timestamptz(6)
-  trialEndsAt           DateTime?          @db.Timestamptz(6)
+  trialStartedAt DateTime? @db.Timestamptz(6)
+  trialEndsAt    DateTime? @db.Timestamptz(6)
 
-  currentPeriodStart    DateTime?          @db.Timestamptz(6)
-  currentPeriodEnd      DateTime?          @db.Timestamptz(6)
+  currentPeriodStart DateTime? @db.Timestamptz(6)
+  currentPeriodEnd   DateTime? @db.Timestamptz(6)
 
-  cancelAtPeriodEnd     Boolean            @default(false)
-  canceledAt            DateTime?          @db.Timestamptz(6)
+  cancelAtPeriodEnd Boolean   @default(false)
+  canceledAt        DateTime? @db.Timestamptz(6)
 
-  provider              String?            @db.VarChar(50)
-  providerCustomerId    String?            @db.VarChar(255)
-  providerSubscriptionId String?           @db.VarChar(255)
+  provider               String? @db.VarChar(50)
+  providerCustomerId     String? @db.VarChar(255)
+  providerSubscriptionId String? @db.VarChar(255)
 
-  createdAt             DateTime           @default(now()) @db.Timestamptz(6)
-  updatedAt             DateTime           @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  user                  User               @relation(fields: [userId], references: [id], onDelete: Restrict)
-  plan                  Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Restrict)
 
-  events                SubscriptionEvent[]
-  payments              Payment[]
+  events   SubscriptionEvent[]
+  payments Payment[]
 
   @@index([userId])
   @@index([userId, status])
@@ -565,61 +578,59 @@ model Subscription {
   @@map("subscriptions")
 }
 
-
 // ============================================================
 // 13. SUBSCRIPTION EVENTS
 // ============================================================
 
 model SubscriptionEvent {
-  id             String                 @id @default(uuid()) @db.Uuid
-  subscriptionId String                 @db.Uuid
+  id             String @id @default(uuid()) @db.Uuid
+  subscriptionId String @db.Uuid
 
-  eventType      SubscriptionEventType
+  eventType SubscriptionEventType
 
-  oldStatus      SubscriptionStatus?
-  newStatus      SubscriptionStatus?
+  oldStatus SubscriptionStatus?
+  newStatus SubscriptionStatus?
 
-  metadata       Json?                  @db.JsonB
+  metadata Json? @db.JsonB
 
-  createdAt      DateTime               @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  subscription   Subscription           @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
 
   @@index([subscriptionId])
   @@index([subscriptionId, createdAt])
   @@map("subscription_events")
 }
 
-
 // ============================================================
 // 14. PAYMENTS
 // ============================================================
 
 model Payment {
-  id                String          @id @default(uuid()) @db.Uuid
-  userId            String          @db.Uuid
-  subscriptionId    String          @db.Uuid
+  id             String @id @default(uuid()) @db.Uuid
+  userId         String @db.Uuid
+  subscriptionId String @db.Uuid
 
-  amount            Decimal         @db.Decimal(19, 4)
-  currency          String          @default("IDR") @db.Char(3)
+  amount   Decimal @db.Decimal(19, 4)
+  currency String  @default("IDR") @db.Char(3)
 
-  status            PaymentStatus
+  status PaymentStatus
 
-  provider          String          @db.VarChar(50)
-  providerPaymentId String?         @db.VarChar(255)
+  provider          String  @db.VarChar(50)
+  providerPaymentId String? @db.VarChar(255)
 
-  paidAt            DateTime?       @db.Timestamptz(6)
-  failedAt          DateTime?       @db.Timestamptz(6)
+  paidAt   DateTime? @db.Timestamptz(6)
+  failedAt DateTime? @db.Timestamptz(6)
 
-  metadata          Json?           @db.JsonB
+  metadata Json? @db.JsonB
 
-  createdAt         DateTime        @default(now()) @db.Timestamptz(6)
-  updatedAt         DateTime        @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  user              User            @relation(fields: [userId], references: [id], onDelete: Restrict)
-  subscription      Subscription    @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
 
   @@index([userId])
   @@index([subscriptionId])
@@ -628,58 +639,56 @@ model Payment {
   @@map("payments")
 }
 
-
 // ============================================================
 // 15. USAGE RECORDS
 // ============================================================
 
 model UsageRecord {
-  id           String      @id @default(uuid()) @db.Uuid
-  userId       String      @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
 
-  featureCode  String      @db.VarChar(100)
-  usageCount   Int         @default(0)
+  featureCode String @db.VarChar(100)
+  usageCount  Int    @default(0)
 
-  periodStart  DateTime    @db.Timestamptz(6)
-  periodEnd    DateTime    @db.Timestamptz(6)
+  periodStart DateTime @db.Timestamptz(6)
+  periodEnd   DateTime @db.Timestamptz(6)
 
-  createdAt    DateTime    @default(now()) @db.Timestamptz(6)
-  updatedAt    DateTime    @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  user         User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@unique([userId, featureCode, periodStart, periodEnd])
   @@index([userId, featureCode])
   @@map("usage_records")
 }
 
-
 // ============================================================
 // 16. TELEGRAM ACCOUNTS
 // ============================================================
 
 model TelegramAccount {
-  id              String    @id @default(uuid()) @db.Uuid
-  userId          String    @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
 
-  telegramUserId  BigInt
-  telegramUsername String?  @db.VarChar(100)
+  telegramUserId   BigInt
+  telegramUsername String? @db.VarChar(100)
 
-  firstName       String?   @db.VarChar(100)
-  lastName        String?   @db.VarChar(100)
+  firstName String? @db.VarChar(100)
+  lastName  String? @db.VarChar(100)
 
-  isVerified      Boolean   @default(false)
+  isVerified Boolean @default(false)
 
-  linkedAt        DateTime  @default(now()) @db.Timestamptz(6)
-  unlinkedAt      DateTime? @db.Timestamptz(6)
+  linkedAt   DateTime  @default(now()) @db.Timestamptz(6)
+  unlinkedAt DateTime? @db.Timestamptz(6)
 
-  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  user            User      @relation(fields: [userId], references: [id], onDelete: Restrict)
-  messages        TelegramMessage[]
+  user     User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  messages TelegramMessage[]
 
   @@unique([telegramUserId])
   @@index([userId])
@@ -687,30 +696,29 @@ model TelegramAccount {
   @@map("telegram_accounts")
 }
 
-
 // ============================================================
 // 17. TELEGRAM MESSAGES
 // ============================================================
 
 model TelegramMessage {
-  id                String                   @id @default(uuid()) @db.Uuid
-  telegramAccountId String                   @db.Uuid
+  id                String @id @default(uuid()) @db.Uuid
+  telegramAccountId String @db.Uuid
 
   telegramMessageId BigInt
   chatId            BigInt
 
-  messageType       TelegramMessageType
-  content           String?
+  messageType TelegramMessageType
+  content     String?
 
-  direction         TelegramMessageDirection
-  processingStatus  TelegramProcessingStatus @default(RECEIVED)
+  direction        TelegramMessageDirection
+  processingStatus TelegramProcessingStatus @default(RECEIVED)
 
-  processedAt       DateTime?                @db.Timestamptz(6)
+  processedAt DateTime? @db.Timestamptz(6)
 
-  createdAt         DateTime                 @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  telegramAccount   TelegramAccount          @relation(fields: [telegramAccountId], references: [id], onDelete: Cascade)
+  telegramAccount TelegramAccount @relation(fields: [telegramAccountId], references: [id], onDelete: Cascade)
 
   @@unique([chatId, telegramMessageId])
   @@index([telegramAccountId])
@@ -719,76 +727,73 @@ model TelegramMessage {
   @@map("telegram_messages")
 }
 
-
 // ============================================================
 // 18. AI CONVERSATIONS
 // ============================================================
 
 model AIConversation {
-  id          String      @id @default(uuid()) @db.Uuid
-  userId      String      @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
 
-  title       String?     @db.VarChar(255)
+  title String? @db.VarChar(255)
 
-  createdAt   DateTime    @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime    @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages    AIMessage[]
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages AIMessage[]
 
   @@index([userId])
   @@index([userId, updatedAt])
   @@map("ai_conversations")
 }
 
-
 // ============================================================
 // 19. AI MESSAGES
 // ============================================================
 
 model AIMessage {
-  id             String         @id @default(uuid()) @db.Uuid
-  conversationId String         @db.Uuid
+  id             String @id @default(uuid()) @db.Uuid
+  conversationId String @db.Uuid
 
-  role           AIMessageRole
-  content        String
+  role    AIMessageRole
+  content String
 
-  model          String?        @db.VarChar(100)
+  model String? @db.VarChar(100)
 
-  createdAt      DateTime       @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
   @@index([conversationId, createdAt])
   @@map("ai_messages")
 }
 
-
 // ============================================================
 // 20. AI USAGE
 // ============================================================
 
 model AIUsage {
-  id            String    @id @default(uuid()) @db.Uuid
-  userId        String    @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
 
-  feature       String    @db.VarChar(100)
-  provider      String    @db.VarChar(50)
-  model         String    @db.VarChar(100)
+  feature  String @db.VarChar(100)
+  provider String @db.VarChar(50)
+  model    String @db.VarChar(100)
 
-  inputTokens   Int       @default(0)
-  outputTokens  Int       @default(0)
-  totalTokens   Int       @default(0)
+  inputTokens  Int @default(0)
+  outputTokens Int @default(0)
+  totalTokens  Int @default(0)
 
-  estimatedCost Decimal?  @db.Decimal(19, 8)
+  estimatedCost Decimal? @db.Decimal(19, 8)
 
-  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  user          User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([userId])
   @@index([userId, createdAt])
@@ -796,28 +801,27 @@ model AIUsage {
   @@map("ai_usage")
 }
 
-
 // ============================================================
 // 21. NOTIFICATIONS
 // ============================================================
 
 model Notification {
-  id          String                @id @default(uuid()) @db.Uuid
-  userId      String                @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
 
-  type        String                @db.VarChar(100)
-  title       String                @db.VarChar(255)
-  message     String
+  type    String @db.VarChar(100)
+  title   String @db.VarChar(255)
+  message String
 
-  channel     NotificationChannel
-  status      NotificationStatus
+  channel NotificationChannel
+  status  NotificationStatus
 
-  readAt      DateTime?             @db.Timestamptz(6)
+  readAt DateTime? @db.Timestamptz(6)
 
-  createdAt   DateTime              @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([userId, status])
@@ -825,55 +829,53 @@ model Notification {
   @@map("notifications")
 }
 
-
 // ============================================================
 // 22. NOTIFICATION PREFERENCES
 // ============================================================
 
 model NotificationPreference {
-  id                  String   @id @default(uuid()) @db.Uuid
-  userId              String   @unique @db.Uuid
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @unique @db.Uuid
 
-  telegramEnabled     Boolean  @default(true)
-  emailEnabled        Boolean  @default(true)
+  telegramEnabled Boolean @default(true)
+  emailEnabled    Boolean @default(true)
 
-  budgetAlertEnabled  Boolean  @default(true)
+  budgetAlertEnabled Boolean @default(true)
 
-  dailySummaryEnabled  Boolean @default(false)
-  weeklySummaryEnabled Boolean @default(false)
+  dailySummaryEnabled   Boolean @default(false)
+  weeklySummaryEnabled  Boolean @default(false)
   monthlySummaryEnabled Boolean @default(false)
 
-  createdAt           DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt           DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("notification_preferences")
 }
-
 
 // ============================================================
 // 23. AUDIT LOGS
 // ============================================================
 
 model AuditLog {
-  id          String    @id @default(uuid()) @db.Uuid
-  userId      String?   @db.Uuid
+  id     String  @id @default(uuid()) @db.Uuid
+  userId String? @db.Uuid
 
-  action      String    @db.VarChar(100)
-  entityType  String    @db.VarChar(100)
-  entityId    String?   @db.Uuid
+  action     String  @db.VarChar(100)
+  entityType String  @db.VarChar(100)
+  entityId   String? @db.Uuid
 
-  metadata    Json?     @db.JsonB
+  metadata Json? @db.JsonB
 
-  ipAddress   String?   @db.Inet
-  userAgent   String?
+  ipAddress String? @db.Inet
+  userAgent String?
 
-  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // Relations
-  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([entityType, entityId])
@@ -882,24 +884,23 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-
 // ============================================================
 // 24. WEBHOOK EVENTS
 // ============================================================
 
 model WebhookEvent {
-  id          String             @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
-  provider    String             @db.VarChar(50)
-  eventId     String             @db.VarChar(255)
-  eventType   String             @db.VarChar(100)
+  provider  String @db.VarChar(50)
+  eventId   String @db.VarChar(255)
+  eventType String @db.VarChar(100)
 
-  payload     Json               @db.JsonB
+  payload Json @db.JsonB
 
   status      WebhookEventStatus @default(RECEIVED)
   processedAt DateTime?          @db.Timestamptz(6)
 
-  createdAt   DateTime           @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   @@unique([provider, eventId])
   @@index([provider])
