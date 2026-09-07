@@ -7,14 +7,20 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../../../database/prisma/prisma.service';
+import { QueueService } from '../../../queue/queue.service';
 
 @Injectable()
 export class EmailVerificationService {
   private readonly tokenExpirationMinutes = 30;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+    private readonly queueService: QueueService,
+  ) {}
 
   generateToken(): string {
     return randomBytes(32).toString('hex');
@@ -39,7 +45,6 @@ export class EmailVerificationService {
       },
     });
 
-    // Save the token to the database
     await this.prisma.emailVerificationToken.create({
       data: {
         userId,
@@ -49,6 +54,28 @@ export class EmailVerificationService {
     });
 
     return token;
+  }
+
+  async createAndSendToken(
+    userId: string,
+    email: string,
+    name: string,
+  ): Promise<void> {
+    const token = await this.createToken(userId);
+
+    const frontendUrl = this.configService.get<string>('app.frontendUrl');
+
+    if (!frontendUrl) {
+      throw new Error('FRONTEND_URL is not configured');
+    }
+
+    const verificationUrl = `${frontendUrl}/verify-email?token=${token}`;
+
+    await this.queueService.addEmailVerificationJob({
+      email,
+      name,
+      verificationUrl,
+    });
   }
 
   async verifyToken(token: string): Promise<string> {

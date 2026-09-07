@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 
 import { EmailVerificationService } from './email-verification.service';
 import { PrismaService } from 'src/database/prisma/prisma.service';
+import { QueueService } from 'src/queue/queue.service';
 
 describe('EmailVerificationService', () => {
   let service: EmailVerificationService;
@@ -21,6 +23,20 @@ describe('EmailVerificationService', () => {
     $transaction: jest.fn(),
   };
 
+  const configServiceMock = {
+    get: jest.fn((key: string) => {
+      if (key === 'app.frontendUrl') {
+        return 'http://localhost:3000';
+      }
+
+      return undefined;
+    }),
+  };
+
+  const queueServiceMock = {
+    addEmailVerificationJob: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -30,6 +46,14 @@ describe('EmailVerificationService', () => {
         {
           provide: PrismaService,
           useValue: prismaMock,
+        },
+        {
+          provide: ConfigService,
+          useValue: configServiceMock,
+        },
+        {
+          provide: QueueService,
+          useValue: queueServiceMock,
         },
       ],
     }).compile();

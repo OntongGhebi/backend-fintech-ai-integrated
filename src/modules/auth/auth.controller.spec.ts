@@ -17,6 +17,7 @@ describe('AuthController', () => {
 
   const emailVerificationServiceMock = {
     verifyEmail: jest.fn(),
+    verifyToken: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -108,9 +109,21 @@ describe('AuthController', () => {
 
       authServiceMock.login.mockResolvedValue(expectedResult);
 
-      const result = await controller.login(dto);
+      const request = {
+        headers: {
+          'user-agent': 'jest-agent',
+        },
+        ip: '127.0.0.1',
+        get: jest.fn().mockReturnValue('jest-agent'),
+      } as any;
 
-      expect(authServiceMock.login).toHaveBeenCalledWith(dto);
+      const result = await controller.login(dto, request);
+
+      expect(authServiceMock.login).toHaveBeenCalledWith(
+        dto,
+        '127.0.0.1',
+        'jest-agent',
+      );
 
       expect(result).toEqual(expectedResult);
     });

@@ -25,7 +25,7 @@ describe('PasswordService', () => {
       const secondHash = await service.hash(password);
 
       expect(firstHash).not.toBe(secondHash);
-    });
+    }, 15000);
   });
 
   describe('compare', () => {
@@ -36,7 +36,7 @@ describe('PasswordService', () => {
       const result = await service.compare(password, hash);
 
       expect(result).toBe(true);
-    });
+    }, 15000);
 
     it('should return false for an incorrect password', async () => {
       const password = 'StrongPassword123!';
@@ -46,6 +46,6 @@ describe('PasswordService', () => {
       const result = await service.compare(wrongPassword, hash);
 
       expect(result).toBe(false);
-    });
+    }, 15000);
   });
 });

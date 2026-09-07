@@ -12,6 +12,7 @@ import { EmailVerificationService } from './services/email-verification.service'
 
 import { AccessTokenGuard } from './guards/access-token.guard';
 import { AccessTokenStrategy } from './strategies/access-token.strategy';
+import { RefreshTokenService } from './services/refresh-token.service';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { AccessTokenStrategy } from './strategies/access-token.strategy';
     AuthService,
     PasswordService,
     EmailVerificationService,
+    RefreshTokenService,
     AccessTokenStrategy,
     AccessTokenGuard,
   ],

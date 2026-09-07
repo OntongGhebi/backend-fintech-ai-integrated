@@ -14,16 +14,14 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { Request } from 'express';
+import type { Request } from 'express';
 
 import { AuthService } from './auth.service';
-
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
-
 import { AccessTokenGuard } from './guards/access-token.guard';
-
 import { EmailVerificationService } from './services/email-verification.service';
 
 interface AuthenticatedRequest extends Request {
@@ -32,8 +30,8 @@ interface AuthenticatedRequest extends Request {
   };
 }
 
-@ApiTags('Authentication')
 @Controller('auth')
+@ApiTags('Authentication')
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
@@ -47,18 +45,14 @@ export class AuthController {
   })
   @ApiResponse({
     status: HttpStatus.CREATED,
-    description: 'User successfully registered',
-  })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Invalid registration data',
+    description: 'User registered successfully',
   })
   @ApiResponse({
     status: HttpStatus.CONFLICT,
-    description: 'Email is already registered',
+    description: 'Email already registered',
   })
-  async register(@Body() registerDto: RegisterDto) {
-    return this.authService.register(registerDto);
+  async register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
   }
 
   @Post('verify-email')
@@ -68,18 +62,14 @@ export class AuthController {
   })
   @ApiResponse({
     status: HttpStatus.OK,
-    description: 'Email successfully verified',
+    description: 'Email verified successfully',
   })
   @ApiResponse({
-    status: HttpStatus.NOT_FOUND,
-    description: 'Invalid verification token',
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Invalid or expired verification token',
   })
-  @ApiResponse({
-    status: HttpStatus.CONFLICT,
-    description: 'Verification token is expired or already used',
-  })
-  async verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
-    await this.emailVerificationService.verifyEmail(verifyEmailDto.token);
+  async verifyEmail(@Body() dto: VerifyEmailDto) {
+    await this.emailVerificationService.verifyEmail(dto.token);
 
     return {
       message: 'Email verified successfully',
@@ -89,22 +79,38 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Authenticate user credentials',
+    summary: 'Login and create authentication session',
   })
   @ApiResponse({
     status: HttpStatus.OK,
-    description: 'User successfully authenticated and access token generated',
-  })
-  @ApiResponse({
-    status: HttpStatus.BAD_REQUEST,
-    description: 'Invalid login data',
+    description: 'Login successful and access/refresh tokens returned',
   })
   @ApiResponse({
     status: HttpStatus.UNAUTHORIZED,
     description: 'Invalid credentials, inactive account, or unverified email',
   })
-  async login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  async login(@Body() dto: LoginDto, @Req() request: Request) {
+    const ipAddress = this.getClientIp(request);
+    const userAgent = request.get('user-agent');
+
+    return this.authService.login(dto, ipAddress, userAgent);
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Refresh access token using refresh token',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Access token refreshed and refresh token rotated',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Invalid, expired, or revoked refresh token',
+  })
+  async refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refresh(dto.refreshToken);
   }
 
   @Get('protected')
@@ -126,5 +132,19 @@ export class AuthController {
       message: 'Authenticated access granted',
       userId: request.user.id,
     };
+  }
+
+  private getClientIp(request: Request): string | undefined {
+    const forwardedFor = request.headers['x-forwarded-for'];
+
+    if (typeof forwardedFor === 'string') {
+      return forwardedFor.split(',')[0]?.trim();
+    }
+
+    if (Array.isArray(forwardedFor)) {
+      return forwardedFor[0];
+    }
+
+    return request.ip;
   }
 }

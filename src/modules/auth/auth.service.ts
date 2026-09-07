@@ -6,15 +6,14 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 
-import { PrismaService } from 'src/database/prisma/prisma.service';
-import { QueueService } from 'src/queue/queue.service';
+import { PrismaService } from '../../database/prisma/prisma.service';
+import { QueueService } from '../../queue/queue.service';
 
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-
 import { EmailVerificationService } from './services/email-verification.service';
 import { PasswordService } from './services/password.service';
-
+import { RefreshTokenService } from './services/refresh-token.service';
 import { JwtPayload } from './types/jwt-payload.type';
 
 @Injectable()
@@ -26,11 +25,12 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly queueService: QueueService,
     private readonly jwtService: JwtService,
+    private readonly refreshTokenService: RefreshTokenService,
   ) {}
 
-  async register(registerDto: RegisterDto) {
-    const email = registerDto.email.trim().toLowerCase();
-    const name = registerDto.name.trim();
+  async register(dto: RegisterDto) {
+    const email = dto.email.trim().toLowerCase();
+    const name = dto.name.trim();
 
     const existingUser = await this.prisma.user.findUnique({
       where: {
@@ -42,13 +42,13 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new ConflictException('Email is already registered');
+      throw new ConflictException('Email already registered');
     }
 
-    const passwordHash = await this.passwordService.hash(registerDto.password);
+    const passwordHash = await this.passwordService.hash(dto.password);
 
-    const user = await this.prisma.$transaction(async (tx) => {
-      const createdUser = await tx.user.create({
+    const user = await this.prisma.$transaction(async (transaction) => {
+      const createdUser = await transaction.user.create({
         data: {
           email,
           passwordHash,
@@ -62,7 +62,7 @@ export class AuthService {
         },
       });
 
-      await tx.userPreference.create({
+      await transaction.userPreference.create({
         data: {
           userId: createdUser.id,
         },
@@ -71,33 +71,21 @@ export class AuthService {
       return createdUser;
     });
 
-    const verificationToken = await this.emailVerificationService.createToken(
+    await this.emailVerificationService.createAndSendToken(
       user.id,
+      user.email,
+      user.name,
     );
-
-    const frontendUrl = this.configService.get<string>('app.frontendUrl');
-
-    if (!frontendUrl) {
-      throw new Error('FRONTEND_URL is not configured');
-    }
-
-    const verificationUrl = `${frontendUrl}/verify-email?token=${verificationToken}`;
-
-    await this.queueService.addEmailVerificationJob({
-      email: user.email,
-      name: user.name,
-      verificationUrl,
-    });
 
     return {
       id: user.id,
       email: user.email,
       name: user.name,
-      emailVerified: user.emailVerifiedAt !== null,
+      emailVerified: Boolean(user.emailVerifiedAt),
     };
   }
 
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, ipAddress?: string, userAgent?: string) {
     const email = loginDto.email.trim().toLowerCase();
 
     const user = await this.prisma.user.findUnique({
@@ -141,6 +129,7 @@ export class AuthService {
 
     const accessSecret =
       this.configService.getOrThrow<string>('jwt.accessSecret');
+
     const accessExpiresIn = this.configService.getOrThrow<string>(
       'jwt.accessExpiresIn',
     ) as JwtSignOptions['expiresIn'];
@@ -152,8 +141,15 @@ export class AuthService {
 
     const accessToken = await this.jwtService.signAsync(payload, jwtOptions);
 
+    const refreshToken = await this.refreshTokenService.createSession(
+      user.id,
+      ipAddress,
+      userAgent,
+    );
+
     return {
       accessToken,
+      refreshToken,
       user: {
         id: user.id,
         email: user.email,
@@ -161,5 +157,9 @@ export class AuthService {
         emailVerified: true,
       },
     };
+  }
+
+  async refresh(refreshToken: string) {
+    return this.refreshTokenService.rotateSession(refreshToken);
   }
 }

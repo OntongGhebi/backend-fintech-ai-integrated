@@ -10,6 +10,7 @@ import { EmailVerificationService } from './services/email-verification.service'
 
 import { PrismaService } from 'src/database/prisma/prisma.service';
 import { QueueService } from 'src/queue/queue.service';
+import { RefreshTokenService } from './services/refresh-token.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -30,6 +31,7 @@ describe('AuthService', () => {
 
   const emailVerificationServiceMock = {
     createToken: jest.fn(),
+    createAndSendToken: jest.fn(),
   };
 
   const queueServiceMock = {
@@ -45,8 +47,16 @@ describe('AuthService', () => {
     signAsync: jest.fn(),
   };
 
+  const refreshTokenServiceMock = {
+    createSession: jest.fn(),
+    rotateSession: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
+    refreshTokenServiceMock.createSession.mockResolvedValue(
+      'test-refresh-token',
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -74,6 +84,10 @@ describe('AuthService', () => {
         {
           provide: JwtService,
           useValue: jwtServiceMock,
+        },
+        {
+          provide: RefreshTokenService,
+          useValue: refreshTokenServiceMock,
         },
       ],
     }).compile();
@@ -118,8 +132,8 @@ describe('AuthService', () => {
           }),
       );
 
-      emailVerificationServiceMock.createToken.mockResolvedValue(
-        'verification-token',
+      emailVerificationServiceMock.createAndSendToken.mockResolvedValue(
+        undefined,
       );
 
       configServiceMock.get.mockImplementation((key: string) => {
@@ -129,6 +143,10 @@ describe('AuthService', () => {
 
         return undefined;
       });
+
+      emailVerificationServiceMock.createAndSendToken.mockResolvedValue(
+        undefined,
+      );
 
       queueServiceMock.addEmailVerificationJob.mockResolvedValue(undefined);
 
@@ -149,16 +167,13 @@ describe('AuthService', () => {
 
       expect(passwordServiceMock.hash).toHaveBeenCalledWith('Password123!');
 
-      expect(emailVerificationServiceMock.createToken).toHaveBeenCalledWith(
-        user.id,
-      );
+      expect(
+        emailVerificationServiceMock.createAndSendToken,
+      ).toHaveBeenCalledWith(user.id, user.email, user.name);
 
-      expect(queueServiceMock.addEmailVerificationJob).toHaveBeenCalledWith({
-        email: user.email,
-        name: user.name,
-        verificationUrl:
-          'http://localhost:5173/verify-email?token=verification-token',
-      });
+      expect(
+        emailVerificationServiceMock.createAndSendToken,
+      ).toHaveBeenCalledWith(user.id, user.email, user.name);
 
       expect(result).toEqual({
         id: user.id,
@@ -204,8 +219,8 @@ describe('AuthService', () => {
           }),
       );
 
-      emailVerificationServiceMock.createToken.mockResolvedValue(
-        'secret-verification-token',
+      emailVerificationServiceMock.createAndSendToken.mockResolvedValue(
+        undefined,
       );
 
       configServiceMock.get.mockReturnValue('http://localhost:5173');
@@ -315,8 +330,15 @@ describe('AuthService', () => {
         },
       );
 
+      expect(refreshTokenServiceMock.createSession).toHaveBeenCalledWith(
+        verifiedActiveUser.id,
+        undefined,
+        undefined,
+      );
+
       expect(result).toEqual({
         accessToken: 'test-access-token',
+        refreshToken: 'test-refresh-token',
         user: {
           id: verifiedActiveUser.id,
           email: verifiedActiveUser.email,
