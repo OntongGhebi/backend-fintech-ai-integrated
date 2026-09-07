@@ -6,6 +6,7 @@ import { RegisterDto } from './dto/register.dto';
 
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { EmailVerificationService } from './services/email-verification.service';
+import { LoginDto } from './dto/login.dto';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -59,5 +60,26 @@ export class AuthController {
     return {
       message: 'Email verified successfully',
     };
+  }
+
+  @Post('login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Authenticate user credentials',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'User successfully authenticated',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Invalid login data',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Invalid credentials, inactive account, or unverified email',
+  })
+  async login(@Body() loginDto: LoginDto) {
+    return this.authService.login(loginDto);
   }
 }

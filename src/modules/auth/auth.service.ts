@@ -1,4 +1,8 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { PasswordService } from './services/password.service';
@@ -6,6 +10,7 @@ import { RegisterDto } from './dto/register.dto';
 import { EmailVerificationService } from './services/email-verification.service';
 import { EmailService } from 'src/integrations/email/email.service';
 import { QueueService } from 'src/queue/queue.service';
+import { LoginDto } from './dto/login.dto';
 
 @Injectable()
 export class AuthService {
@@ -85,6 +90,53 @@ export class AuthService {
       email: user.email,
       name: user.name,
       emailVerified: user.emailVerifiedAt !== null,
+    };
+  }
+
+  async login(loginDto: LoginDto) {
+    const email = loginDto.email.trim().toLowerCase();
+
+    const user = await this.prisma.user.findUnique({
+      where: {
+        email,
+      },
+      select: {
+        id: true,
+        email: true,
+        passwordHash: true,
+        name: true,
+        emailVerifiedAt: true,
+        status: true,
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+    const passwordMatches = await this.passwordService.compare(
+      loginDto.password,
+      user.passwordHash,
+    );
+
+    if (!passwordMatches) {
+      throw new UnauthorizedException('Invalid email or password');
+    }
+
+    if (user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('User account is not active');
+    }
+
+    if (!user.emailVerifiedAt) {
+      throw new UnauthorizedException('Email address is not verified');
+    }
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        emailVerified: true,
+      },
     };
   }
 }
