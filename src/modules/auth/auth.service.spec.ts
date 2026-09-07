@@ -1,6 +1,7 @@
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 
 import { AuthService } from './auth.service';
 
@@ -8,7 +9,6 @@ import { PasswordService } from './services/password.service';
 import { EmailVerificationService } from './services/email-verification.service';
 
 import { PrismaService } from 'src/database/prisma/prisma.service';
-import { EmailService } from 'src/integrations/email/email.service';
 import { QueueService } from 'src/queue/queue.service';
 
 describe('AuthService', () => {
@@ -32,16 +32,17 @@ describe('AuthService', () => {
     createToken: jest.fn(),
   };
 
-  const emailServiceMock = {
-    sendEmailVerification: jest.fn(),
-  };
-
   const queueServiceMock = {
     addEmailVerificationJob: jest.fn(),
   };
 
   const configServiceMock = {
     get: jest.fn(),
+    getOrThrow: jest.fn(),
+  };
+
+  const jwtServiceMock = {
+    signAsync: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -63,16 +64,16 @@ describe('AuthService', () => {
           useValue: emailVerificationServiceMock,
         },
         {
-          provide: EmailService,
-          useValue: emailServiceMock,
-        },
-        {
           provide: QueueService,
           useValue: queueServiceMock,
         },
         {
           provide: ConfigService,
           useValue: configServiceMock,
+        },
+        {
+          provide: JwtService,
+          useValue: jwtServiceMock,
         },
       ],
     }).compile();
@@ -261,28 +262,42 @@ describe('AuthService', () => {
       status: 'ACTIVE',
     };
 
-    it('should login successfully with valid credentials', async () => {
+    beforeEach(() => {
+      configServiceMock.get.mockImplementation((key: string) => {
+        if (key === 'jwt.accessSecret') {
+          return 'test-access-secret';
+        }
+
+        if (key === 'jwt.accessExpiresIn') {
+          return '15m';
+        }
+
+        return undefined;
+      });
+
+      configServiceMock.getOrThrow.mockImplementation((key: string) => {
+        if (key === 'jwt.accessSecret') {
+          return 'test-access-secret';
+        }
+
+        if (key === 'jwt.accessExpiresIn') {
+          return '15m';
+        }
+
+        throw new Error(`Missing config: ${key}`);
+      });
+    });
+
+    it('should login successfully and generate an access token', async () => {
       prismaMock.user.findUnique.mockResolvedValue(verifiedActiveUser);
 
       passwordServiceMock.compare.mockResolvedValue(true);
 
+      jwtServiceMock.signAsync.mockResolvedValue('test-access-token');
+
       const result = await service.login({
         email: 'test@example.com',
         password: 'Password123!',
-      });
-
-      expect(prismaMock.user.findUnique).toHaveBeenCalledWith({
-        where: {
-          email: 'test@example.com',
-        },
-        select: {
-          id: true,
-          email: true,
-          passwordHash: true,
-          name: true,
-          emailVerifiedAt: true,
-          status: true,
-        },
       });
 
       expect(passwordServiceMock.compare).toHaveBeenCalledWith(
@@ -290,7 +305,18 @@ describe('AuthService', () => {
         'hashed-password',
       );
 
+      expect(jwtServiceMock.signAsync).toHaveBeenCalledWith(
+        {
+          sub: verifiedActiveUser.id,
+        },
+        {
+          secret: 'test-access-secret',
+          expiresIn: '15m',
+        },
+      );
+
       expect(result).toEqual({
+        accessToken: 'test-access-token',
         user: {
           id: verifiedActiveUser.id,
           email: verifiedActiveUser.email,
@@ -311,6 +337,8 @@ describe('AuthService', () => {
       ).rejects.toThrow(new UnauthorizedException('Invalid email or password'));
 
       expect(passwordServiceMock.compare).not.toHaveBeenCalled();
+
+      expect(jwtServiceMock.signAsync).not.toHaveBeenCalled();
     });
 
     it('should reject login when password is incorrect', async () => {
@@ -329,6 +357,8 @@ describe('AuthService', () => {
         'WrongPassword123!',
         'hashed-password',
       );
+
+      expect(jwtServiceMock.signAsync).not.toHaveBeenCalled();
     });
 
     it('should reject login when user account is not active', async () => {
@@ -347,6 +377,8 @@ describe('AuthService', () => {
       ).rejects.toThrow(
         new UnauthorizedException('User account is not active'),
       );
+
+      expect(jwtServiceMock.signAsync).not.toHaveBeenCalled();
     });
 
     it('should reject login when email is not verified', async () => {
@@ -365,12 +397,16 @@ describe('AuthService', () => {
       ).rejects.toThrow(
         new UnauthorizedException('Email address is not verified'),
       );
+
+      expect(jwtServiceMock.signAsync).not.toHaveBeenCalled();
     });
 
     it('should normalize email before querying the database', async () => {
       prismaMock.user.findUnique.mockResolvedValue(verifiedActiveUser);
 
       passwordServiceMock.compare.mockResolvedValue(true);
+
+      jwtServiceMock.signAsync.mockResolvedValue('test-access-token');
 
       await service.login({
         email: '  TEST@EXAMPLE.COM  ',
@@ -397,6 +433,8 @@ describe('AuthService', () => {
 
       passwordServiceMock.compare.mockResolvedValue(true);
 
+      jwtServiceMock.signAsync.mockResolvedValue('test-access-token');
+
       const result = await service.login({
         email: 'test@example.com',
         password: 'Password123!',
@@ -407,7 +445,37 @@ describe('AuthService', () => {
       expect(result.user).not.toHaveProperty('passwordHash');
     });
 
-    it('should not continue authentication when password comparison fails', async () => {
+    it('should not expose sensitive data in the JWT payload', async () => {
+      prismaMock.user.findUnique.mockResolvedValue(verifiedActiveUser);
+
+      passwordServiceMock.compare.mockResolvedValue(true);
+
+      jwtServiceMock.signAsync.mockResolvedValue('test-access-token');
+
+      await service.login({
+        email: 'test@example.com',
+        password: 'Password123!',
+      });
+
+      expect(jwtServiceMock.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: verifiedActiveUser.id,
+        }),
+        expect.any(Object),
+      );
+
+      const [payload] = jwtServiceMock.signAsync.mock.calls[0];
+
+      expect(payload).not.toHaveProperty('password');
+
+      expect(payload).not.toHaveProperty('passwordHash');
+
+      expect(payload).not.toHaveProperty('email');
+
+      expect(payload).not.toHaveProperty('name');
+    });
+
+    it('should not generate an access token before authentication succeeds', async () => {
       prismaMock.user.findUnique.mockResolvedValue(verifiedActiveUser);
 
       passwordServiceMock.compare.mockResolvedValue(false);
@@ -419,7 +487,22 @@ describe('AuthService', () => {
         }),
       ).rejects.toThrow(UnauthorizedException);
 
-      expect(passwordServiceMock.compare).toHaveBeenCalledTimes(1);
+      expect(jwtServiceMock.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('should generate the token only after account status and email verification checks pass', async () => {
+      prismaMock.user.findUnique.mockResolvedValue(verifiedActiveUser);
+
+      passwordServiceMock.compare.mockResolvedValue(true);
+
+      jwtServiceMock.signAsync.mockResolvedValue('test-access-token');
+
+      await service.login({
+        email: 'test@example.com',
+        password: 'Password123!',
+      });
+
+      expect(jwtServiceMock.signAsync).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -1,12 +1,36 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { Request } from 'express';
 
 import { AuthService } from './auth.service';
-import { RegisterDto } from './dto/register.dto';
 
-import { VerifyEmailDto } from './dto/verify-email.dto';
-import { EmailVerificationService } from './services/email-verification.service';
 import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+
+import { AccessTokenGuard } from './guards/access-token.guard';
+
+import { EmailVerificationService } from './services/email-verification.service';
+
+interface AuthenticatedRequest extends Request {
+  user: {
+    id: string;
+  };
+}
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -69,7 +93,7 @@ export class AuthController {
   })
   @ApiResponse({
     status: HttpStatus.OK,
-    description: 'User successfully authenticated',
+    description: 'User successfully authenticated and access token generated',
   })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
@@ -81,5 +105,26 @@ export class AuthController {
   })
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
+  }
+
+  @Get('protected')
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Test authenticated access using access token',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Access token is valid',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Missing or invalid access token',
+  })
+  getProtected(@Req() request: AuthenticatedRequest) {
+    return {
+      message: 'Authenticated access granted',
+      userId: request.user.id,
+    };
   }
 }

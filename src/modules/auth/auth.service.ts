@@ -1,31 +1,35 @@
 import {
-  Injectable,
   ConflictException,
+  Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../../database/prisma/prisma.service';
-import { PasswordService } from './services/password.service';
-import { RegisterDto } from './dto/register.dto';
-import { EmailVerificationService } from './services/email-verification.service';
-import { EmailService } from 'src/integrations/email/email.service';
+import { JwtService, JwtSignOptions } from '@nestjs/jwt';
+
+import { PrismaService } from 'src/database/prisma/prisma.service';
 import { QueueService } from 'src/queue/queue.service';
+
 import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
+
+import { EmailVerificationService } from './services/email-verification.service';
+import { PasswordService } from './services/password.service';
+
+import { JwtPayload } from './types/jwt-payload.type';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly passwordService: PasswordService,
-    private readonly emailService: EmailService,
     private readonly emailVerificationService: EmailVerificationService,
     private readonly configService: ConfigService,
     private readonly queueService: QueueService,
+    private readonly jwtService: JwtService,
   ) {}
 
   async register(registerDto: RegisterDto) {
     const email = registerDto.email.trim().toLowerCase();
-
     const name = registerDto.name.trim();
 
     const existingUser = await this.prisma.user.findUnique({
@@ -113,6 +117,7 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Invalid email or password');
     }
+
     const passwordMatches = await this.passwordService.compare(
       loginDto.password,
       user.passwordHash,
@@ -130,7 +135,25 @@ export class AuthService {
       throw new UnauthorizedException('Email address is not verified');
     }
 
+    const payload: JwtPayload = {
+      sub: user.id,
+    };
+
+    const accessSecret =
+      this.configService.getOrThrow<string>('jwt.accessSecret');
+    const accessExpiresIn = this.configService.getOrThrow<string>(
+      'jwt.accessExpiresIn',
+    ) as JwtSignOptions['expiresIn'];
+
+    const jwtOptions: JwtSignOptions = {
+      secret: accessSecret,
+      expiresIn: accessExpiresIn,
+    };
+
+    const accessToken = await this.jwtService.signAsync(payload, jwtOptions);
+
     return {
+      accessToken,
       user: {
         id: user.id,
         email: user.email,
