@@ -117,11 +117,11 @@ export class AuthService {
     }
 
     if (user.status !== 'ACTIVE') {
-      throw new UnauthorizedException('User account is not active');
+      throw new UnauthorizedException('Invalid email or password');
     }
 
     if (!user.emailVerifiedAt) {
-      throw new UnauthorizedException('Email address is not verified');
+      throw new UnauthorizedException('Invalid email or password');
     }
 
     const payload: JwtPayload = {

@@ -396,9 +396,7 @@ describe('AuthService', () => {
           email: 'test@example.com',
           password: 'Password123!',
         }),
-      ).rejects.toThrow(
-        new UnauthorizedException('User account is not active'),
-      );
+      ).rejects.toThrow(new UnauthorizedException('Invalid email or password'));
 
       expect(jwtServiceMock.signAsync).not.toHaveBeenCalled();
     });
@@ -416,9 +414,7 @@ describe('AuthService', () => {
           email: 'test@example.com',
           password: 'Password123!',
         }),
-      ).rejects.toThrow(
-        new UnauthorizedException('Email address is not verified'),
-      );
+      ).rejects.toThrow(new UnauthorizedException('Invalid email or password'));
 
       expect(jwtServiceMock.signAsync).not.toHaveBeenCalled();
     });
