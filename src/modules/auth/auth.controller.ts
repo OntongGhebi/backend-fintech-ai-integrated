@@ -113,6 +113,28 @@ export class AuthController {
     return this.authService.refresh(dto.refreshToken);
   }
 
+  @Post('logout')
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Logout and revoke the current authentication session',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Session revoked successfully',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Missing/invalid access token or refresh token',
+  })
+  async logout(
+    @Body() dto: RefreshTokenDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.authService.logout(dto.refreshToken, request.user.id);
+  }
+
   @Get('protected')
   @UseGuards(AccessTokenGuard)
   @ApiBearerAuth()

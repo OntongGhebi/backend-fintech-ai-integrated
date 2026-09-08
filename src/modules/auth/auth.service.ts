@@ -162,4 +162,18 @@ export class AuthService {
   async refresh(refreshToken: string) {
     return this.refreshTokenService.rotateSession(refreshToken);
   }
+
+  async logout(
+    refreshToken: string,
+    userId: string,
+  ): Promise<{ message: string }> {
+    await this.refreshTokenService.revokeSessionByRefreshToken(
+      refreshToken,
+      userId,
+    );
+
+    return {
+      message: 'Logout successfully',
+    };
+  }
 }

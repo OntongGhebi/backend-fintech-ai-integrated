@@ -2,13 +2,9 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { createHash, randomUUID } from 'crypto';
-import { PrismaService } from 'src/database/prisma/prisma.service';
-import { RefreshTokenPayload } from '../types/refresh-token-payload.type';
 
-export interface RefreshTokenSessionContext {
-  sessionId: string;
-  userId: string;
-}
+import { PrismaService } from '../../../database/prisma/prisma.service';
+import { RefreshTokenPayload } from '../types/refresh-token-payload.type';
 
 @Injectable()
 export class RefreshTokenService {
@@ -124,11 +120,33 @@ export class RefreshTokenService {
     };
   }
 
-  async revokeSession(sessionId: string): Promise<void> {
-    await this.prisma.session.updateMany({
+  async revokeSession(sessionId: string, userId: string): Promise<void> {
+    const session = await this.prisma.session.findUnique({
       where: {
         id: sessionId,
-        revokedAt: null,
+      },
+      select: {
+        id: true,
+        userId: true,
+        revokedAt: true,
+      },
+    });
+
+    if (!session) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (session.userId !== userId) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (session.revokedAt) {
+      return;
+    }
+
+    await this.prisma.session.update({
+      where: {
+        id: session.id,
       },
       data: {
         revokedAt: new Date(),
@@ -136,13 +154,33 @@ export class RefreshTokenService {
     });
   }
 
-  private async generateAccessToken(userId: string): Promise<string> {
-    const accessSecret =
-      this.configService.getOrThrow<string>('jwt.accessSecret');
+  async revokeSessionByRefreshToken(
+    refreshToken: string,
+    userId: string,
+  ): Promise<void> {
+    const payload = await this.verifyRefreshToken(refreshToken);
 
-    const accessExpiresIn = this.configService.getOrThrow<string>(
+    if (payload.sub !== userId) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    await this.revokeSession(payload.sid, userId);
+  }
+
+  private async generateAccessToken(userId: string): Promise<string> {
+    const accessSecret = this.configService.get<string>('jwt.accessSecret');
+
+    const accessExpiresIn = this.configService.get<string>(
       'jwt.accessExpiresIn',
     ) as JwtSignOptions['expiresIn'];
+
+    if (!accessSecret) {
+      throw new Error('JWT_ACCESS_SECRET is not configured');
+    }
+
+    if (!accessExpiresIn) {
+      throw new Error('JWT_ACCESS_EXPIRES_IN is not configured');
+    }
 
     return this.jwtService.signAsync(
       {
@@ -159,12 +197,19 @@ export class RefreshTokenService {
     userId: string,
     sessionId: string,
   ): Promise<string> {
-    const refreshSecret =
-      this.configService.getOrThrow<string>('jwt.refreshSecret');
+    const refreshSecret = this.configService.get<string>('jwt.refreshSecret');
 
-    const refreshExpiresIn = this.configService.getOrThrow<string>(
+    const refreshExpiresIn = this.configService.get<string>(
       'jwt.refreshExpiresIn',
     ) as JwtSignOptions['expiresIn'];
+
+    if (!refreshSecret) {
+      throw new Error('JWT_REFRESH_SECRET is not configured');
+    }
+
+    if (!refreshExpiresIn) {
+      throw new Error('JWT_REFRESH_EXPIRES_IN is not configured');
+    }
 
     const payload: RefreshTokenPayload = {
       sub: userId,

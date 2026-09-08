@@ -311,12 +311,17 @@ describe('RefreshTokenService', () => {
 
   describe('revokeSession', () => {
     it('should revoke an active session', async () => {
-      await service.revokeSession('session-id');
+      prismaMock.session.findUnique.mockResolvedValue({
+        id: 'session-id',
+        userId: 'user-id',
+        revokedAt: null,
+      });
 
-      expect(prismaMock.session.updateMany).toHaveBeenCalledWith({
+      await service.revokeSession('session-id', 'user-id');
+
+      expect(prismaMock.session.update).toHaveBeenCalledWith({
         where: {
           id: 'session-id',
-          revokedAt: null,
         },
         data: {
           revokedAt: expect.any(Date),
