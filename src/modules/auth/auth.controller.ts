@@ -135,6 +135,28 @@ export class AuthController {
     return this.authService.logout(dto.refreshToken, request.user.id);
   }
 
+  @Get('me')
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get the currently authenticated user',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Current authenticated user returned successfully',
+  })
+  @ApiResponse({
+    status: HttpStatus.UNAUTHORIZED,
+    description: 'Missing or invalid access token',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Authenticated user no longer exists',
+  })
+  async me(@Req() request: AuthenticatedRequest) {
+    return this.authService.me(request.user.id);
+  }
+
   @Get('protected')
   @UseGuards(AccessTokenGuard)
   @ApiBearerAuth()
