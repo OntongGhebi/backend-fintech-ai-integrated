@@ -131,13 +131,9 @@ describe('AuthController', () => {
 
   describe('getProtected', () => {
     it('should return authenticated user id from request', () => {
-      const request = {
-        user: {
-          id: '11111111-1111-1111-1111-111111111111',
-        },
-      } as any;
-
-      const result = controller.getProtected(request);
+      const result = controller.getProtected(
+        '11111111-1111-1111-1111-111111111111',
+      );
 
       expect(result).toEqual({
         message: 'Authenticated access granted',

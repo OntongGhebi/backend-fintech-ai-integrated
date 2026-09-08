@@ -17,18 +17,13 @@ import {
 import type { Request } from 'express';
 
 import { AuthService } from './auth.service';
+import { CurrentUser } from './decorators/current-user-decorator';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { AccessTokenGuard } from './guards/access-token.guard';
 import { EmailVerificationService } from './services/email-verification.service';
-
-interface AuthenticatedRequest extends Request {
-  user: {
-    id: string;
-  };
-}
 
 @Controller('auth')
 @ApiTags('Authentication')
@@ -91,6 +86,7 @@ export class AuthController {
   })
   async login(@Body() dto: LoginDto, @Req() request: Request) {
     const ipAddress = this.getClientIp(request);
+
     const userAgent = request.get('user-agent');
 
     return this.authService.login(dto, ipAddress, userAgent);
@@ -128,11 +124,8 @@ export class AuthController {
     status: HttpStatus.UNAUTHORIZED,
     description: 'Missing/invalid access token or refresh token',
   })
-  async logout(
-    @Body() dto: RefreshTokenDto,
-    @Req() request: AuthenticatedRequest,
-  ) {
-    return this.authService.logout(dto.refreshToken, request.user.id);
+  async logout(@Body() dto: RefreshTokenDto, @CurrentUser() userId: string) {
+    return this.authService.logout(dto.refreshToken, userId);
   }
 
   @Get('me')
@@ -153,8 +146,8 @@ export class AuthController {
     status: HttpStatus.NOT_FOUND,
     description: 'Authenticated user no longer exists',
   })
-  async me(@Req() request: AuthenticatedRequest) {
-    return this.authService.me(request.user.id);
+  async me(@CurrentUser() userId: string) {
+    return this.authService.me(userId);
   }
 
   @Get('protected')
@@ -171,10 +164,10 @@ export class AuthController {
     status: HttpStatus.UNAUTHORIZED,
     description: 'Missing or invalid access token',
   })
-  getProtected(@Req() request: AuthenticatedRequest) {
+  getProtected(@CurrentUser() userId: string) {
     return {
       message: 'Authenticated access granted',
-      userId: request.user.id,
+      userId,
     };
   }
 
