@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { createHash } from 'crypto';
 
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { RefreshTokenService } from './refresh-token.service';
@@ -157,6 +158,8 @@ describe('RefreshTokenService', () => {
         sid: 'session-id',
       });
 
+      jwtServiceMock.signAsync.mockReset();
+
       prismaMock.session.findUnique.mockResolvedValue({
         id: 'session-id',
         userId: 'user-id',
@@ -251,6 +254,63 @@ describe('RefreshTokenService', () => {
       );
     });
 
+    it('should reject rotation when conditional session update affects zero rows', async () => {
+      const refreshToken = 'valid-refresh-token';
+      const userId = 'user-123';
+      const sessionId = 'session-123';
+
+      jwtServiceMock.verifyAsync.mockResolvedValue({
+        sub: userId,
+        sid: sessionId,
+      });
+
+      jwtServiceMock.signAsync
+        .mockResolvedValueOnce('new-refresh-token')
+        .mockResolvedValueOnce('new-access-token');
+
+      jwtServiceMock.decode.mockReturnValue({
+        exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7,
+      });
+
+      prismaMock.session.findUnique.mockResolvedValue({
+        id: sessionId,
+        userId,
+        refreshTokenHash: createHash('sha256')
+          .update(refreshToken)
+          .digest('hex'),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        revokedAt: null,
+        user: {
+          id: userId,
+          status: 'ACTIVE',
+        },
+      });
+
+      prismaMock.session.updateMany.mockResolvedValue({
+        count: 0,
+      });
+
+      await expect(service.rotateSession(refreshToken)).rejects.toThrow(
+        'Refresh token has already been rotated or revoked',
+      );
+
+      expect(prismaMock.session.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: sessionId,
+          userId,
+          refreshTokenHash: createHash('sha256')
+            .update(refreshToken)
+            .digest('hex'),
+          revokedAt: null,
+        },
+        data: expect.objectContaining({
+          refreshTokenHash: expect.any(String),
+          expiresAt: expect.any(Date),
+          lastUsedAt: expect.any(Date),
+        }),
+      });
+    });
+
     it('should reject an inactive user', async () => {
       prismaMock.session.findUnique.mockResolvedValue({
         id: 'session-id',
@@ -265,7 +325,7 @@ describe('RefreshTokenService', () => {
       });
 
       await expect(service.rotateSession(refreshToken)).rejects.toThrow(
-        'Invalid refresh token',
+        'User account is not active',
       );
     });
 
@@ -289,6 +349,10 @@ describe('RefreshTokenService', () => {
         },
       });
 
+      prismaMock.session.updateMany.mockResolvedValue({
+        count: 1,
+      });
+
       const result = await service.rotateSession(refreshToken);
 
       expect(result).toEqual({
@@ -296,9 +360,12 @@ describe('RefreshTokenService', () => {
         refreshToken: newRefreshToken,
       });
 
-      expect(prismaMock.session.update).toHaveBeenCalledWith({
+      expect(prismaMock.session.updateMany).toHaveBeenCalledWith({
         where: {
           id: 'session-id',
+          userId: 'user-id',
+          refreshTokenHash: oldHash,
+          revokedAt: null,
         },
         data: {
           refreshTokenHash: expect.any(String),
