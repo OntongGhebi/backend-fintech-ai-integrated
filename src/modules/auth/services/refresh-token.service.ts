@@ -82,14 +82,14 @@ export class RefreshTokenService {
       throw new UnauthorizedException('Refresh token has expired');
     }
 
+    if (session.user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('User account is not active');
+    }
+
     const incomingTokenHash = this.hashToken(refreshToken);
 
     if (incomingTokenHash !== session.refreshTokenHash) {
       throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    if (session.user.status !== 'ACTIVE') {
-      throw new UnauthorizedException('User account is not active');
     }
 
     const newRefreshToken = await this.generateRefreshToken(
@@ -101,9 +101,12 @@ export class RefreshTokenService {
 
     const newExpiresAt = this.getRefreshTokenExpiration(newRefreshToken);
 
-    await this.prisma.session.update({
+    const updateResult = await this.prisma.session.updateMany({
       where: {
         id: session.id,
+        userId: session.userId,
+        refreshTokenHash: incomingTokenHash,
+        revokedAt: null,
       },
       data: {
         refreshTokenHash: newRefreshTokenHash,
@@ -111,6 +114,12 @@ export class RefreshTokenService {
         lastUsedAt: new Date(),
       },
     });
+
+    if (updateResult.count !== 1) {
+      throw new UnauthorizedException(
+        'Refresh token has already been rotated or revoked',
+      );
+    }
 
     const accessToken = await this.generateAccessToken(session.userId);
 
