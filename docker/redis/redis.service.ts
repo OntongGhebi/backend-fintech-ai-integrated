@@ -28,7 +28,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       password,
       db,
       lazyConnect: true,
-      maxRetriesPerRequest: 3,
+      maxRetriesPerRequest: null,
     });
 
     this.client.on('error', (error: Error) => {

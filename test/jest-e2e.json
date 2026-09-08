@@ -5,5 +5,11 @@
   "testRegex": ".e2e-spec.ts$",
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "transformIgnorePatterns": ["node_modules/(?!@nestjs/terminus)"],
+  "moduleNameMapper": {
+    "^src/(.*)$": "<rootDir>/../src/$1",
+    "^docker/(.*)$": "<rootDir>/../docker/$1",
+    "^(\\.{1,2}/.*)\\.js$": "$1"
   }
 }

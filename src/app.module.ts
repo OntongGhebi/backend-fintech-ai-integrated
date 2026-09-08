@@ -15,7 +15,7 @@ import redisConfig from './config/redis.config';
 import databaseConfig from './config/database.config';
 import { RequestMiddleware } from './common/middlewares/request-id.middleware';
 import { RequestLoggerMiddleware } from './common/middlewares/request-logger.middleware';
-import { RedisModule } from 'docker/redis/redis.module';
+import { RedisModule } from '../docker/redis/redis.module';
 import bullmqConfig from './config/bullmq.config';
 import { QueueModule } from './queue/queue.module';
 import { DatabaseModule } from './database/database.module';
