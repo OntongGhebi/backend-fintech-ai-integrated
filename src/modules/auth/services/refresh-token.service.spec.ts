@@ -101,6 +101,7 @@ describe('RefreshTokenService', () => {
         {
           sub: 'user-id',
           sid: expect.any(String),
+          jti: expect.any(String),
         },
         {
           secret: 'test-refresh-secret',

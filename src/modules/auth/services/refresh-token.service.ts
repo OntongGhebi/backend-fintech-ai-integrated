@@ -223,6 +223,7 @@ export class RefreshTokenService {
     const payload: RefreshTokenPayload = {
       sub: userId,
       sid: sessionId,
+      jti: randomUUID(),
     };
 
     return this.jwtService.signAsync(payload, {
