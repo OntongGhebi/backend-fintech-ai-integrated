@@ -13,6 +13,7 @@ import { UserProfileResponseDto } from './dto/user-profile-response.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdatePreferencesDto } from './dto/update-preference.dto';
 import { UserPreferencesResponseDto } from './dto/user-preferences-response.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('users')
 @ApiTags('Users')
@@ -145,5 +146,41 @@ export class UsersController {
       userId,
       dto,
     )) as UserPreferencesResponseDto;
+  }
+
+  @Patch('me/password')
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Change current user password',
+    description:
+      'Changes the authenticated user password. All existing refresh-token sessions are revoked after a successful password change.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Password changed successfully.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid request data.',
+  })
+  @ApiResponse({
+    status: 401,
+    description:
+      'Missing or invalid access token or incorrect current password.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'User not found.',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'New password must be different from the current password.',
+  })
+  async changePassword(
+    @CurrentUser() userId: string,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<{ message: string }> {
+    return this.usersService.changePassword(userId, dto);
   }
 }

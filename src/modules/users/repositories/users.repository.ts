@@ -74,4 +74,16 @@ export class UsersRepository {
       data,
     });
   }
+
+  async revokeAllSessions(userId: string) {
+    return this.prisma.session.updateMany({
+      where: {
+        userId,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+  }
 }

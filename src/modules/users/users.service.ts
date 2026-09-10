@@ -2,17 +2,21 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { UsersRepository } from './repositories/users.repository';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { EmailVerificationService } from '../auth/services/email-verification.service';
 import { UpdatePreferencesDto } from './dto/update-preference.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { PasswordService } from '../auth/services/password.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly usersRepository: UsersRepository,
     private readonly emailVerificationService: EmailVerificationService,
+    private readonly passwordService: PasswordService,
   ) {}
 
   async findById(userId: string) {
@@ -157,5 +161,46 @@ export class UsersService {
     await this.usersRepository.updatePreference(userId, data);
 
     return this.getPreferences(userId);
+  }
+
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+  ): Promise<{ message: string }> {
+    const user = await this.usersRepository.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const currentPasswordMatches = await this.passwordService.compare(
+      dto.currentPassword,
+      user.passwordHash,
+    );
+
+    if (!currentPasswordMatches) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const newPasswordMatchesCurrent = await this.passwordService.compare(
+      dto.newPassword,
+      user.passwordHash,
+    );
+
+    if (newPasswordMatchesCurrent) {
+      throw new ConflictException(
+        'New password must be different from current password',
+      );
+    }
+
+    const newPasswordHash = await this.passwordService.hash(dto.newPassword);
+
+    await this.usersRepository.updateUser(userId, {
+      passwordHash: newPasswordHash,
+    } as unknown as Parameters<UsersRepository['updateUser']>[1]);
+
+    return {
+      message: 'Password changed successfully',
+    };
   }
 }
