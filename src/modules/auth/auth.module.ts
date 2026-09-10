@@ -43,6 +43,11 @@ import { RefreshTokenService } from './services/refresh-token.service';
     AccessTokenStrategy,
     AccessTokenGuard,
   ],
-  exports: [AuthService, PasswordService, AccessTokenGuard],
+  exports: [
+    AuthService,
+    PasswordService,
+    EmailVerificationService,
+    AccessTokenGuard,
+  ],
 })
 export class AuthModule {}
