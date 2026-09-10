@@ -6,6 +6,7 @@ import {
 import { UsersRepository } from './repositories/users.repository';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { EmailVerificationService } from '../auth/services/email-verification.service';
+import { UpdatePreferencesDto } from './dto/update-preference.dto';
 
 @Injectable()
 export class UsersService {
@@ -105,5 +106,56 @@ export class UsersService {
     }
 
     return this.getProfile(userId);
+  }
+
+  async getPreferences(userId: string) {
+    const user = await this.usersRepository.findByIdWithPreference(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return {
+      currency: user.preferences?.currency,
+      timezone: user.preferences?.timezone,
+      locale: user.preferences?.locale,
+      weekStartsOn: user.preferences?.weekStartsOn,
+    };
+  }
+
+  async updatePreferences(userId: string, dto: UpdatePreferencesDto) {
+    const user = await this.usersRepository.findByIdWithPreference(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const data: {
+      currency?: string;
+      timezone?: string;
+      locale?: string;
+      weekStartsOn?: number;
+    } = {};
+
+    if (dto.currency !== undefined) {
+      data.currency = dto.currency.trim().toUpperCase();
+    }
+    if (dto.timezone !== undefined) {
+      data.timezone = dto.timezone.trim();
+    }
+    if (dto.locale !== undefined) {
+      data.locale = dto.locale.trim();
+    }
+    if (dto.weekStartsOn !== undefined) {
+      data.weekStartsOn = dto.weekStartsOn;
+    }
+
+    if (Object.keys(data).length === 0) {
+      return this.getPreferences(userId);
+    }
+
+    await this.usersRepository.updatePreference(userId, data);
+
+    return this.getPreferences(userId);
   }
 }

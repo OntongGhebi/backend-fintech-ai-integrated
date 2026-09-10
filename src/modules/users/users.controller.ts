@@ -11,6 +11,8 @@ import { AccessTokenGuard } from '../auth/guards/access-token.guard';
 import { UsersService } from './users.service';
 import { UserProfileResponseDto } from './dto/user-profile-response.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UpdatePreferencesDto } from './dto/update-preference.dto';
+import { UserPreferencesResponseDto } from './dto/user-preferences-response.dto';
 
 @Controller('users')
 @ApiTags('Users')
@@ -81,5 +83,67 @@ export class UsersController {
       userId,
       dto,
     )) as UserProfileResponseDto;
+  }
+
+  @Get('me/preferences')
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get current user preferences',
+    description: 'Returns the authenticated user preferences.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'User preferences retrieved successfully.',
+    type: UserPreferencesResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'User not found.',
+  })
+  async getPreferences(
+    @CurrentUser() userId: string,
+  ): Promise<UserPreferencesResponseDto> {
+    return (await this.usersService.getPreferences(
+      userId,
+    )) as UserPreferencesResponseDto;
+  }
+
+  @Patch('me/preferences')
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Update current user preferences',
+    description: 'Updates the authenticated user preferences.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'User preferences updated successfully.',
+    type: UserPreferencesResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid request data.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'User not found.',
+  })
+  async updatePreferences(
+    @CurrentUser() userId: string,
+    @Body() dto: UpdatePreferencesDto,
+  ): Promise<UserPreferencesResponseDto> {
+    return (await this.usersService.updatePreferences(
+      userId,
+      dto,
+    )) as UserPreferencesResponseDto;
   }
 }
