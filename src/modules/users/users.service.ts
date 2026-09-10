@@ -195,12 +195,68 @@ export class UsersService {
 
     const newPasswordHash = await this.passwordService.hash(dto.newPassword);
 
-    await this.usersRepository.updateUser(userId, {
-      passwordHash: newPasswordHash,
-    } as unknown as Parameters<UsersRepository['updateUser']>[1]);
+    const result = await this.usersRepository.changePasswordAndRevokeSessions(
+      userId,
+      user.passwordHash,
+      newPasswordHash,
+    );
+
+    if (!result.passwordUpdated) {
+      throw new ConflictException('Password has changed. Please try again');
+    }
 
     return {
       message: 'Password changed successfully',
+    };
+  }
+
+  async getSessions(userId: string) {
+    const user = await this.usersRepository.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const sessions = await this.usersRepository.findSessionsByUserId(userId);
+
+    return {
+      sessions,
+    };
+  }
+
+  async revokeSession(
+    userId: string,
+    sessionId: string,
+  ): Promise<{ message: string }> {
+    const revokedCount = await this.usersRepository.revokeSessionByIdAndUserId(
+      sessionId,
+      userId,
+    );
+
+    if (revokedCount !== 1) {
+      throw new NotFoundException('Session not found');
+    }
+
+    return {
+      message: 'Session revoked successfully',
+    };
+  }
+
+  async revokeAllSessions(
+    userId: string,
+  ): Promise<{ message: string; revokedCount: number }> {
+    const user = await this.usersRepository.findById(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const revokedCount =
+      await this.usersRepository.revokeAllSessionsByUserId(userId);
+
+    return {
+      message: 'All sessions revoked successfully',
+      revokedCount,
     };
   }
 }

@@ -75,8 +75,86 @@ export class UsersRepository {
     });
   }
 
-  async revokeAllSessions(userId: string) {
-    return this.prisma.session.updateMany({
+  async changePasswordAndRevokeSessions(
+    userId: string,
+    currentPasswordHash: string,
+    newPasswordHash: string,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const updatedUser = await tx.user.updateMany({
+        where: {
+          id: userId,
+          passwordHash: currentPasswordHash,
+        },
+        data: {
+          passwordHash: newPasswordHash,
+        },
+      });
+
+      if (updatedUser.count !== 1) {
+        return {
+          passwordUpdated: false,
+          sessionsRevoked: 0,
+        };
+      }
+
+      const revokedSessions = await tx.session.updateMany({
+        where: {
+          userId,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
+
+      return {
+        passwordUpdated: true,
+        sessionsRevoked: revokedSessions.count,
+      };
+    });
+  }
+
+  async findSessionsByUserId(userId: string) {
+    return this.prisma.session.findMany({
+      where: {
+        userId,
+      },
+      select: {
+        id: true,
+        ipAddress: true,
+        userAgent: true,
+        createdAt: true,
+        lastUsedAt: true,
+        expiresAt: true,
+        revokedAt: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  async revokeSessionByIdAndUserId(
+    sessionId: string,
+    userId: string,
+  ): Promise<number> {
+    const result = await this.prisma.session.updateMany({
+      where: {
+        id: sessionId,
+        userId,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    return result.count;
+  }
+
+  async revokeAllSessionsByUserId(userId: string): Promise<number> {
+    const result = await this.prisma.session.updateMany({
       where: {
         userId,
         revokedAt: null,
@@ -85,5 +163,7 @@ export class UsersRepository {
         revokedAt: new Date(),
       },
     });
+
+    return result.count;
   }
 }

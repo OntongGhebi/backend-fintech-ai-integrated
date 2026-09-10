@@ -1,9 +1,18 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
+  ApiParam,
 } from '@nestjs/swagger';
 
 import { CurrentUser } from '../auth/decorators/current-user-decorator';
@@ -14,6 +23,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdatePreferencesDto } from './dto/update-preference.dto';
 import { UserPreferencesResponseDto } from './dto/user-preferences-response.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { UserSessionsResponseDto } from './dto/user-sessions-response.dto';
 
 @Controller('users')
 @ApiTags('Users')
@@ -182,5 +192,64 @@ export class UsersController {
     @Body() dto: ChangePasswordDto,
   ): Promise<{ message: string }> {
     return this.usersService.changePassword(userId, dto);
+  }
+
+  @Get('me/sessions')
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get current user sessions',
+  })
+  @ApiResponse({
+    status: 200,
+    type: UserSessionsResponseDto,
+  })
+  async getSessions(
+    @CurrentUser() userId: string,
+  ): Promise<UserSessionsResponseDto> {
+    return this.usersService.getSessions(userId);
+  }
+
+  @Delete('me/sessions/:sessionId')
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Revoke a specific session',
+  })
+  @ApiParam({
+    name: 'sessionId',
+    description: 'Session UUID',
+    format: 'uuid',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Session revoked successfully.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Session not found.',
+  })
+  async revokeSession(
+    @CurrentUser() userId: string,
+    @Param('sessionId') sessionId: string,
+  ): Promise<{ message: string }> {
+    return this.usersService.revokeSession(userId, sessionId);
+  }
+
+  @Delete('me/sessions')
+  @UseGuards(AccessTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Revoke all current user sessions',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'All active sessions have been revoked.',
+  })
+  async revokeAllSessions(@CurrentUser() userId: string): Promise<{
+    message: string;
+    revokedCount: number;
+  }> {
+    return this.usersService.revokeAllSessions(userId);
   }
 }
