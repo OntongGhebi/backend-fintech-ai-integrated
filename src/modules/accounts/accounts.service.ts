@@ -107,4 +107,28 @@ export class AccountsService {
 
     return this.accountsRepository.findByIdAndUserId(accountId, userId);
   }
+
+  async archive(accountId: string, userId: string) {
+    const account = await this.accountsRepository.findByIdAndUserId(
+      accountId,
+      userId,
+    );
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    const archived = await this.accountsRepository.softDelete(
+      accountId,
+      userId,
+    );
+
+    if (archived.count === 0) {
+      throw new NotFoundException('Account not found');
+    }
+
+    return {
+      message: 'Account archived successfully',
+    };
+  }
 }

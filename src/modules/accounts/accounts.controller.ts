@@ -7,6 +7,7 @@ import {
   Post,
   NotFoundException,
   UseGuards,
+  Delete,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -99,6 +100,17 @@ export class AccountsController {
     }
 
     return this.toResponse(account);
+  }
+
+  @Delete(':id')
+  @ApiOkResponse({
+    description: 'Account archived successfully',
+  })
+  async archive(
+    @CurrentUser('id') userId: string,
+    @Param('id') accountId: string,
+  ): Promise<{ message: string }> {
+    return this.accountsService.archive(accountId, userId);
   }
 
   private toResponse(account: {
