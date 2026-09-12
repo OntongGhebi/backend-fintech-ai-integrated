@@ -24,8 +24,6 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { AccountsModule } from './modules/accounts/accounts.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
-import { TransactionsController } from './modules/transactions/transactions.controller';
-import { TransactionsService } from './modules/transactions/transactions.service';
 
 @Module({
   imports: [
@@ -57,9 +55,7 @@ import { TransactionsService } from './modules/transactions/transactions.service
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
-    TransactionsService,
   ],
-  controllers: [TransactionsController],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

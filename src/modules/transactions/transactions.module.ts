@@ -4,9 +4,10 @@ import { AuthModule } from '../auth/auth.module';
 import { TransactionsController } from './transactions.controller';
 import { TransactionsService } from './transactions.service';
 import { TransactionsRepository } from './repositories/transactions.repository';
+import { AccountsModule } from '../accounts/accounts.module';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, AccountsModule],
   controllers: [TransactionsController],
   providers: [TransactionsRepository, TransactionsService],
   exports: [TransactionsService],

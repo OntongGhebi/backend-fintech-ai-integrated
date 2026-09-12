@@ -8,6 +8,6 @@ import { AccountsRepository } from './repositories/accounts.repository';
   imports: [AuthModule],
   controllers: [AccountsController],
   providers: [AccountsRepository, AccountsService],
-  exports: [AccountsService],
+  exports: [AccountsService, AccountsRepository],
 })
 export class AccountsModule {}
