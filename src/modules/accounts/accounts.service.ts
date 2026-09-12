@@ -1,6 +1,11 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { AccountsRepository } from './repositories/accounts.repository';
 import { CreateAccountDto } from './dto/create-account.dto';
+import { UpdateAccountDto } from './dto/update-account.dto';
 
 @Injectable()
 export class AccountsService {
@@ -31,8 +36,17 @@ export class AccountsService {
     });
   }
 
-  async findById(accountId: string) {
-    return this.accountsRepository.findById(accountId);
+  async findById(accountId: string, userId: string) {
+    const account = await this.accountsRepository.findByIdAndUserId(
+      accountId,
+      userId,
+    );
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    return account;
   }
 
   async findByIdAndUserId(accountId: string, userId: string) {
@@ -41,5 +55,56 @@ export class AccountsService {
 
   async findManyByUserId(userId: string) {
     return this.accountsRepository.findManyByUserId(userId);
+  }
+
+  async update(accountId: string, userId: string, dto: UpdateAccountDto) {
+    const account = await this.accountsRepository.findByIdAndUserId(
+      accountId,
+      userId,
+    );
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    const data: UpdateAccountDto = {};
+
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+
+      const accounts = await this.accountsRepository.findManyByUserId(userId);
+
+      const duplicatedName = accounts.some(
+        (item) =>
+          item.id !== accountId &&
+          item.name.trim().toLowerCase() === name.toLowerCase(),
+      );
+
+      if (duplicatedName) {
+        throw new ConflictException('An account with this name already exists');
+      }
+
+      data.name = name;
+    }
+
+    if (dto.type !== undefined) {
+      data.type = dto.type;
+    }
+
+    if (dto.currency !== undefined) {
+      data.currency = dto.currency.toUpperCase();
+    }
+
+    const updated = await this.accountsRepository.update(
+      accountId,
+      userId,
+      data,
+    );
+
+    if (updated.count === 0) {
+      throw new NotFoundException('Account not found');
+    }
+
+    return this.accountsRepository.findByIdAndUserId(accountId, userId);
   }
 }
