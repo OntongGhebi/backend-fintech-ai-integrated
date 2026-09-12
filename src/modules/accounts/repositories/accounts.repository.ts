@@ -56,7 +56,7 @@ export class AccountsRepository {
     });
   }
 
-  async softDelet(accountId: string, userId: string) {
+  async softDelete(accountId: string, userId: string) {
     return this.prisma.account.updateMany({
       where: {
         id: accountId,
