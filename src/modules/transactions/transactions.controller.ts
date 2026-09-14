@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -87,6 +88,17 @@ export class TransactionsController {
       dto,
     );
     return this.toResponse(transaction);
+  }
+
+  @Delete(':id')
+  @ApiOkResponse({
+    schema: { example: { message: 'Transaction voided successfully' } },
+  })
+  async remove(
+    @CurrentUser('id') userId: string,
+    @Param('id', new ParseUUIDPipe()) transactionId: string,
+  ): Promise<{ message: string }> {
+    return this.transactionsService.voidTransaction(transactionId, userId);
   }
 
   private toResponse(transaction: {

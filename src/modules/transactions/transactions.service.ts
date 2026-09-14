@@ -239,4 +239,32 @@ export class TransactionsService {
 
     return result;
   }
+
+  async voidTransaction(transactionId: string, userId: string) {
+    const transaction = await this.transactionsRepository.findByIdAndUserId(
+      transactionId,
+      userId,
+    );
+
+    if (!transaction) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    if (transaction.status !== 'ACTIVE') {
+      throw new BadRequestException('Transaction ia already voided');
+    }
+
+    const result = await this.transactionsRepository.voidTransaction(
+      transactionId,
+      userId,
+    );
+
+    if (result.count === 0) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    return {
+      message: 'Transaction voided successfully',
+    };
+  }
 }
