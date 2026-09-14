@@ -26,6 +26,8 @@ import { TransactionListResponseDto } from './dto/transaction-list-response.dto'
 import { TransactionResponseDto } from './dto/transaction-response.dto';
 import { TransactionsService } from './transactions.service';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
+import { TransferResponseDto } from './dto/transfer-response.dto';
+import { CreateTransferDto } from './dto/create-transfer.dto';
 
 @Controller('transactions')
 @ApiTags('Transactions')
@@ -45,6 +47,21 @@ export class TransactionsController {
     const transaction = await this.transactionsService.create(userId, dto);
 
     return this.toResponse(transaction);
+  }
+
+  @Post('transfer')
+  @ApiCreatedResponse({ type: TransferResponseDto })
+  async createTransfer(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CreateTransferDto,
+  ): Promise<TransferResponseDto> {
+    const result = await this.transactionsService.createTransfer(userId, dto);
+    return {
+      transferGroupId: result.transferGroupId,
+      transactions: result.transactions.map((transaction) =>
+        this.toResponse(transaction),
+      ),
+    };
   }
 
   @Get()

@@ -157,4 +157,34 @@ export class TransactionsRepository {
       },
     });
   }
+
+  async createTransfer(
+    sourceData: Parameters<PrismaService['transaction']['create']>[0]['data'],
+    destinationData: Parameters<
+      PrismaService['transaction']['create']
+    >[0]['data'],
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const sourceTransaction = await tx.transaction.create({
+        data: sourceData,
+        include: {
+          account: true,
+          category: true,
+        },
+      });
+
+      const destinationTransaction = await tx.transaction.create({
+        data: destinationData,
+        include: {
+          account: true,
+          category: true,
+        },
+      });
+
+      return {
+        sourceTransaction,
+        destinationTransaction,
+      };
+    });
+  }
 }

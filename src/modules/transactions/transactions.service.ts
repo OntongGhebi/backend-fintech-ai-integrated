@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '../../../generated/prisma/client.js';
+import * as crypto from 'node:crypto';
 
 import { TransactionSource } from 'src/database/enums/transaction-source.enum';
 import { TransactionType } from 'src/database/enums/transaction-type.enum';
@@ -13,6 +14,7 @@ import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { GetTransactionsQueryDto } from './dto/get-transaction-query.dto';
 import { TransactionsRepository } from './repositories/transactions.repository';
 import { UpdateTransactionDto } from './dto/update-transaction.dto.js';
+import { CreateTransferDto } from './dto/create-transfer.dto.js';
 
 @Injectable()
 export class TransactionsService {
@@ -265,6 +267,91 @@ export class TransactionsService {
 
     return {
       message: 'Transaction voided successfully',
+    };
+  }
+
+  async createTransfer(userId: string, dto: CreateTransferDto) {
+    if (dto.sourceAccountId === dto.destinationAccountId) {
+      throw new BadRequestException(
+        'Source and destination accounts must be different',
+      );
+    }
+
+    const sourceAccount = await this.accountsRepository.findByIdAndUserId(
+      dto.sourceAccountId,
+      userId,
+    );
+
+    if (!sourceAccount) {
+      throw new NotFoundException('Source account not found');
+    }
+
+    const destinationAccount = await this.accountsRepository.findByIdAndUserId(
+      dto.destinationAccountId,
+      userId,
+    );
+
+    if (!destinationAccount) {
+      throw new NotFoundException('Destination account not found');
+    }
+
+    if (!sourceAccount.isActive) {
+      throw new BadRequestException('Source account is inactive');
+    }
+
+    if (!destinationAccount.isActive) {
+      throw new BadRequestException('Destination account is inactive');
+    }
+
+    if (sourceAccount.currency !== 'IDR') {
+      throw new BadRequestException('Source account currency must be IDR');
+    }
+
+    if (destinationAccount.currency !== 'IDR') {
+      throw new BadRequestException('Destination account currency must be IDR');
+    }
+
+    const transferGroupId = crypto.randomUUID();
+    const transactionDate = new Date(dto.transactionDate);
+    const description = dto.description?.trim() || null;
+    const result = await this.transactionsRepository.createTransfer(
+      {
+        userId,
+        accountId: dto.sourceAccountId,
+        categoryId: null,
+        type: TransactionType.TRANSFER,
+        amount: dto.amount,
+        currency: 'IDR',
+        description,
+        transactionDate,
+        source: TransactionSource.MANUAL,
+        status: 'ACTIVE',
+        transferGroupId,
+        metadata: {
+          direction: 'OUT',
+        },
+      },
+      {
+        userId,
+        accountId: dto.destinationAccountId,
+        categoryId: null,
+        type: TransactionType.TRANSFER,
+        amount: dto.amount,
+        currency: 'IDR',
+        description,
+        transactionDate,
+        source: TransactionSource.MANUAL,
+        status: 'ACTIVE',
+        transferGroupId,
+        metadata: {
+          direction: 'IN',
+        },
+      },
+    );
+
+    return {
+      transferGroupId,
+      transactions: [result.sourceTransaction, result.destinationTransaction],
     };
   }
 }
