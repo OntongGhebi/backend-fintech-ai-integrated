@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -23,6 +24,7 @@ import { GetTransactionsQueryDto } from './dto/get-transaction-query.dto';
 import { TransactionListResponseDto } from './dto/transaction-list-response.dto';
 import { TransactionResponseDto } from './dto/transaction-response.dto';
 import { TransactionsService } from './transactions.service';
+import { UpdateTransactionDto } from './dto/update-transaction.dto';
 
 @Controller('transactions')
 @ApiTags('Transactions')
@@ -70,6 +72,19 @@ export class TransactionsController {
     const transaction = await this.transactionsService.findById(
       transactionId,
       userId,
+    );
+    return this.toResponse(transaction);
+  }
+
+  @Patch(':id') @ApiOkResponse({ type: TransactionResponseDto }) async update(
+    @CurrentUser('id') userId: string,
+    @Param('id', new ParseUUIDPipe()) transactionId: string,
+    @Body() dto: UpdateTransactionDto,
+  ): Promise<TransactionResponseDto> {
+    const transaction = await this.transactionsService.update(
+      transactionId,
+      userId,
+      dto,
     );
     return this.toResponse(transaction);
   }

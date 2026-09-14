@@ -12,6 +12,7 @@ import { AccountsRepository } from '../accounts/repositories/accounts.repository
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { GetTransactionsQueryDto } from './dto/get-transaction-query.dto';
 import { TransactionsRepository } from './repositories/transactions.repository';
+import { UpdateTransactionDto } from './dto/update-transaction.dto.js';
 
 @Injectable()
 export class TransactionsService {
@@ -113,5 +114,129 @@ export class TransactionsService {
     }
 
     return transaction;
+  }
+
+  async update(
+    transactionId: string,
+    userId: string,
+    dto: UpdateTransactionDto,
+  ) {
+    const transaction = await this.transactionsRepository.findByIdAndUserId(
+      transactionId,
+      userId,
+    );
+
+    if (!transaction) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    if (transaction.status !== 'ACTIVE') {
+      throw new BadRequestException('Voided transaction cannot be updated');
+    }
+
+    if (dto.accountId !== undefined) {
+      const account = await this.accountsRepository.findByIdAndUserId(
+        dto.accountId,
+        userId,
+      );
+
+      if (!account) {
+        throw new NotFoundException('Account is inactive');
+      }
+
+      if (!account.isActive) {
+        throw new BadRequestException('Account is inactive');
+      }
+
+      if (account.currency !== 'IDR') {
+        throw new BadRequestException('Account currency must be IDR');
+      }
+    }
+
+    if (dto.categoryId !== undefined) {
+      const category =
+        await this.transactionsRepository.findCategoryByIdAndUserId(
+          dto.categoryId,
+          userId,
+        );
+
+      if (!category) {
+        throw new NotFoundException('Category not found');
+      }
+
+      if (!category.isActive || category.deletedAt) {
+        throw new BadRequestException('Category is inactive');
+      }
+
+      if (transaction.type === 'INCOME' && category.type !== 'INCOME') {
+        throw new BadRequestException(
+          'Income transaction requires an income category',
+        );
+      }
+
+      if (transaction.type === 'EXPENSE' && category.type !== 'EXPENSE') {
+        throw new BadRequestException(
+          'Expense transaction requires an expense category',
+        );
+      }
+
+      if (transaction.type === 'TRANSFER') {
+        throw new BadRequestException(
+          'Transfer transaction cannot have a category',
+        );
+      }
+    }
+
+    const data: {
+      accountId?: string;
+      categoryId?: string | null;
+      amount?: number;
+      description?: string | null;
+      transactionDate?: Date;
+    } = {};
+
+    if (dto.accountId !== undefined) {
+      data.accountId = dto.accountId;
+    }
+
+    if (dto.categoryId !== undefined) {
+      data.categoryId = dto.categoryId;
+    }
+    if (dto.amount !== undefined) {
+      data.amount = dto.amount;
+    }
+    if (dto.description !== undefined) {
+      data.description = dto.description.trim() || null;
+    }
+    if (dto.transactionDate !== undefined) {
+      data.transactionDate = new Date(dto.transactionDate);
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException(
+        'At least one field must be provided for update',
+      );
+    }
+
+    const updated = await this.transactionsRepository.update(
+      transactionId,
+      userId,
+      data,
+    );
+
+    if (updated.count === 0) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    const result = await this.transactionsRepository.findByIdAndUserId(
+      transactionId,
+      userId,
+    );
+
+    if (!result) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    return result;
   }
 }
