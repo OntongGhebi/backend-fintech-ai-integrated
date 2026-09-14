@@ -143,7 +143,7 @@ export class TransactionsService {
       );
 
       if (!account) {
-        throw new NotFoundException('Account is inactive');
+        throw new NotFoundException('Account not found');
       }
 
       if (!account.isActive) {
@@ -253,7 +253,7 @@ export class TransactionsService {
     }
 
     if (transaction.status !== 'ACTIVE') {
-      throw new BadRequestException('Transaction ia already voided');
+      throw new BadRequestException('Transaction is already voided');
     }
 
     const result = await this.transactionsRepository.voidTransaction(
