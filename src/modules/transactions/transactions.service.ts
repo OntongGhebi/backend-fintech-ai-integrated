@@ -101,4 +101,17 @@ export class TransactionsService {
 
     return this.transactionsRepository.findManyByUserId(userId, query);
   }
+
+  async findById(transactionId: string, userId: string) {
+    const transaction = await this.transactionsRepository.findByIdAndUserId(
+      transactionId,
+      userId,
+    );
+
+    if (!transaction) {
+      throw new NotFoundException('Transaction not found');
+    }
+
+    return transaction;
+  }
 }

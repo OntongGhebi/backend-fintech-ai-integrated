@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -52,6 +61,17 @@ export class TransactionsController {
       data: result.data.map((transaction) => this.toResponse(transaction)),
       meta: result.meta,
     };
+  }
+
+  @Get(':id') @ApiOkResponse({ type: TransactionResponseDto }) async findOne(
+    @CurrentUser('id') userId: string,
+    @Param('id', new ParseUUIDPipe()) transactionId: string,
+  ): Promise<TransactionResponseDto> {
+    const transaction = await this.transactionsService.findById(
+      transactionId,
+      userId,
+    );
+    return this.toResponse(transaction);
   }
 
   private toResponse(transaction: {
