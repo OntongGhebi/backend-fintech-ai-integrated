@@ -24,6 +24,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { AccountsModule } from './modules/accounts/accounts.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
+import { CategoriesModule } from './modules/categories/categories.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { TransactionsModule } from './modules/transactions/transactions.module';
     UsersModule,
     AccountsModule,
     TransactionsModule,
+    CategoriesModule,
   ],
   providers: [
     {
