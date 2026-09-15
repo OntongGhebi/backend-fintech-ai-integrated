@@ -35,6 +35,19 @@ export class CategoriesRepository {
     });
   }
 
+  async findByNameAndUserId(name: string, userId: string) {
+    return this.prisma.category.findFirst({
+      where: {
+        userId,
+        name: {
+          equals: name,
+          mode: 'insensitive',
+        },
+        deletedAt: null,
+      },
+    });
+  }
+
   async findManyByUserId(userId: string) {
     return this.prisma.category.findMany({
       where: {
