@@ -25,6 +25,7 @@ import { UsersModule } from './modules/users/users.module';
 import { AccountsModule } from './modules/accounts/accounts.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { CategoriesModule } from './modules/categories/categories.module';
+import { BudgetsModule } from './modules/budgets/budgets.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { CategoriesModule } from './modules/categories/categories.module';
     AccountsModule,
     TransactionsModule,
     CategoriesModule,
+    BudgetsModule,
   ],
   providers: [
     {
