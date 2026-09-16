@@ -48,6 +48,26 @@ export class CategoriesRepository {
     });
   }
 
+  async findByNameAndUserIdExceptId(
+    name: string,
+    userId: string,
+    categoryId: string,
+  ) {
+    return this.prisma.category.findFirst({
+      where: {
+        userId,
+        id: {
+          not: categoryId,
+        },
+        name: {
+          equals: name,
+          mode: 'insensitive',
+        },
+        deletedAt: null,
+      },
+    });
+  }
+
   async findManyByUserId(userId: string) {
     return this.prisma.category.findMany({
       where: {
