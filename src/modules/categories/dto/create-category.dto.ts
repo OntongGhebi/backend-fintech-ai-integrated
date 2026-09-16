@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsEnum,
   IsOptional,
   IsString,
@@ -7,6 +8,7 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { CategoryType } from 'src/database/enums/category-type.enum';
 
 export class CreateCategoryDto {
@@ -16,6 +18,7 @@ export class CreateCategoryDto {
     minLength: 1,
     maxLength: 100,
   })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @Length(1, 100)
   name!: string;
@@ -34,6 +37,7 @@ export class CreateCategoryDto {
     maxLength: 50,
   })
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(50)
   icon?: string;
@@ -44,10 +48,19 @@ export class CreateCategoryDto {
     maxLength: 20,
   })
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(20)
   @Matches(/^#[0-9A-Fa-f]{6}$/, {
     message: 'color must be a valid hexadecimal color such as #FF5733',
   })
   color?: string;
+
+  @ApiPropertyOptional({
+    description: 'System flag is controlled by the server',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isSystem?: boolean;
 }
