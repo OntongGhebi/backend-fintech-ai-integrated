@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -65,6 +73,38 @@ export class CategoriesController {
 
     return {
       data: categories,
+    };
+  }
+
+  @Get(':id')
+  @ApiOkResponse({
+    description: 'Category retrieved successfully',
+    schema: {
+      example: {
+        data: {
+          id: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+          userId: '9a7b6c5d-4e3f-2a1b-8c7d-6e5f4a3b2c1d',
+          name: 'Food',
+          type: 'EXPENSE',
+          icon: 'utensils',
+          color: '#FF5733',
+          isSystem: false,
+          isActive: true,
+          createdAt: '2026-09-16T00:00:00.000Z',
+          updatedAt: '2026-09-16T00:00:00.000Z',
+          deletedAt: null,
+        },
+      },
+    },
+  })
+  async findById(
+    @Param('id') categoryId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    const category = await this.categoriesService.findById(categoryId, userId);
+
+    return {
+      data: category,
     };
   }
 }

@@ -1,4 +1,8 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { CategoriesRepository } from './repositories/categories.repository';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { GetCategoriesQueryDto } from './dto/get-categories-query.dto';
@@ -37,5 +41,18 @@ export class CategoriesService {
     }
 
     return this.categoriesRepository.findManyByUserId(userId);
+  }
+
+  async findById(categoryId: string, userId: string) {
+    const category = await this.categoriesRepository.findByIdAndUserId(
+      categoryId,
+      userId,
+    );
+
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    return category;
   }
 }
