@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -67,6 +68,10 @@ export class CategoriesService {
       throw new NotFoundException('Category not found');
     }
 
+    if (category.isSystem) {
+      throw new ForbiddenException('System categories cannot be updated');
+    }
+
     const updateData: {
       name?: string;
       type?: UpdateCategoryDto['type'];
@@ -128,6 +133,10 @@ export class CategoriesService {
 
     if (!category) {
       throw new NotFoundException('Category not found');
+    }
+
+    if (category.isSystem) {
+      throw new ForbiddenException('System categories cannot be archived');
     }
 
     const result = await this.categoriesRepository.softDelete(
