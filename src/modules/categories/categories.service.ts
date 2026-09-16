@@ -119,4 +119,29 @@ export class CategoriesService {
 
     return this.categoriesRepository.findByIdAndUserId(categoryId, userId);
   }
+
+  async archive(categoryId: string, userId: string) {
+    const category = await this.categoriesRepository.findByIdAndUserId(
+      categoryId,
+      userId,
+    );
+
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    const result = await this.categoriesRepository.softDelete(
+      categoryId,
+      userId,
+    );
+
+    if (result.count === 0) {
+      throw new NotFoundException('Category not found');
+    }
+
+    return {
+      id: categoryId,
+      archived: true,
+    };
+  }
 }

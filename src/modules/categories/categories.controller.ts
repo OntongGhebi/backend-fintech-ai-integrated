@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -144,6 +145,29 @@ export class CategoriesController {
 
     return {
       data: category,
+    };
+  }
+
+  @Delete(':id')
+  @ApiOkResponse({
+    description: 'Category archived successfully',
+    schema: {
+      example: {
+        data: {
+          id: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+          archived: true,
+        },
+      },
+    },
+  })
+  async archive(
+    @Param('id') categoryId: string,
+    @CurrentUser('id') userId: string,
+  ) {
+    const result = await this.categoriesService.archive(categoryId, userId);
+
+    return {
+      data: result,
     };
   }
 }
