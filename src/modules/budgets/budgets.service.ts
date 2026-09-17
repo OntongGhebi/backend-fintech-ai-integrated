@@ -10,6 +10,7 @@ import { CategoriesService } from '../categories/categories.service';
 
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { BudgetsRepository } from './repositories/budgets.repository';
+import { GetBudgetsQueryDto } from './dto/get-budgets-query.dto';
 
 @Injectable()
 export class BudgetsService {
@@ -70,6 +71,17 @@ export class BudgetsService {
           }
         : {}),
     });
+  }
+
+  async findAll(userId: string, query: GetBudgetsQueryDto) {
+    if (query.status) {
+      return this.budgetsRepository.findManyByUserIdAndStatus(
+        userId,
+        query.status,
+      );
+    }
+
+    return this.budgetsRepository.findManyByUserId(userId);
   }
 
   private parseDate(value: string, fieldName: string): Date {
