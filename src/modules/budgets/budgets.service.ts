@@ -12,6 +12,7 @@ import { CategoriesService } from '../categories/categories.service';
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { BudgetsRepository } from './repositories/budgets.repository';
 import { GetBudgetsQueryDto } from './dto/get-budgets-query.dto';
+import { UpdateBudgetDto } from './dto/update-budget.dto';
 
 @Injectable()
 export class BudgetsService {
@@ -47,7 +48,7 @@ export class BudgetsService {
     }
 
     if (dto.categoryId) {
-      await this.categoriesService.findById(userId, dto.categoryId);
+      await this.categoriesService.findById(dto.categoryId, userId);
     }
 
     return this.budgetsRepository.create({
@@ -96,6 +97,85 @@ export class BudgetsService {
     }
 
     return budget;
+  }
+
+  async update(userId: string, budgetId: string, dto: UpdateBudgetDto) {
+    const existingBudget = await this.budgetsRepository.findByIdAndUserId(
+      budgetId,
+      userId,
+    );
+
+    if (!existingBudget) {
+      throw new NotFoundException('Budget not found');
+    }
+
+    const data: Parameters<typeof this.budgetsRepository.update>[2] = {};
+
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+
+      if (!name) {
+        throw new BadRequestException('Budget name cannot be empty');
+      }
+
+      const duplicatedBudget =
+        await this.budgetsRepository.findByNameAndUserIdExceptId(
+          name,
+          userId,
+          budgetId,
+        );
+
+      if (duplicatedBudget) {
+        throw new ConflictException('A budget with this name already exists');
+      }
+      data.name = name;
+    }
+
+    if (dto.amount !== undefined) {
+      data.amount = dto.amount;
+    }
+
+    if (dto.period !== undefined) {
+      data.period = dto.period;
+    }
+
+    let startDate = existingBudget.startDate;
+    let endDate = existingBudget.endDate;
+
+    if (dto.startDate !== undefined) {
+      startDate = this.parseDate(dto.startDate, 'startDate');
+
+      data.startDate = startDate;
+    }
+    if (dto.endDate !== undefined) {
+      endDate = dto.endDate ? this.parseDate(dto.endDate, 'endDate') : null;
+
+      data.endDate = endDate;
+    }
+
+    if (endDate && endDate.getTime() < startDate.getTime()) {
+      throw new BadRequestException(
+        'endDate must be greater than or equal to startDate',
+      );
+    }
+
+    if (dto.categoryId !== undefined) {
+      if (dto.categoryId === null) {
+        data.categoryId = null;
+      } else {
+        await this.categoriesService.findById(dto.categoryId, userId);
+
+        data.categoryId = dto.categoryId;
+      }
+    }
+
+    if (Object.keys(data).length === 0) {
+      return this.findById(userId, budgetId);
+    }
+
+    await this.budgetsRepository.update(budgetId, userId, data);
+
+    return this.findById(userId, budgetId);
   }
 
   private parseDate(value: string, fieldName: string): Date {
