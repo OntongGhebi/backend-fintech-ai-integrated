@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 
 import { BudgetStatus } from 'src/database/enums/budget-status.enum';
@@ -82,6 +83,19 @@ export class BudgetsService {
     }
 
     return this.budgetsRepository.findManyByUserId(userId);
+  }
+
+  async findById(userId: string, budgetId: string) {
+    const budget = await this.budgetsRepository.findByIdAndUserId(
+      budgetId,
+      userId,
+    );
+
+    if (!budget) {
+      throw new NotFoundException('Budget not found');
+    }
+
+    return budget;
   }
 
   private parseDate(value: string, fieldName: string): Date {

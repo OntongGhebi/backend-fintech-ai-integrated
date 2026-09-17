@@ -1,7 +1,17 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Param,
+  ParseUUIDPipe,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
+  ApiParam,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -46,5 +56,25 @@ export class BudgetsController {
     @Query() query: GetBudgetsQueryDto,
   ) {
     return this.budgetsService.findAll(userId, query);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get budget detail' })
+  @ApiParam({
+    name: 'id',
+    description: 'Budget UUID',
+    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Budget detail retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Budget not found' })
+  async findById(
+    @CurrentUser('id') userId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) budgetId: string,
+  ) {
+    return this.budgetsService.findById(userId, budgetId);
   }
 }

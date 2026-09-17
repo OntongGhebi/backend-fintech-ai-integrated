@@ -18,7 +18,7 @@ export class BudgetsRepository {
   }
 
   async findByIdAndUserId(budgetId: string, userId: string) {
-    return this.prisma.budget.findMany({
+    return this.prisma.budget.findFirst({
       where: {
         id: budgetId,
         userId,
