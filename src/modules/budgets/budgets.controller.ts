@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   UseGuards,
   Patch,
+  Delete,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -101,5 +102,22 @@ export class BudgetsController {
     @Body() dto: UpdateBudgetDto,
   ) {
     return this.budgetsService.update(userId, budgetId, dto);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Archive budget' })
+  @ApiParam({
+    name: 'id',
+    description: 'Budget UUID',
+    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+  })
+  @ApiResponse({ status: 200, description: 'Budget archived successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Budget not found' })
+  async remove(
+    @CurrentUser('id') userId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) budgetId: string,
+  ) {
+    return this.budgetsService.remove(userId, budgetId);
   }
 }

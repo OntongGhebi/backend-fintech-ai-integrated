@@ -178,6 +178,23 @@ export class BudgetsService {
     return this.findById(userId, budgetId);
   }
 
+  async remove(userId: string, budgetId: string) {
+    const existingBudget = await this.budgetsRepository.findByIdAndUserId(
+      budgetId,
+      userId,
+    );
+
+    if (!existingBudget) {
+      throw new NotFoundException('Budget not found');
+    }
+
+    await this.budgetsRepository.softDalete(budgetId, userId);
+
+    return {
+      message: 'Budget archived successfully',
+    };
+  }
+
   private parseDate(value: string, fieldName: string): Date {
     const date = new Date(value);
 
