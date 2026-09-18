@@ -13,6 +13,7 @@ import { CreateBudgetDto } from './dto/create-budget.dto';
 import { BudgetsRepository } from './repositories/budgets.repository';
 import { GetBudgetsQueryDto } from './dto/get-budgets-query.dto';
 import { UpdateBudgetDto } from './dto/update-budget.dto';
+import { UpdateBudgetStatusDto } from './dto/update-budget-status.dto';
 
 @Injectable()
 export class BudgetsService {
@@ -193,6 +194,32 @@ export class BudgetsService {
     return {
       message: 'Budget archived successfully',
     };
+  }
+
+  async updateStatus(
+    userId: string,
+    budgetId: string,
+    dto: UpdateBudgetStatusDto,
+  ) {
+    const existingBudget = await this.budgetsRepository.findByIdAndUserId(
+      budgetId,
+      userId,
+    );
+
+    if (!existingBudget) {
+      throw new NotFoundException('Budget not found');
+    }
+    const status = dto.status;
+
+    if (String(existingBudget.status) === String(status)) {
+      return existingBudget;
+    }
+
+    await this.budgetsRepository.update(budgetId, userId, {
+      status,
+    });
+
+    return this.findById(userId, budgetId);
   }
 
   private parseDate(value: string, fieldName: string): Date {

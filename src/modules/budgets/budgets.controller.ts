@@ -25,6 +25,7 @@ import { CurrentUser } from '../auth/decorators/current-user-decorator';
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { GetBudgetsQueryDto } from './dto/get-budgets-query.dto';
 import { UpdateBudgetDto } from './dto/update-budget.dto';
+import { UpdateBudgetStatusDto } from './dto/update-budget-status.dto';
 
 @Controller('budgets')
 @ApiTags('Budgets')
@@ -79,6 +80,28 @@ export class BudgetsController {
     @Param('id', new ParseUUIDPipe({ version: '4' })) budgetId: string,
   ) {
     return this.budgetsService.findById(userId, budgetId);
+  }
+
+  @Patch(':id/status')
+  @ApiOperation({ summary: 'Update budget status' })
+  @ApiParam({
+    name: 'id',
+    description: 'Budget UUID',
+    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Budget status updated successfully',
+  })
+  @ApiResponse({ status: 400, description: 'Invalid budget status' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Budget not found' })
+  async updateStatus(
+    @CurrentUser('id') userId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) budgetId: string,
+    @Body() dto: UpdateBudgetStatusDto,
+  ) {
+    return this.budgetsService.updateStatus(userId, budgetId, dto);
   }
 
   @Patch(':id')
