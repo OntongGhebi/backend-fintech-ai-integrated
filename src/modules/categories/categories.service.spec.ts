@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
-import { CategoriesRepository } from './categories.repository';
+import { CategoriesRepository } from './repositories/categories.repository';
 import { CategoriesService } from './categories.service';
 import { CategoryType } from 'src/database/enums/category-type.enum';
 

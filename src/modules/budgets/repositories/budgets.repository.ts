@@ -124,7 +124,7 @@ export class BudgetsRepository {
     });
   }
 
-  async softDalete(budgetId: string, userId: string) {
+  async softDelete(budgetId: string, userId: string) {
     return this.prisma.budget.updateMany({
       where: {
         id: budgetId,

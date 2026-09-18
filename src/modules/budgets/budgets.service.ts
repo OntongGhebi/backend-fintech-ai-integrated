@@ -189,7 +189,7 @@ export class BudgetsService {
       throw new NotFoundException('Budget not found');
     }
 
-    await this.budgetsRepository.softDalete(budgetId, userId);
+    await this.budgetsRepository.softDelete(budgetId, userId);
 
     return {
       message: 'Budget archived successfully',
