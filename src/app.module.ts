@@ -26,6 +26,7 @@ import { AccountsModule } from './modules/accounts/accounts.module';
 import { TransactionsModule } from './modules/transactions/transactions.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { BudgetsModule } from './modules/budgets/budgets.module';
+import { BudgetAlertsModule } from './modules/budget-alerts/budget-alerts.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { BudgetsModule } from './modules/budgets/budgets.module';
     TransactionsModule,
     CategoriesModule,
     BudgetsModule,
+    BudgetAlertsModule,
   ],
   providers: [
     {
