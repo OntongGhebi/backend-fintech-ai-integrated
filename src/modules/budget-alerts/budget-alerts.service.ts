@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { BudgetAlertsRepository } from './repositories/budget-alerts.repository';
 import { BudgetsService } from '../budgets/budgets.service';
 import { CreateBudgetAlertDto } from './dto/create-budget-alert.dto';
@@ -48,5 +48,18 @@ export class BudgetAlertsService {
         isEnabled: query.isEnabled,
       },
     );
+  }
+
+  async findById(userId: string, budgetAlertId: string) {
+    const budgetAlert = await this.budgetAlertsRepository.findByIdAndUserId(
+      budgetAlertId,
+      userId,
+    );
+
+    if (!budgetAlert) {
+      throw new NotFoundException('Budget alert not found');
+    }
+
+    return budgetAlert;
   }
 }

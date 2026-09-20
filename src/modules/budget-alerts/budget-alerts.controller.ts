@@ -101,4 +101,30 @@ export class BudgetAlertsController {
   ) {
     return this.budgetAlertsService.findAllByBudget(userId, budgetId, query);
   }
+
+  @Get('budget-alerts/:alertId')
+  @ApiOperation({
+    summary: 'Get a budget alert by ID',
+    description:
+      'Returns a specific budget alert owned by the authenticated user.',
+  })
+  @ApiParam({
+    name: 'alertId',
+    description: 'Budget alert UUID',
+    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Budget alert retrieved successfully.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Budget alert not found.',
+  })
+  async findById(
+    @CurrentUser('id') userId: string,
+    @Param('alertId', new ParseUUIDPipe({ version: '4' })) alertId: string,
+  ) {
+    return this.budgetAlertsService.findById(userId, alertId);
+  }
 }
