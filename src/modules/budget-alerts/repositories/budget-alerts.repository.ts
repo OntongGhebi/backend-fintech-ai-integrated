@@ -84,7 +84,7 @@ export class BudgetAlertsRepository {
         id: budgetAlertId,
         budget: {
           userId,
-          deletdAt: null,
+          deletedAt: null,
         },
       },
     });
