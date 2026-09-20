@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from 'src/database/prisma/prisma.service';
+import { GetBudgetAlertsQueryDto } from '../dto/get-budget-alerts-query.dto';
 
 @Injectable()
 export class BudgetAlertsRepository {
@@ -43,7 +44,11 @@ export class BudgetAlertsRepository {
     });
   }
 
-  async findManyByBudgetIdAndUserId(budgetId: string, userId: string) {
+  async findManyByBudgetIdAndUserId(
+    budgetId: string,
+    userId: string,
+    query: GetBudgetAlertsQueryDto,
+  ) {
     return this.prisma.budgetAlert.findMany({
       where: {
         budgetId,
@@ -51,9 +56,46 @@ export class BudgetAlertsRepository {
           userId,
           deletedAt: null,
         },
+        ...(query.channel !== undefined
+          ? {
+              channel: query.channel,
+            }
+          : {}),
+        ...(query.isEnabled !== undefined
+          ? {
+              isEnabled: query.isEnabled,
+            }
+          : {}),
       },
       orderBy: {
         createdAt: 'asc',
+      },
+      include: {
+        budget: true,
+      },
+    });
+  }
+
+  async findManyByUserId(userId: string, query: GetBudgetAlertsQueryDto) {
+    return this.prisma.budgetAlert.findMany({
+      where: {
+        budget: {
+          userId,
+          deletedAt: null,
+        },
+        ...(query.channel !== undefined
+          ? {
+              channel: query.channel,
+            }
+          : {}),
+        ...(query.isEnabled !== undefined
+          ? {
+              isEnabled: query.isEnabled,
+            }
+          : {}),
+      },
+      orderBy: {
+        createdAt: 'desc',
       },
       include: {
         budget: true,
