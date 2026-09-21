@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -23,6 +24,7 @@ import { CurrentUser } from '../auth/decorators/current-user-decorator';
 import { CreateBudgetAlertDto } from './dto/create-budget-alert.dto';
 import { GetBudgetAlertsQueryDto } from './dto/get-budget-alerts-query.dto';
 import { BudgetAlertsService } from './budget-alerts.service';
+import { UpdateBudgetAlertDto } from './dto/update-budget-alert.dto';
 
 @Controller()
 @ApiTags('Budget Alerts')
@@ -126,5 +128,35 @@ export class BudgetAlertsController {
     @Param('alertId', new ParseUUIDPipe({ version: '4' })) alertId: string,
   ) {
     return this.budgetAlertsService.findById(userId, alertId);
+  }
+
+  @Patch('budget-alerts/:alertId')
+  @ApiOperation({
+    summary: 'Update a budget alert',
+    description: 'Updates a budget alert owned by the authenticated user.',
+  })
+  @ApiParam({
+    name: 'alertId',
+    description: 'Budget alert UUID',
+    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Budget alert updated successfully.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation failed.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Budget alert not found.',
+  })
+  async update(
+    @CurrentUser('id') userId: string,
+    @Param('alertId', new ParseUUIDPipe({ version: '4' })) alertId: string,
+    @Body() dto: UpdateBudgetAlertDto,
+  ) {
+    return this.budgetAlertsService.update(userId, alertId, dto);
   }
 }

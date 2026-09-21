@@ -3,6 +3,7 @@ import { BudgetAlertsRepository } from './repositories/budget-alerts.repository'
 import { BudgetsService } from '../budgets/budgets.service';
 import { CreateBudgetAlertDto } from './dto/create-budget-alert.dto';
 import { GetBudgetAlertsQueryDto } from './dto/get-budget-alerts-query.dto';
+import { UpdateBudgetAlertDto } from './dto/update-budget-alert.dto';
 
 @Injectable()
 export class BudgetAlertsService {
@@ -61,5 +62,41 @@ export class BudgetAlertsService {
     }
 
     return budgetAlert;
+  }
+
+  async update(
+    userId: string,
+    budgetAlertId: string,
+    dto: UpdateBudgetAlertDto,
+  ) {
+    const existingBudgetAlert =
+      await this.budgetAlertsRepository.findByIdAndUserId(
+        budgetAlertId,
+        userId,
+      );
+
+    if (!existingBudgetAlert) {
+      throw new NotFoundException('Budget alert not found');
+    }
+
+    const data: Parameters<typeof this.budgetAlertsRepository.update>[2] = {};
+
+    if (dto.thresholdPercentage !== undefined) {
+      data.thresholdPercentage = dto.thresholdPercentage;
+    }
+    if (dto.channel !== undefined) {
+      data.channel = dto.channel;
+    }
+    if (dto.isEnabled !== undefined) {
+      data.isEnabled = dto.isEnabled;
+    }
+
+    if (Object.keys(data).length === 0) {
+      return existingBudgetAlert;
+    }
+
+    await this.budgetAlertsRepository.update(budgetAlertId, userId, data);
+
+    return this.findById(userId, budgetAlertId);
   }
 }
