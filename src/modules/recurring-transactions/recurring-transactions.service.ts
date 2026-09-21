@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AccountsService } from '../accounts/accounts.service';
 import { CategoriesService } from '../categories/categories.service';
 
@@ -72,6 +76,20 @@ export class RecurringTransactionsService {
 
   async findAll(userId: string, query: GetRecurringTransactionsQueryDto) {
     return this.recurringTransactionsRepository.findManyByUserId(userId, query);
+  }
+
+  async findById(userId: string, recurringTransactionId: string) {
+    const recurringTransaction =
+      await this.recurringTransactionsRepository.findByIdAndUserId(
+        recurringTransactionId,
+        userId,
+      );
+
+    if (!recurringTransaction) {
+      throw new NotFoundException('Recurring transaction not found');
+    }
+
+    return recurringTransaction;
   }
 
   private parseDate(value: string, fieldName: string) {
