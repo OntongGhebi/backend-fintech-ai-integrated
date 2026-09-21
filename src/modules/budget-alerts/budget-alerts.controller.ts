@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -158,5 +160,66 @@ export class BudgetAlertsController {
     @Body() dto: UpdateBudgetAlertDto,
   ) {
     return this.budgetAlertsService.update(userId, alertId, dto);
+  }
+
+  @Patch('budget-alerts/:alertId/enabled')
+  @ApiOperation({
+    summary: 'Enable or disable a budget alert',
+    description:
+      'Enables or disables a budget alert owned by the authenticated user.',
+  })
+  @ApiParam({
+    name: 'alertId',
+    description: 'Budget alert UUID',
+    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Budget alert enabled state updated successfully.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation failed.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Budget alert not found.',
+  })
+  async setEnabled(
+    @CurrentUser('id') userId: string,
+    @Param('alertId', new ParseUUIDPipe({ version: '4' })) alertId: string,
+    @Body() dto: UpdateBudgetAlertDto,
+  ) {
+    if (dto.isEnabled === undefined) {
+      throw new BadRequestException('isEnabled is required');
+    }
+
+    return this.budgetAlertsService.setEnabled(userId, alertId, dto.isEnabled);
+  }
+
+  @Delete('budget-alerts/:alertId')
+  @ApiOperation({
+    summary: 'Delete a budget alert',
+    description:
+      'Permanently deletes a budget alert owned by the authenticated user.',
+  })
+  @ApiParam({
+    name: 'alertId',
+    description: 'Budget alert UUID',
+    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Budget alert deleted successfully.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Budget alert not found.',
+  })
+  async remove(
+    @CurrentUser('id') userId: string,
+    @Param('alertId', new ParseUUIDPipe({ version: '4' })) alertId: string,
+  ) {
+    return this.budgetAlertsService.remove(userId, alertId);
   }
 }

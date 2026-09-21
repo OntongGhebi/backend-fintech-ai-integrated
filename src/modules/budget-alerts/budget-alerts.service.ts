@@ -99,4 +99,43 @@ export class BudgetAlertsService {
 
     return this.findById(userId, budgetAlertId);
   }
+
+  async setEnabled(userId: string, budgetAlertId: string, isEnabled: boolean) {
+    const existingBudgetAlert =
+      await this.budgetAlertsRepository.findByIdAndUserId(
+        budgetAlertId,
+        userId,
+      );
+
+    if (!existingBudgetAlert) {
+      throw new NotFoundException('Budget alert not found');
+    }
+    if (existingBudgetAlert.isEnabled === isEnabled) {
+      return existingBudgetAlert;
+    }
+
+    await this.budgetAlertsRepository.update(budgetAlertId, userId, {
+      isEnabled,
+    });
+
+    return this.findById(userId, budgetAlertId);
+  }
+
+  async remove(userId: string, budgetAlertId: string) {
+    const existingBudgetAlert =
+      await this.budgetAlertsRepository.findByIdAndUserId(
+        budgetAlertId,
+        userId,
+      );
+
+    if (!existingBudgetAlert) {
+      throw new NotFoundException('Budget alert not found');
+    }
+
+    await this.budgetAlertsRepository.delete(budgetAlertId, userId);
+
+    return {
+      message: 'Budget alert deleted successfully',
+    };
+  }
 }
