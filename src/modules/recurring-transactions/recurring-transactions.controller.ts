@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 
 import {
   ApiBearerAuth,
@@ -12,6 +12,7 @@ import { AccessTokenGuard } from '../auth/guards/access-token.guard';
 
 import { CreateRecurringTransactionDto } from './dto/create-recurring-transaction.dto';
 import { RecurringTransactionsService } from './recurring-transactions.service';
+import { GetRecurringTransactionsQueryDto } from './dto/get-recurring-transaction-query.dto';
 
 @Controller('recurring-transactions')
 @ApiTags('Recurring Transactions')
@@ -50,5 +51,26 @@ export class RecurringTransactionsController {
     @Body() dto: CreateRecurringTransactionDto,
   ) {
     return this.recurringTransactionsService.create(userId, dto);
+  }
+
+  @Get()
+  @ApiOperation({
+    summary: 'List recurring transactions',
+    description:
+      'Returns recurring transactions owned by the authenticated user with optional filters.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Recurring transactions retrieved successfully.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Authentication required.',
+  })
+  async findAll(
+    @CurrentUser('id') userId: string,
+    @Query() query: GetRecurringTransactionsQueryDto,
+  ) {
+    return this.recurringTransactionsService.findAll(userId, query);
   }
 }

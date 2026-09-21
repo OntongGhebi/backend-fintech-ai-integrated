@@ -5,6 +5,7 @@ import { CategoriesService } from '../categories/categories.service';
 import { CreateRecurringTransactionDto } from './dto/create-recurring-transaction.dto';
 import { RecurringTransactionsRepository } from './repositories/recurring-transactions.repository';
 import { RecurringFrequency } from 'src/database/enums/recurring-frequency.enum';
+import { GetRecurringTransactionsQueryDto } from './dto/get-recurring-transaction-query.dto';
 
 @Injectable()
 export class RecurringTransactionsService {
@@ -67,6 +68,10 @@ export class RecurringTransactionsService {
       lastRunAt: null,
       isActive: true,
     });
+  }
+
+  async findAll(userId: string, query: GetRecurringTransactionsQueryDto) {
+    return this.recurringTransactionsRepository.findManyByUserId(userId, query);
   }
 
   private parseDate(value: string, fieldName: string) {
