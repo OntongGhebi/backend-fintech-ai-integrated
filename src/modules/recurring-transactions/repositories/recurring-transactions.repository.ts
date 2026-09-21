@@ -1,0 +1,135 @@
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from 'src/database/prisma/prisma.service';
+
+@Injectable()
+export class RecurringTransactionsRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(
+    data: Parameters<
+      PrismaService['recurringTransaction']['create']
+    >[0]['data'],
+  ) {
+    return this.prisma.recurringTransaction.create({
+      data,
+      include: {
+        account: true,
+        category: true,
+      },
+    });
+  }
+
+  async findById(recurringTransactionId: string) {
+    return this.prisma.recurringTransaction.findUnique({
+      where: {
+        id: recurringTransactionId,
+      },
+      include: {
+        account: true,
+        category: true,
+      },
+    });
+  }
+
+  async findByIdAndUserId(recurringTransactionId: string, userId: string) {
+    return this.prisma.recurringTransaction.findFirst({
+      where: {
+        id: recurringTransactionId,
+        userId,
+      },
+      include: {
+        account: true,
+        category: true,
+      },
+    });
+  }
+
+  async findManyByUserId(userId: string) {
+    return this.prisma.recurringTransaction.findMany({
+      where: {
+        userId,
+      },
+      include: {
+        account: true,
+        category: true,
+      },
+      orderBy: [
+        {
+          nextRunAt: 'asc',
+        },
+        {
+          createdAt: 'desc',
+        },
+      ],
+    });
+  }
+
+  async findManyActiveByUserId(userId: string) {
+    return this.prisma.recurringTransaction.findMany({
+      where: {
+        userId,
+        isActive: true,
+      },
+      include: {
+        account: true,
+        category: true,
+      },
+      orderBy: {
+        nextRunAt: 'asc',
+      },
+    });
+  }
+
+  async findManyDue(beforeOrAt: Date) {
+    return this.prisma.recurringTransaction.findMany({
+      where: {
+        isActive: true,
+        nextRunAt: {
+          lte: beforeOrAt,
+        },
+        OR: [
+          {
+            endDate: null,
+          },
+          {
+            endDate: {
+              gte: beforeOrAt,
+            },
+          },
+        ],
+      },
+      include: {
+        account: true,
+        category: true,
+      },
+      orderBy: {
+        nextRunAt: 'asc',
+      },
+    });
+  }
+
+  async update(
+    recurringTransactionId: string,
+    userId: string,
+    data: Parameters<
+      PrismaService['recurringTransaction']['updateMany']
+    >[0]['data'],
+  ) {
+    return this.prisma.recurringTransaction.updateMany({
+      where: {
+        id: recurringTransactionId,
+        userId,
+      },
+      data,
+    });
+  }
+
+  async delete(recurringTransactionId: string, userId: string) {
+    return this.prisma.recurringTransaction.deleteMany({
+      where: {
+        id: recurringTransactionId,
+        userId,
+      },
+    });
+  }
+}

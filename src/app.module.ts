@@ -27,6 +27,7 @@ import { TransactionsModule } from './modules/transactions/transactions.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { BudgetsModule } from './modules/budgets/budgets.module';
 import { BudgetAlertsModule } from './modules/budget-alerts/budget-alerts.module';
+import { RecurringTransactionsModule } from './modules/recurring-transactions/recurring-transactions.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { BudgetAlertsModule } from './modules/budget-alerts/budget-alerts.module
     CategoriesModule,
     BudgetsModule,
     BudgetAlertsModule,
+    RecurringTransactionsModule,
   ],
   providers: [
     {
