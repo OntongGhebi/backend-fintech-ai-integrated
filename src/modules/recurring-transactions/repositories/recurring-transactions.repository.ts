@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma/prisma.service';
+import { GetRecurringTransactionsQueryDto } from '../dto/get-recurring-transaction-query.dto';
 
 @Injectable()
 export class RecurringTransactionsRepository {
@@ -44,10 +45,28 @@ export class RecurringTransactionsRepository {
     });
   }
 
-  async findManyByUserId(userId: string) {
+  async findManyByUserId(
+    userId: string,
+    query: GetRecurringTransactionsQueryDto,
+  ) {
     return this.prisma.recurringTransaction.findMany({
       where: {
         userId,
+        ...(query.type !== undefined
+          ? {
+              type: query.type,
+            }
+          : {}),
+        ...(query.frequency !== undefined
+          ? {
+              frequency: query.frequency,
+            }
+          : {}),
+        ...(query.isActive !== undefined
+          ? {
+              isActive: query.isActive,
+            }
+          : {}),
       },
       include: {
         account: true,
