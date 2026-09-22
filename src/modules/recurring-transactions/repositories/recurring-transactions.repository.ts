@@ -233,9 +233,13 @@ export class RecurringTransactionsRepository {
 
       return {
         transaction,
-        recurrtingTransaction: await tx.recurringTransaction.findUnique({
+        recurringTransaction: await tx.recurringTransaction.findUnique({
           where: {
             id: recurringTransactionId,
+          },
+          include: {
+            account: true,
+            category: true,
           },
         }),
       };

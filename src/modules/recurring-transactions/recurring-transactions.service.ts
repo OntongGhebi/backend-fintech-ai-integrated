@@ -110,11 +110,11 @@ export class RecurringTransactionsService {
     }
 
     if (dto.accountId !== undefined) {
-      await this.accountsService.findById(userId, dto.accountId);
+      await this.accountsService.findById(dto.accountId, userId);
     }
 
     if (dto.categoryId !== undefined && dto.categoryId !== null) {
-      await this.categoriesService.findById(userId, dto.categoryId);
+      await this.categoriesService.findById(dto.categoryId, userId);
     }
 
     const startDate =
