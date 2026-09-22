@@ -355,29 +355,28 @@ model Transaction {
   accountId  String  @db.Uuid
   categoryId String? @db.Uuid
 
-  type     TransactionType
-  amount   Decimal         @db.Decimal(19, 4)
-  currency String          @default("IDR") @db.Char(3)
+  recurringTransactionId String? @db.Uuid
+  recurringExecutionKey  String? @unique @db.VarChar(255)
 
-  description     String?  @db.VarChar(500)
-  transactionDate DateTime @db.Timestamptz(6)
-
-  source TransactionSource
-  status TransactionStatus @default(ACTIVE)
-
-  // Same UUID is shared by the two sides of a transfer.
-  transferGroupId String? @db.Uuid
-
-  metadata Json? @db.JsonB
+  type            TransactionType
+  amount          Decimal           @db.Decimal(19, 4)
+  currency        String            @default("IDR") @db.Char(3)
+  description     String?           @db.VarChar(500)
+  transactionDate DateTime          @db.Timestamptz(6)
+  source          TransactionSource
+  status          TransactionStatus @default(ACTIVE)
+  transferGroupId String?           @db.Uuid
+  metadata        Json?             @db.JsonB
 
   createdAt DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @db.Timestamptz(6)
   deletedAt DateTime? @db.Timestamptz(6)
 
-  // Relations
   user     User      @relation(fields: [userId], references: [id], onDelete: Restrict)
   account  Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
   category Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  recurringTransaction RecurringTransaction? @relation(fields: [recurringTransactionId], references: [id])
 
   @@index([userId, transactionDate])
   @@index([userId, type, transactionDate])
@@ -385,6 +384,7 @@ model Transaction {
   @@index([userId, accountId, transactionDate])
   @@index([userId, transferGroupId])
   @@index([userId, status])
+  @@index([userId, recurringTransactionId, transactionDate])
   @@index([deletedAt])
   @@map("transactions")
 }
@@ -472,10 +472,11 @@ model RecurringTransaction {
   createdAt DateTime @default(now()) @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
-  // Relations
   user     User      @relation(fields: [userId], references: [id], onDelete: Restrict)
   account  Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
   category Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  transactions Transaction[]
 
   @@index([userId, nextRunAt])
   @@index([userId, isActive])

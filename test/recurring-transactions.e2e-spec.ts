@@ -412,6 +412,12 @@ describe('Recurring Transactions E2E', () => {
   describe('POST /api/v1/recurring-transactions/:id/execute - due transaction', () => {
     let dueRecurringTransactionId: string;
 
+    let firstTransactionId: string;
+    let firstTransactionDate: string;
+
+    let secondTransactionId: string;
+    let secondTransactionDate: string;
+
     it('should create a due recurring transaction for execution testing', async () => {
       const response = await request(app.getHttpServer())
         .post('/api/v1/recurring-transactions')
@@ -434,7 +440,7 @@ describe('Recurring Transactions E2E', () => {
       );
     });
 
-    it('should generate an actual transaction', async () => {
+    it('should generate the first actual transaction', async () => {
       const response = await request(app.getHttpServer())
         .post(
           `/api/v1/recurring-transactions/${dueRecurringTransactionId}/execute`,
@@ -442,32 +448,36 @@ describe('Recurring Transactions E2E', () => {
         .set('Authorization', `Bearer ${userAAccessToken}`)
         .expect(201);
 
-      expect(response.body.transaction).toEqual(
+      expect(response.body).toEqual(
         expect.objectContaining({
-          userId: userAId,
-          accountId,
-          type: 'EXPENSE',
-          amount: '25000',
-          currency: 'IDR',
-          source: 'SYSTEM',
-          status: 'ACTIVE',
+          alreadyExecuted: false,
+          transaction: expect.objectContaining({
+            userId: userAId,
+            accountId,
+            type: 'EXPENSE',
+            amount: '25000',
+            currency: 'IDR',
+            source: 'SYSTEM',
+            status: 'ACTIVE',
+          }),
+          recurringTransaction: expect.objectContaining({
+            id: dueRecurringTransactionId,
+            lastRunAt: expect.any(String),
+            isActive: true,
+            nextRunAt: expect.any(String),
+          }),
         }),
       );
 
-      expect(response.body.transaction.categoryId).toBeNull();
       expect(response.body.transaction.id).toEqual(expect.any(String));
 
       expect(response.body.transaction.transactionDate).toEqual(
         expect.any(String),
       );
 
-      expect(response.body.recurringTransaction).toEqual(
-        expect.objectContaining({
-          id: dueRecurringTransactionId,
-          lastRunAt: expect.any(String),
-          isActive: true,
-        }),
-      );
+      firstTransactionId = response.body.transaction.id;
+
+      firstTransactionDate = response.body.transaction.transactionDate;
 
       expect(
         new Date(response.body.recurringTransaction.nextRunAt).getTime(),
@@ -484,19 +494,38 @@ describe('Recurring Transactions E2E', () => {
         .set('Authorization', `Bearer ${userAAccessToken}`)
         .expect(201);
 
-      expect(response.body.transaction).toEqual(
+      expect(response.body).toEqual(
         expect.objectContaining({
-          userId: userAId,
-          accountId,
-          type: 'EXPENSE',
-          amount: '25000',
-          currency: 'IDR',
-          source: 'SYSTEM',
-          status: 'ACTIVE',
+          alreadyExecuted: false,
+          transaction: expect.objectContaining({
+            userId: userAId,
+            accountId,
+            type: 'EXPENSE',
+            amount: '25000',
+            currency: 'IDR',
+            source: 'SYSTEM',
+            status: 'ACTIVE',
+          }),
+          recurringTransaction: expect.objectContaining({
+            id: dueRecurringTransactionId,
+            lastRunAt: expect.any(String),
+            isActive: true,
+            nextRunAt: expect.any(String),
+          }),
         }),
       );
 
-      expect(response.body.transaction.categoryId).toBeNull();
+      secondTransactionId = response.body.transaction.id;
+
+      secondTransactionDate = response.body.transaction.transactionDate;
+
+      expect(secondTransactionId).not.toBe(firstTransactionId);
+
+      expect(secondTransactionDate).not.toBe(firstTransactionDate);
+
+      expect(new Date(secondTransactionDate).getTime()).toBeGreaterThan(
+        new Date(firstTransactionDate).getTime(),
+      );
     });
   });
 

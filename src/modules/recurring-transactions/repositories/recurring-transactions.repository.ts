@@ -189,6 +189,22 @@ export class RecurringTransactionsRepository {
         return null;
       }
 
+      const recurringExecutionKey = `${recurringTransaction.id}:${scheduledAt.toISOString()}`;
+
+      const existingTransaction = await tx.transaction.findUnique({
+        where: {
+          recurringExecutionKey,
+        },
+      });
+
+      if (existingTransaction) {
+        return {
+          transaction: existingTransaction,
+          recurringTransaction,
+          alreadyExecuted: true,
+        };
+      }
+
       if (recurringTransaction.nextRunAt.getTime() !== scheduledAt.getTime()) {
         return null;
       }
@@ -198,15 +214,28 @@ export class RecurringTransactionsRepository {
           userId: recurringTransaction.userId,
           accountId: recurringTransaction.accountId,
           categoryId: recurringTransaction.categoryId,
+
+          recurringTransactionId: recurringTransaction.id,
+
+          recurringExecutionKey,
+
           type: recurringTransaction.type,
+
           amount: recurringTransaction.amount,
+
           currency: 'IDR',
+
           description: recurringTransaction.description,
+
           transactionDate: scheduledAt,
+
           source: 'SYSTEM',
+
           status: 'ACTIVE',
+
           metadata: {
             recurringTransactionId: recurringTransaction.id,
+
             recurringScheduledAt: scheduledAt.toISOString(),
           },
         },
@@ -237,11 +266,9 @@ export class RecurringTransactionsRepository {
           where: {
             id: recurringTransactionId,
           },
-          include: {
-            account: true,
-            category: true,
-          },
         }),
+
+        alreadyExecuted: false,
       };
     });
   }

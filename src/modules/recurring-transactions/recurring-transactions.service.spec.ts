@@ -167,6 +167,58 @@ describe('RecurringTransactionsService', () => {
       });
     });
 
+    it('should return the existing transaction when the occurrence was already executed', async () => {
+      const scheduledAt = new Date('2026-09-20T00:00:00.000Z');
+
+      const existingTransaction = {
+        id: '55555555-5555-4555-8555-555555555555',
+        userId,
+        accountId,
+        categoryId,
+        type: TransactionType.EXPENSE,
+        amount: '150000',
+        currency: 'IDR',
+        description: 'Daily expense',
+        transactionDate: scheduledAt,
+        source: 'SYSTEM',
+        status: 'ACTIVE',
+      };
+
+      const recurringTransaction = {
+        id: recurringTransactionId,
+        userId,
+        accountId,
+        categoryId,
+        type: TransactionType.EXPENSE,
+        amount: '150000',
+        description: 'Daily expense',
+        frequency: RecurringFrequency.DAILY,
+        startDate: new Date('2026-09-19T00:00:00.000Z'),
+        endDate: null,
+        nextRunAt: scheduledAt,
+        lastRunAt: null,
+        isActive: true,
+      };
+
+      recurringTransactionsRepository.findByIdAndUserId.mockResolvedValue(
+        recurringTransaction,
+      );
+
+      recurringTransactionsRepository.executeDueTransaction.mockResolvedValue({
+        transaction: existingTransaction,
+        recurringTransaction,
+        alreadyExecuted: true,
+      });
+
+      const result = await service.execute(userId, recurringTransactionId);
+
+      expect(result).toEqual({
+        transaction: existingTransaction,
+        recurringTransaction,
+        alreadyExecuted: true,
+      });
+    });
+
     it('should reject a recurring transaction that does not exist', async () => {
       recurringTransactionsRepository.findByIdAndUserId.mockResolvedValue(null);
 

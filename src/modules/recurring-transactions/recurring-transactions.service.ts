@@ -351,6 +351,7 @@ export class RecurringTransactionsService {
     }
 
     const scheduledAt = recurringTransaction.nextRunAt;
+
     const nextRunAt = this.calculatedNextRunAt(
       scheduledAt,
       recurringTransaction.frequency,
@@ -375,7 +376,7 @@ export class RecurringTransactionsService {
 
     if (!result) {
       throw new BadRequestException(
-        'Recurring transaction could not be excuted',
+        'Recurring transaction could not be executed',
       );
     }
 
