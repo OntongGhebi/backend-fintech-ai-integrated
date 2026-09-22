@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+
 import { Prisma } from '../../../generated/prisma/client.js';
 import * as crypto from 'node:crypto';
 
@@ -15,6 +16,8 @@ import { GetTransactionsQueryDto } from './dto/get-transaction-query.dto';
 import { TransactionsRepository } from './repositories/transactions.repository';
 import { UpdateTransactionDto } from './dto/update-transaction.dto.js';
 import { CreateTransferDto } from './dto/create-transfer.dto.js';
+
+type TransactionTypeValue = 'INCOME' | 'EXPENSE' | 'TRANSFER';
 
 @Injectable()
 export class TransactionsService {
@@ -48,31 +51,7 @@ export class TransactionsService {
     }
 
     if (dto.categoryId) {
-      const category =
-        await this.transactionsRepository.findCategoryByIdAndUserId(
-          dto.categoryId,
-          userId,
-        );
-
-      if (!category) {
-        throw new NotFoundException('Category not found');
-      }
-
-      if (!category.isActive || category.deletedAt) {
-        throw new BadRequestException('Category is inactive');
-      }
-
-      if (dto.type === TransactionType.INCOME && category.type !== 'INCOME') {
-        throw new BadRequestException(
-          'Income transaction requires an income category',
-        );
-      }
-
-      if (dto.type === TransactionType.EXPENSE && category.type !== 'EXPENSE') {
-        throw new BadRequestException(
-          'Expense transaction requires an expense category',
-        );
-      }
+      await this.validateCategory(dto.categoryId, userId, dto.type);
     }
 
     return this.transactionsRepository.create({
@@ -89,6 +68,114 @@ export class TransactionsService {
       transferGroupId: null,
       metadata: Prisma.DbNull,
     });
+  }
+
+  /**
+   * Internal transaction creation entry point.
+   *
+   * This method is intentionally separate from the HTTP
+   * CreateTransactionDto flow because system-generated
+   * transactions must use TransactionSource.SYSTEM.
+   *
+   * The actual recurring execution remains responsible
+   * for atomic execution with the recurring transaction
+   * state update.
+   */
+  async createSystemTransaction(params: {
+    userId: string;
+    accountId: string;
+    categoryId?: string | null;
+    type: TransactionType;
+    amount: number | string;
+    transactionDate: Date;
+    description?: string | null;
+    metadata?: Prisma.InputJsonValue | typeof Prisma.DbNull;
+  }) {
+    const account = await this.accountsRepository.findByIdAndUserId(
+      params.accountId,
+      params.userId,
+    );
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    if (!account.isActive) {
+      throw new BadRequestException('Account is inactive');
+    }
+
+    if (account.currency !== 'IDR') {
+      throw new BadRequestException('Account currency must be IDR');
+    }
+
+    if (params.type === TransactionType.TRANSFER && params.categoryId) {
+      throw new BadRequestException(
+        'Transfer transaction cannot have a category',
+      );
+    }
+
+    if (params.categoryId) {
+      await this.validateCategory(
+        params.categoryId,
+        params.userId,
+        params.type,
+      );
+    }
+
+    return this.transactionsRepository.create({
+      userId: params.userId,
+      accountId: params.accountId,
+      categoryId: params.categoryId ?? null,
+      type: params.type,
+      amount: params.amount,
+      currency: 'IDR',
+      description: params.description?.trim() || null,
+      transactionDate: params.transactionDate,
+      source: TransactionSource.SYSTEM,
+      status: 'ACTIVE',
+      transferGroupId: null,
+      metadata: params.metadata ?? Prisma.DbNull,
+    });
+  }
+
+  private async validateCategory(
+    categoryId: string,
+    userId: string,
+    type: TransactionTypeValue,
+  ) {
+    const category =
+      await this.transactionsRepository.findCategoryByIdAndUserId(
+        categoryId,
+        userId,
+      );
+
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    if (!category.isActive || category.deletedAt) {
+      throw new BadRequestException('Category is inactive');
+    }
+
+    if (type === 'INCOME' && category.type !== 'INCOME') {
+      throw new BadRequestException(
+        'Income transaction requires an income category',
+      );
+    }
+
+    if (type === 'EXPENSE' && category.type !== 'EXPENSE') {
+      throw new BadRequestException(
+        'Expense transaction requires an expense category',
+      );
+    }
+
+    if (type === 'TRANSFER') {
+      throw new BadRequestException(
+        'Transfer transaction cannot have a category',
+      );
+    }
+
+    return category;
   }
 
   async findManyByUserId(userId: string, query: GetTransactionsQueryDto) {
@@ -156,37 +243,7 @@ export class TransactionsService {
     }
 
     if (dto.categoryId !== undefined) {
-      const category =
-        await this.transactionsRepository.findCategoryByIdAndUserId(
-          dto.categoryId,
-          userId,
-        );
-
-      if (!category) {
-        throw new NotFoundException('Category not found');
-      }
-
-      if (!category.isActive || category.deletedAt) {
-        throw new BadRequestException('Category is inactive');
-      }
-
-      if (transaction.type === 'INCOME' && category.type !== 'INCOME') {
-        throw new BadRequestException(
-          'Income transaction requires an income category',
-        );
-      }
-
-      if (transaction.type === 'EXPENSE' && category.type !== 'EXPENSE') {
-        throw new BadRequestException(
-          'Expense transaction requires an expense category',
-        );
-      }
-
-      if (transaction.type === 'TRANSFER') {
-        throw new BadRequestException(
-          'Transfer transaction cannot have a category',
-        );
-      }
+      await this.validateCategory(dto.categoryId, userId, transaction.type);
     }
 
     const data: {
@@ -204,12 +261,15 @@ export class TransactionsService {
     if (dto.categoryId !== undefined) {
       data.categoryId = dto.categoryId;
     }
+
     if (dto.amount !== undefined) {
       data.amount = dto.amount;
     }
+
     if (dto.description !== undefined) {
       data.description = dto.description.trim() || null;
     }
+
     if (dto.transactionDate !== undefined) {
       data.transactionDate = new Date(dto.transactionDate);
     }
@@ -312,8 +372,11 @@ export class TransactionsService {
     }
 
     const transferGroupId = crypto.randomUUID();
+
     const transactionDate = new Date(dto.transactionDate);
+
     const description = dto.description?.trim() || null;
+
     const result = await this.transactionsRepository.createTransfer(
       {
         userId,

@@ -1,10 +1,16 @@
 import { Injectable } from '@nestjs/common';
+
 import { PrismaService } from 'src/database/prisma/prisma.service';
+import { TransactionDomainService } from 'src/modules/transactions/transaction-domain.service';
+
 import { GetRecurringTransactionsQueryDto } from '../dto/get-recurring-transaction-query.dto';
 
 @Injectable()
 export class RecurringTransactionsRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly transactionDomainService: TransactionDomainService,
+  ) {}
 
   async create(
     data: Parameters<
@@ -209,37 +215,21 @@ export class RecurringTransactionsRepository {
         return null;
       }
 
-      const transaction = await tx.transaction.create({
-        data: {
+      const transaction =
+        await this.transactionDomainService.createSystemTransaction(tx, {
           userId: recurringTransaction.userId,
           accountId: recurringTransaction.accountId,
           categoryId: recurringTransaction.categoryId,
-
-          recurringTransactionId: recurringTransaction.id,
-
-          recurringExecutionKey,
-
           type: recurringTransaction.type,
-
           amount: recurringTransaction.amount,
-
-          currency: 'IDR',
-
-          description: recurringTransaction.description,
-
           transactionDate: scheduledAt,
-
-          source: 'SYSTEM',
-
-          status: 'ACTIVE',
-
+          description: recurringTransaction.description,
           metadata: {
             recurringTransactionId: recurringTransaction.id,
-
             recurringScheduledAt: scheduledAt.toISOString(),
+            recurringExecutionKey,
           },
-        },
-      });
+        });
 
       const updated = await tx.recurringTransaction.updateMany({
         where: {
@@ -249,7 +239,11 @@ export class RecurringTransactionsRepository {
         },
         data: {
           lastRunAt: scheduledAt,
-          ...(nextRunAt !== null ? { nextRunAt } : {}),
+          ...(nextRunAt !== null
+            ? {
+                nextRunAt,
+              }
+            : {}),
           isActive,
         },
       });
@@ -267,7 +261,6 @@ export class RecurringTransactionsRepository {
             id: recurringTransactionId,
           },
         }),
-
         alreadyExecuted: false,
       };
     });
