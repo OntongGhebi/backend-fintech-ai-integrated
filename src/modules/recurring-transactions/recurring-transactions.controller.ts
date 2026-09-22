@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -199,6 +200,79 @@ export class RecurringTransactionsController {
       userId,
       recurringTransactionId,
       dto,
+    );
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary: 'Delete a recurring transaction',
+    description:
+      'Permanently deletes a recurring transaction owned by the authenticated user.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Recurring transaction UUID.',
+    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Recurring transaction deleted successfully.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Authentication required.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Recurring transaction not found.',
+  })
+  async remove(
+    @CurrentUser('id') userId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' }))
+    recurringTransactionId: string,
+  ) {
+    return this.recurringTransactionsService.remove(
+      userId,
+      recurringTransactionId,
+    );
+  }
+
+  @Post(':id/execute')
+  @ApiOperation({
+    summary: 'Execute a recurring transaction',
+    description:
+      'Generates an actual transaction when the recurring transaction is due.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Recurring transaction UUID.',
+    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Recurring transaction executed successfully.',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Recurring transaction is disabled, not due yet, or could not be executed.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Authentication required.',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Recurring transaction not found.',
+  })
+  async execute(
+    @CurrentUser('id') userId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' }))
+    recurringTransactionId: string,
+  ) {
+    return this.recurringTransactionsService.execute(
+      userId,
+      recurringTransactionId,
     );
   }
 }

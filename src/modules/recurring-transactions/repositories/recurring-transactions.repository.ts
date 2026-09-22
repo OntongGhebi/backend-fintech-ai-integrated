@@ -167,4 +167,78 @@ export class RecurringTransactionsRepository {
       },
     });
   }
+
+  async executeDueTransaction(
+    recurringTransactionId: string,
+    scheduledAt: Date,
+    nextRunAt: Date | null,
+    isActive: boolean,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const recurringTransaction = await tx.recurringTransaction.findUnique({
+        where: {
+          id: recurringTransactionId,
+        },
+      });
+
+      if (!recurringTransaction) {
+        return null;
+      }
+
+      if (!recurringTransaction.isActive) {
+        return null;
+      }
+
+      if (recurringTransaction.nextRunAt.getTime() !== scheduledAt.getTime()) {
+        return null;
+      }
+
+      const transaction = await tx.transaction.create({
+        data: {
+          userId: recurringTransaction.userId,
+          accountId: recurringTransaction.accountId,
+          categoryId: recurringTransaction.categoryId,
+          type: recurringTransaction.type,
+          amount: recurringTransaction.amount,
+          currency: 'IDR',
+          description: recurringTransaction.description,
+          transactionDate: scheduledAt,
+          source: 'SYSTEM',
+          status: 'ACTIVE',
+          metadata: {
+            recurringTransactionId: recurringTransaction.id,
+            recurringScheduledAt: scheduledAt.toISOString(),
+          },
+        },
+      });
+
+      const updated = await tx.recurringTransaction.updateMany({
+        where: {
+          id: recurringTransactionId,
+          isActive: true,
+          nextRunAt: scheduledAt,
+        },
+        data: {
+          lastRunAt: scheduledAt,
+          ...(nextRunAt !== null ? { nextRunAt } : {}),
+          isActive,
+        },
+      });
+
+      if (updated.count === 0) {
+        throw new Error(
+          'Recurring transaction execution state changed unexpectedly',
+        );
+      }
+
+      return {
+        transaction,
+        recurrtingTransaction: await tx.recurringTransaction.findUnique({
+          where: {
+            id: recurringTransactionId,
+          },
+        }),
+      };
+    });
+  }
 }

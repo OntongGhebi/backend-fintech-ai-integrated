@@ -266,6 +266,31 @@ export class RecurringTransactionsService {
     return this.findById(userId, recurringTransactionId);
   }
 
+  async remove(userId: string, recurringTransactionId: string) {
+    const existing =
+      await this.recurringTransactionsRepository.findByIdAndUserId(
+        recurringTransactionId,
+        userId,
+      );
+
+    if (!existing) {
+      throw new NotFoundException('Recurring transaction not found');
+    }
+
+    const result = await this.recurringTransactionsRepository.delete(
+      recurringTransactionId,
+      userId,
+    );
+
+    if (result.count === 0) {
+      throw new NotFoundException('Recurring transaction not found');
+    }
+
+    return {
+      message: 'Recurring transaction deleted successfully',
+    };
+  }
+
   private parseDate(value: string, fieldName: string) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
@@ -302,5 +327,58 @@ export class RecurringTransactionsService {
     }
 
     return nextRunAt;
+  }
+
+  async execute(userId: string, recurringTransactionId: string) {
+    const recurringTransaction =
+      await this.recurringTransactionsRepository.findByIdAndUserId(
+        recurringTransactionId,
+        userId,
+      );
+
+    if (!recurringTransaction) {
+      throw new NotFoundException('Recurring transaction not found');
+    }
+
+    if (!recurringTransaction.isActive) {
+      throw new BadRequestException('Recurring transaction is disabled');
+    }
+
+    const now = new Date();
+
+    if (recurringTransaction.nextRunAt.getTime() > now.getTime()) {
+      throw new BadRequestException('Recurring transaction is not due yet');
+    }
+
+    const scheduledAt = recurringTransaction.nextRunAt;
+    const nextRunAt = this.calculatedNextRunAt(
+      scheduledAt,
+      recurringTransaction.frequency,
+    );
+
+    let shouldRemainActive = true;
+
+    if (
+      recurringTransaction.endDate &&
+      nextRunAt.getTime() > recurringTransaction.endDate.getTime()
+    ) {
+      shouldRemainActive = false;
+    }
+
+    const result =
+      await this.recurringTransactionsRepository.executeDueTransaction(
+        recurringTransactionId,
+        scheduledAt,
+        shouldRemainActive ? nextRunAt : null,
+        shouldRemainActive,
+      );
+
+    if (!result) {
+      throw new BadRequestException(
+        'Recurring transaction could not be excuted',
+      );
+    }
+
+    return result;
   }
 }
