@@ -143,6 +143,22 @@ export class RecurringTransactionsRepository {
     });
   }
 
+  async setEnabled(
+    recurringTransactionId: string,
+    userId: string,
+    isActive: boolean,
+  ) {
+    return this.prisma.recurringTransaction.updateMany({
+      where: {
+        id: recurringTransactionId,
+        userId,
+      },
+      data: {
+        isActive,
+      },
+    });
+  }
+
   async delete(recurringTransactionId: string, userId: string) {
     return this.prisma.recurringTransaction.deleteMany({
       where: {

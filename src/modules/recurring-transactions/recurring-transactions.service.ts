@@ -10,6 +10,8 @@ import { CreateRecurringTransactionDto } from './dto/create-recurring-transactio
 import { RecurringTransactionsRepository } from './repositories/recurring-transactions.repository';
 import { RecurringFrequency } from 'src/database/enums/recurring-frequency.enum';
 import { GetRecurringTransactionsQueryDto } from './dto/get-recurring-transaction-query.dto';
+import { UpdateRecurringTransactionDto } from './dto/update-recurring-transaction.dto';
+import { SetRecurringTransactionEnabledDto } from './dto/set-recurring-transaction-enabled.dto';
 
 @Injectable()
 export class RecurringTransactionsService {
@@ -90,6 +92,178 @@ export class RecurringTransactionsService {
     }
 
     return recurringTransaction;
+  }
+
+  async update(
+    userId: string,
+    recurringTransactionId: string,
+    dto: UpdateRecurringTransactionDto,
+  ) {
+    const existing =
+      await this.recurringTransactionsRepository.findByIdAndUserId(
+        recurringTransactionId,
+        userId,
+      );
+
+    if (!existing) {
+      throw new NotFoundException('Recurring transaction not found');
+    }
+
+    if (dto.accountId !== undefined) {
+      await this.accountsService.findById(userId, dto.accountId);
+    }
+
+    if (dto.categoryId !== undefined && dto.categoryId !== null) {
+      await this.categoriesService.findById(userId, dto.categoryId);
+    }
+
+    const startDate =
+      dto.startDate !== undefined
+        ? this.parseDate(dto.startDate, 'startDate')
+        : existing.startDate;
+
+    const endDate =
+      dto.endDate !== undefined
+        ? dto.endDate === null
+          ? null
+          : this.parseDate(dto.endDate, 'endDate')
+        : existing.endDate;
+
+    if (endDate && endDate.getTime() < startDate.getTime()) {
+      throw new BadRequestException(
+        'endDate must be greater than or equal to startDate',
+      );
+    }
+
+    const frequency = dto.frequency ?? existing.frequency;
+
+    const shouldRecalculateNextRunAt =
+      dto.startDate !== undefined || dto.frequency !== undefined;
+
+    const nextRunAt = shouldRecalculateNextRunAt
+      ? this.calculatedNextRunAt(startDate, frequency)
+      : existing.nextRunAt;
+
+    if (endDate && nextRunAt.getTime() > endDate.getTime()) {
+      throw new BadRequestException('The calculated nextRunAt exceeds endDate');
+    }
+
+    const updateData: Parameters<
+      typeof this.recurringTransactionsRepository.update
+    >[2] = {
+      ...(dto.accountId !== undefined
+        ? {
+            account: {
+              connect: {
+                id: dto.accountId,
+              },
+            },
+          }
+        : {}),
+
+      ...(dto.categoryId !== undefined
+        ? dto.categoryId === null
+          ? {
+              category: {
+                disconnect: true,
+              },
+            }
+          : {
+              category: {
+                connect: {
+                  id: dto.categoryId,
+                },
+              },
+            }
+        : {}),
+
+      ...(dto.type !== undefined
+        ? {
+            type: dto.type,
+          }
+        : {}),
+
+      ...(dto.amount !== undefined
+        ? {
+            amount: dto.amount,
+          }
+        : {}),
+
+      ...(dto.description !== undefined
+        ? {
+            description:
+              dto.description === null ? null : dto.description.trim() || null,
+          }
+        : {}),
+
+      ...(dto.frequency !== undefined
+        ? {
+            frequency: dto.frequency,
+          }
+        : {}),
+
+      ...(dto.startDate !== undefined
+        ? {
+            startDate,
+          }
+        : {}),
+
+      ...(dto.endDate !== undefined
+        ? {
+            endDate,
+          }
+        : {}),
+
+      ...(shouldRecalculateNextRunAt
+        ? {
+            nextRunAt,
+          }
+        : {}),
+    };
+
+    const result = await this.recurringTransactionsRepository.update(
+      recurringTransactionId,
+      userId,
+      updateData,
+    );
+
+    if (result.count === 0) {
+      throw new NotFoundException('Recurring transaction not found');
+    }
+
+    return this.findById(userId, recurringTransactionId);
+  }
+
+  async setEnabled(
+    userId: string,
+    recurringTransactionId: string,
+    dto: SetRecurringTransactionEnabledDto,
+  ) {
+    const existing =
+      await this.recurringTransactionsRepository.findByIdAndUserId(
+        recurringTransactionId,
+        userId,
+      );
+
+    if (!existing) {
+      throw new NotFoundException('Recurring transaction not found');
+    }
+
+    if (existing.isActive === dto.isActive) {
+      return existing;
+    }
+
+    const result = await this.recurringTransactionsRepository.setEnabled(
+      recurringTransactionId,
+      userId,
+      dto.isActive,
+    );
+
+    if (result.count === 0) {
+      throw new NotFoundException('Recurring transaction not found');
+    }
+
+    return this.findById(userId, recurringTransactionId);
   }
 
   private parseDate(value: string, fieldName: string) {
