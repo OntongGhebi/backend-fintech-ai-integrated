@@ -28,6 +28,8 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { BudgetsModule } from './modules/budgets/budgets.module';
 import { BudgetAlertsModule } from './modules/budget-alerts/budget-alerts.module';
 import { RecurringTransactionsModule } from './modules/recurring-transactions/recurring-transactions.module';
+import { telegramConfig } from './config/telegram.config';
+import { TelegramModule } from './modules/telegram/Telegram.module';
 
 @Module({
   imports: [
@@ -35,7 +37,14 @@ import { RecurringTransactionsModule } from './modules/recurring-transactions/re
       isGlobal: true,
       cache: true,
       validate: validateEnvironment,
-      load: [appConfig, databaseConfig, redisConfig, jwtConfig, bullmqConfig],
+      load: [
+        appConfig,
+        databaseConfig,
+        redisConfig,
+        jwtConfig,
+        bullmqConfig,
+        telegramConfig,
+      ],
     }),
     ThrottlerModule.forRoot([
       {
@@ -57,6 +66,7 @@ import { RecurringTransactionsModule } from './modules/recurring-transactions/re
     BudgetsModule,
     BudgetAlertsModule,
     RecurringTransactionsModule,
+    TelegramModule,
   ],
   providers: [
     {
