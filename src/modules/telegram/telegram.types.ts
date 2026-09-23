@@ -24,7 +24,7 @@ export interface TelegramMessage {
   text?: string;
 }
 
-export interface TelegramUpdaet {
+export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
 }
