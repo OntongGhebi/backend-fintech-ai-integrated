@@ -20,6 +20,17 @@ export interface CreateSystemTransactionParams {
   transactionDate: Date;
   description?: string | null;
   metadata?: Prisma.InputJsonValue | typeof Prisma.DbNull;
+
+  /**
+   * Used by recurring transactions to guarantee
+   * idempotent system-generated transaction execution.
+   */
+  recurringTransactionId?: string | null;
+
+  /**
+   * Unique execution key for a recurring transaction occurrence.
+   */
+  recurringExecutionKey?: string | null;
 }
 
 @Injectable()
@@ -68,6 +79,11 @@ export class TransactionDomainService {
         userId: params.userId,
         accountId: params.accountId,
         categoryId: params.categoryId ?? null,
+
+        recurringTransactionId: params.recurringTransactionId ?? null,
+
+        recurringExecutionKey: params.recurringExecutionKey ?? null,
+
         type: params.type as TransactionType,
         amount: params.amount,
         currency: 'IDR',

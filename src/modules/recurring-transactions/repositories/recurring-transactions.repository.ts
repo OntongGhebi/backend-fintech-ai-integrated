@@ -224,6 +224,8 @@ export class RecurringTransactionsRepository {
           amount: recurringTransaction.amount,
           transactionDate: scheduledAt,
           description: recurringTransaction.description,
+          recurringTransactionId: recurringTransaction.id,
+          recurringExecutionKey,
           metadata: {
             recurringTransactionId: recurringTransaction.id,
             recurringScheduledAt: scheduledAt.toISOString(),
