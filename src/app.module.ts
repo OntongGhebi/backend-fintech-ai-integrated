@@ -29,7 +29,7 @@ import { BudgetsModule } from './modules/budgets/budgets.module';
 import { BudgetAlertsModule } from './modules/budget-alerts/budget-alerts.module';
 import { RecurringTransactionsModule } from './modules/recurring-transactions/recurring-transactions.module';
 import { telegramConfig } from './config/telegram.config';
-import { TelegramModule } from './modules/telegram/Telegram.module';
+import { telegramModule } from './modules/telegram/telegram.module';
 
 @Module({
   imports: [
@@ -66,7 +66,7 @@ import { TelegramModule } from './modules/telegram/Telegram.module';
     BudgetsModule,
     BudgetAlertsModule,
     RecurringTransactionsModule,
-    TelegramModule,
+    telegramModule,
   ],
   providers: [
     {
