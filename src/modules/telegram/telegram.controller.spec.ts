@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 
 import { TelegramAccountService } from './telegram-account.service';
 import { TelegramController } from './telegram.controller';
+import { TelegramIncomingMessageService } from './telegram-incoming-message.service';
 import { TelegramService } from './telegram.service';
 import { TelegramUpdateParserService } from './telegram-update-parser.service';
 import { TelegramWebhookGuard } from './telegram-webhook.guard';
@@ -22,6 +23,10 @@ describe('TelegramController', () => {
 
   const telegramAccountServiceMock = {
     createLinkCode: jest.fn(),
+  };
+
+  const telegramIncomingMessageServiceMock = {
+    persist: jest.fn(),
   };
 
   const configServiceMock = {
@@ -47,6 +52,10 @@ describe('TelegramController', () => {
           useValue: telegramAccountServiceMock,
         },
         {
+          provide: TelegramIncomingMessageService,
+          useValue: telegramIncomingMessageServiceMock,
+        },
+        {
           provide: TelegramWebhookGuard,
           useFactory: () => ({
             canActivate: jest.fn().mockReturnValue(true),
@@ -67,7 +76,7 @@ describe('TelegramController', () => {
   });
 
   describe('handleWebhook', () => {
-    it('should parse the Telegram update and pass the parsed message to the service', () => {
+    it('should parse, persist, and pass the Telegram message to the service', async () => {
       const update = new TelegramUpdateDto();
 
       update.update_id = 123456;
@@ -79,19 +88,31 @@ describe('TelegramController', () => {
         chatId: 987654,
         chatType: 'private',
         text: 'makan siang 25000',
-        messageDate: new Date(1758630000 * 1000),
+        messageDate: new Date('2026-09-24T10:00:00.000Z'),
         username: 'ghebi',
         firstName: 'Ghebi',
       };
 
       telegramUpdateParserServiceMock.parse.mockReturnValue(parsedMessage);
 
-      const result = controller.handleWebhook(update);
+      telegramIncomingMessageServiceMock.persist.mockResolvedValue({
+        id: 'telegram-message-id',
+      });
+
+      const result = await controller.handleWebhook(update);
 
       expect(telegramUpdateParserServiceMock.parse).toHaveBeenCalledTimes(1);
 
       expect(telegramUpdateParserServiceMock.parse).toHaveBeenCalledWith(
         update,
+      );
+
+      expect(telegramIncomingMessageServiceMock.persist).toHaveBeenCalledTimes(
+        1,
+      );
+
+      expect(telegramIncomingMessageServiceMock.persist).toHaveBeenCalledWith(
+        parsedMessage,
       );
 
       expect(telegramServiceMock.handleUpdate).toHaveBeenCalledTimes(1);
@@ -105,18 +126,22 @@ describe('TelegramController', () => {
       });
     });
 
-    it('should pass null when the update is not processable', () => {
+    it('should not persist when the update is not processable', async () => {
       const update = new TelegramUpdateDto();
 
       update.update_id = 123456;
 
       telegramUpdateParserServiceMock.parse.mockReturnValue(null);
 
-      const result = controller.handleWebhook(update);
+      const result = await controller.handleWebhook(update);
 
       expect(telegramUpdateParserServiceMock.parse).toHaveBeenCalledWith(
         update,
       );
+
+      expect(telegramIncomingMessageServiceMock.persist).not.toHaveBeenCalled();
+
+      expect(telegramServiceMock.handleUpdate).toHaveBeenCalledTimes(1);
 
       expect(telegramServiceMock.handleUpdate).toHaveBeenCalledWith(null);
 
@@ -125,7 +150,7 @@ describe('TelegramController', () => {
       });
     });
 
-    it('should propagate parser errors', () => {
+    it('should propagate parser errors', async () => {
       const update = new TelegramUpdateDto();
 
       update.update_id = 123456;
@@ -134,8 +159,44 @@ describe('TelegramController', () => {
         throw new Error('Telegram update parsing failed');
       });
 
-      expect(() => controller.handleWebhook(update)).toThrow(
+      await expect(controller.handleWebhook(update)).rejects.toThrow(
         'Telegram update parsing failed',
+      );
+
+      expect(telegramIncomingMessageServiceMock.persist).not.toHaveBeenCalled();
+
+      expect(telegramServiceMock.handleUpdate).not.toHaveBeenCalled();
+    });
+
+    it('should propagate persistence errors', async () => {
+      const update = new TelegramUpdateDto();
+
+      update.update_id = 123456;
+
+      const parsedMessage: ParsedTelegramMessage = {
+        updateId: 123456,
+        messageId: 1,
+        telegramUserId: 987654,
+        chatId: 987654,
+        chatType: 'private',
+        text: 'makan siang 25000',
+        messageDate: new Date('2026-09-24T10:00:00.000Z'),
+        username: 'ghebi',
+        firstName: 'Ghebi',
+      };
+
+      telegramUpdateParserServiceMock.parse.mockReturnValue(parsedMessage);
+
+      telegramIncomingMessageServiceMock.persist.mockRejectedValue(
+        new Error('Failed to persist Telegram message'),
+      );
+
+      await expect(controller.handleWebhook(update)).rejects.toThrow(
+        'Failed to persist Telegram message',
+      );
+
+      expect(telegramIncomingMessageServiceMock.persist).toHaveBeenCalledWith(
+        parsedMessage,
       );
 
       expect(telegramServiceMock.handleUpdate).not.toHaveBeenCalled();

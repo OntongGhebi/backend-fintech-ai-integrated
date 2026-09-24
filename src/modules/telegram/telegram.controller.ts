@@ -14,6 +14,7 @@ import { TelegramUpdateParserService } from './telegram-update-parser.service';
 import { TelegramWebhookGuard } from './telegram-webhook.guard';
 import { TelegramUpdateDto } from './dto/telegram-update.dto';
 import { AccessTokenGuard } from '../auth/guards/access-token.guard';
+import { TelegramIncomingMessageService } from './telegram-incoming-message.service';
 
 interface AuthenticatedTelegramRequest {
   user: {
@@ -32,13 +33,26 @@ export class TelegramController {
     private readonly telegramService: TelegramService,
     private readonly telegramUpdateParserService: TelegramUpdateParserService,
     private readonly telegramAccountService: TelegramAccountService,
+    private readonly telegramIncomingMessageService: TelegramIncomingMessageService,
   ) {}
 
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   @UseGuards(TelegramWebhookGuard)
-  handleWebhook(@Body() update: TelegramUpdateDto): { ok: boolean } {
+  async handleWebhook(
+    @Body() update: TelegramUpdateDto,
+  ): Promise<{ ok: boolean }> {
     const parsedMessage = this.telegramUpdateParserService.parse(update);
+
+    if (!parsedMessage) {
+      this.telegramService.handleUpdate(null);
+
+      return {
+        ok: true,
+      };
+    }
+
+    await this.telegramIncomingMessageService.persist(parsedMessage);
 
     this.telegramService.handleUpdate(parsedMessage);
 
