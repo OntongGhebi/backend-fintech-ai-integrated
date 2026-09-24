@@ -1,3 +1,5 @@
+import { TransactionIntent } from './transaction-intent.types';
+
 export type TransactionMessageParseStatus =
   'PARSED' | 'UNSUPPORTED' | 'INVALID';
 
@@ -13,12 +15,7 @@ export interface TransactionMessageInput {
 export interface ParsedTransactionMessage {
   status: TransactionMessageParseStatus;
   rawText: string;
-  description?: string;
-  amount?: number;
-  transactionType?: 'INCOME' | 'EXPENSE';
-  categoryHint?: string;
-  accountHint?: string;
-  confidence?: number;
+  intent?: TransactionIntent;
 }
 
 export interface TransactionMessageParser {
