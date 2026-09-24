@@ -16,13 +16,14 @@ import {
   TelegramBot,
   TelegramSendMessageParams,
   TelegramSendMessageResponse,
-  TelegramUpdate,
   TelegramWebhookInfo,
 } from './telegram.types';
+import { ParsedTelegramMessage } from './telegram-parser.types';
 
 @Injectable()
 export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
+
   constructor(private readonly configService: ConfigService) {}
 
   async getMe(): Promise<TelegramBot> {
@@ -61,10 +62,6 @@ export class TelegramService {
     return result;
   }
 
-  handleUpdate(update: TelegramUpdate): void {
-    this.logger.debug(`Received Telegram update: ${update.update_id}`);
-  }
-
   async deleteWebhook(dropPendingUpdates = false): Promise<boolean> {
     return this.request<boolean>('deleteWebhook', {
       drop_pending_updates: dropPendingUpdates,
@@ -90,6 +87,20 @@ export class TelegramService {
       chat_id: params.chatId,
       text: params.text,
     });
+  }
+
+  handleUpdate(message: ParsedTelegramMessage | null): void {
+    if (!message) {
+      this.logger.debug(
+        'Telegram update does not contain a processable text message',
+      );
+
+      return;
+    }
+
+    this.logger.debug(
+      `Received Telegram message: update=${message.updateId}, chat=${message.chatId}, user=${message.telegramUserId}`,
+    );
   }
 
   private async request<T>(

@@ -101,6 +101,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.set(key, value);
   }
 
+  async getAndDelete(key: string): Promise<string | null> {
+    return this.client.getdel(key);
+  }
+
   async delete(key: string): Promise<number> {
     return this.client.del(key);
   }
