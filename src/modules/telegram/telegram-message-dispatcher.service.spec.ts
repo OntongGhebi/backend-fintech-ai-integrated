@@ -62,6 +62,7 @@ describe('TelegramMessageDispatcherService', () => {
   it('should dispatch text messages to the text handler', async () => {
     const context = createContext({
       messageType: TelegramMessageType.TEXT,
+      content: 'makan siang 25000',
     });
 
     await dispatcher.dispatch(context);
