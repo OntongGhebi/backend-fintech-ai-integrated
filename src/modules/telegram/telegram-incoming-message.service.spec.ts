@@ -1,186 +1,323 @@
-import { Test, TestingModule } from '@nestjs/testing';
-
 import {
   TelegramMessageDirection,
-  TelegramProcessingStatus,
   TelegramMessageType,
+  TelegramProcessingStatus,
 } from '../../../generated/prisma/enums.js';
 
-import { TelegramAccountRepository } from './repositories/telegram-account.repository';
-import { TelegramMessageRepository } from './repositories/telegram-message.repository';
 import { TelegramIncomingMessageService } from './telegram-incoming-message.service';
-import { ParsedTelegramMessage } from './telegram-parser.types';
 
 describe('TelegramIncomingMessageService', () => {
   let service: TelegramIncomingMessageService;
 
-  const telegramAccountRepositoryMock = {
-    findByTelegramUserId: jest.fn(),
+  let telegramAccountRepository: {
+    findByTelegramUserId: jest.Mock;
   };
 
-  const telegramMessageRepositoryMock = {
-    findByTelegramMessageId: jest.fn(),
-    create: jest.fn(),
+  let telegramMessageRepository: {
+    findByTelegramMessageId: jest.Mock;
+    create: jest.Mock;
   };
 
-  beforeEach(async () => {
-    jest.clearAllMocks();
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        TelegramIncomingMessageService,
-        {
-          provide: TelegramAccountRepository,
-          useValue: telegramAccountRepositoryMock,
-        },
-        {
-          provide: TelegramMessageRepository,
-          useValue: telegramMessageRepositoryMock,
-        },
-      ],
-    }).compile();
-
-    service = module.get<TelegramIncomingMessageService>(
-      TelegramIncomingMessageService,
-    );
-  });
-
-  const createMessage = (
-    overrides: Partial<ParsedTelegramMessage> = {},
-  ): ParsedTelegramMessage => ({
-    updateId: 123456,
-    messageId: 1,
-    telegramUserId: 987654,
-    chatId: 987654,
-    chatType: 'private',
+  const createParsedMessage = (overrides: Record<string, unknown> = {}) => ({
+    telegramUserId: '987654',
+    chatId: '987654',
+    messageId: '1',
     text: 'makan siang 25000',
-    messageDate: new Date('2026-09-24T10:00:00.000Z'),
-    username: 'ghebi',
-    firstName: 'Ghebi',
     ...overrides,
   });
 
-  it('should persist a message from a linked Telegram account', async () => {
-    const message = createMessage();
-
-    const telegramAccount = {
-      id: 'account-id',
-      userId: 'user-id',
-      telegramUserId: BigInt(message.telegramUserId),
-      isVerified: true,
-      unlinkedAt: null,
-    };
-
-    const persistedMessage = {
-      id: 'message-id',
-    };
-
-    telegramAccountRepositoryMock.findByTelegramUserId.mockResolvedValue(
-      telegramAccount,
-    );
-
-    telegramMessageRepositoryMock.findByTelegramMessageId.mockResolvedValue(
-      null,
-    );
-
-    telegramMessageRepositoryMock.create.mockResolvedValue(persistedMessage);
-
-    const result = await service.persist(message);
-
-    expect(
-      telegramAccountRepositoryMock.findByTelegramUserId,
-    ).toHaveBeenCalledWith(BigInt(message.telegramUserId));
-
-    expect(
-      telegramMessageRepositoryMock.findByTelegramMessageId,
-    ).toHaveBeenCalledWith(BigInt(message.chatId), BigInt(message.messageId));
-
-    expect(telegramMessageRepositoryMock.create).toHaveBeenCalledWith({
-      telegramAccountId: telegramAccount.id,
-      telegramMessageId: BigInt(message.messageId),
-      chatId: BigInt(message.chatId),
-      messageType: TelegramMessageType.TEXT,
-      content: message.text,
-      direction: TelegramMessageDirection.INBOUND,
-      processingStatus: TelegramProcessingStatus.RECEIVED,
-    });
-
-    expect(result).toEqual(persistedMessage);
+  const createTelegramAccount = (overrides: Record<string, unknown> = {}) => ({
+    id: 'account-id',
+    userId: 'user-id',
+    telegramUserId: BigInt(987654),
+    telegramUsername: 'testuser',
+    firstName: 'Test',
+    lastName: 'User',
+    isVerified: true,
+    unlinkedAt: null,
+    ...overrides,
   });
 
-  it('should persist a command as COMMAND message type', async () => {
-    const message = createMessage({
-      text: '/start',
-    });
+  beforeEach(() => {
+    telegramAccountRepository = {
+      findByTelegramUserId: jest.fn(),
+    };
 
-    telegramAccountRepositoryMock.findByTelegramUserId.mockResolvedValue({
-      id: 'account-id',
-      userId: 'user-id',
-      telegramUserId: BigInt(message.telegramUserId),
-      isVerified: true,
-      unlinkedAt: null,
-    });
+    telegramMessageRepository = {
+      findByTelegramMessageId: jest.fn(),
+      create: jest.fn(),
+    };
 
-    telegramMessageRepositoryMock.findByTelegramMessageId.mockResolvedValue(
-      null,
+    service = new TelegramIncomingMessageService(
+      telegramAccountRepository as any,
+      telegramMessageRepository as any,
     );
+  });
 
-    telegramMessageRepositoryMock.create.mockResolvedValue({
-      id: 'message-id',
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+  });
+
+  describe('persist', () => {
+    it('should return null when Telegram account is not linked', async () => {
+      telegramAccountRepository.findByTelegramUserId.mockResolvedValue(null);
+
+      const message = createParsedMessage();
+
+      const result = await service.persist(message);
+
+      expect(
+        telegramAccountRepository.findByTelegramUserId,
+      ).toHaveBeenCalledWith(BigInt(987654));
+
+      expect(result).toBeNull();
+
+      expect(
+        telegramMessageRepository.findByTelegramMessageId,
+      ).not.toHaveBeenCalled();
+
+      expect(telegramMessageRepository.create).not.toHaveBeenCalled();
     });
 
-    await service.persist(message);
+    it('should persist a new text message from a linked Telegram account', async () => {
+      const telegramAccount = createTelegramAccount();
 
-    expect(telegramMessageRepositoryMock.create).toHaveBeenCalledWith(
-      expect.objectContaining({
+      telegramAccountRepository.findByTelegramUserId.mockResolvedValue(
+        telegramAccount,
+      );
+
+      telegramMessageRepository.findByTelegramMessageId.mockResolvedValue(null);
+
+      const createdMessage = {
+        id: 'message-id',
+        telegramAccountId: 'account-id',
+        telegramMessageId: BigInt(1),
+        chatId: BigInt(987654),
+        messageType: TelegramMessageType.TEXT,
+        content: 'makan siang 25000',
+        direction: TelegramMessageDirection.INBOUND,
+        processingStatus: TelegramProcessingStatus.RECEIVED,
+      };
+
+      telegramMessageRepository.create.mockResolvedValue(createdMessage);
+
+      const message = createParsedMessage();
+
+      const result = await service.persist(message);
+
+      expect(telegramMessageRepository.create).toHaveBeenCalledWith({
+        telegramAccountId: telegramAccount.id,
+        telegramMessageId: BigInt(1),
+        chatId: BigInt(987654),
+        messageType: TelegramMessageType.TEXT,
+        content: 'makan siang 25000',
+        direction: TelegramMessageDirection.INBOUND,
+        processingStatus: TelegramProcessingStatus.RECEIVED,
+      });
+
+      expect(result).toEqual({
+        id: 'message-id',
+        telegramAccountId: 'account-id',
+        userId: 'user-id',
+        telegramUserId: BigInt(987654),
+        chatId: BigInt(987654),
+        telegramMessageId: BigInt(1),
+        messageType: TelegramMessageType.TEXT,
+        content: 'makan siang 25000',
+        processingStatus: TelegramProcessingStatus.RECEIVED,
+        created: true,
+      });
+    });
+
+    it('should persist a command message as COMMAND', async () => {
+      const telegramAccount = createTelegramAccount();
+
+      telegramAccountRepository.findByTelegramUserId.mockResolvedValue(
+        telegramAccount,
+      );
+
+      telegramMessageRepository.findByTelegramMessageId.mockResolvedValue(null);
+
+      telegramMessageRepository.create.mockResolvedValue({
+        id: 'command-message-id',
+        telegramAccountId: 'account-id',
+        telegramMessageId: BigInt(2),
+        chatId: BigInt(987654),
         messageType: TelegramMessageType.COMMAND,
-      }),
-    );
-  });
+        content: '/start',
+        direction: TelegramMessageDirection.INBOUND,
+        processingStatus: TelegramProcessingStatus.RECEIVED,
+      });
 
-  it('should not persist a message from an unlinked Telegram account', async () => {
-    const message = createMessage();
+      const result = await service.persist(
+        createParsedMessage({
+          messageId: '2',
+          text: '/start',
+        }),
+      );
 
-    telegramAccountRepositoryMock.findByTelegramUserId.mockResolvedValue(null);
+      expect(result).toEqual({
+        id: 'command-message-id',
+        telegramAccountId: 'account-id',
+        userId: 'user-id',
+        telegramUserId: BigInt(987654),
+        chatId: BigInt(987654),
+        telegramMessageId: BigInt(2),
+        messageType: TelegramMessageType.COMMAND,
+        content: '/start',
+        processingStatus: TelegramProcessingStatus.RECEIVED,
+        created: true,
+      });
+    });
 
-    const result = await service.persist(message);
+    it('should persist a message without text as OTHER', async () => {
+      const telegramAccount = createTelegramAccount();
 
-    expect(result).toBeNull();
+      telegramAccountRepository.findByTelegramUserId.mockResolvedValue(
+        telegramAccount,
+      );
 
-    expect(
-      telegramMessageRepositoryMock.findByTelegramMessageId,
-    ).not.toHaveBeenCalled();
+      telegramMessageRepository.findByTelegramMessageId.mockResolvedValue(null);
 
-    expect(telegramMessageRepositoryMock.create).not.toHaveBeenCalled();
-  });
+      telegramMessageRepository.create.mockResolvedValue({
+        id: 'other-message-id',
+        telegramAccountId: 'account-id',
+        telegramMessageId: BigInt(3),
+        chatId: BigInt(987654),
+        messageType: TelegramMessageType.OTHER,
+        content: undefined,
+        direction: TelegramMessageDirection.INBOUND,
+        processingStatus: TelegramProcessingStatus.RECEIVED,
+      });
 
-  it('should return the existing message when the Telegram message is already persisted', async () => {
-    const message = createMessage();
+      const result = await service.persist(
+        createParsedMessage({
+          messageId: '3',
+          text: undefined,
+        }),
+      );
 
-    const telegramAccount = {
-      id: 'account-id',
-      userId: 'user-id',
-      telegramUserId: BigInt(message.telegramUserId),
-      isVerified: true,
-      unlinkedAt: null,
-    };
+      expect(telegramMessageRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messageType: TelegramMessageType.OTHER,
+          content: undefined,
+        }),
+      );
 
-    const existingMessage = {
-      id: 'existing-message-id',
-    };
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 'other-message-id',
+          messageType: TelegramMessageType.OTHER,
+          created: true,
+        }),
+      );
+    });
 
-    telegramAccountRepositoryMock.findByTelegramUserId.mockResolvedValue(
-      telegramAccount,
-    );
+    it('should return the existing message when the Telegram message is already persisted', async () => {
+      const telegramAccount = createTelegramAccount();
 
-    telegramMessageRepositoryMock.findByTelegramMessageId.mockResolvedValue(
-      existingMessage,
-    );
+      const existingMessage = {
+        id: 'existing-message-id',
+        telegramAccountId: 'account-id',
+        telegramMessageId: BigInt(1),
+        chatId: BigInt(987654),
+        messageType: TelegramMessageType.TEXT,
+        content: 'makan siang 25000',
+        direction: TelegramMessageDirection.INBOUND,
+        processingStatus: TelegramProcessingStatus.PROCESSED,
+      };
 
-    const result = await service.persist(message);
+      telegramAccountRepository.findByTelegramUserId.mockResolvedValue(
+        telegramAccount,
+      );
 
-    expect(result).toEqual(existingMessage);
+      telegramMessageRepository.findByTelegramMessageId.mockResolvedValue(
+        existingMessage,
+      );
 
-    expect(telegramMessageRepositoryMock.create).not.toHaveBeenCalled();
+      const result = await service.persist(createParsedMessage());
+
+      expect(result).toEqual({
+        id: 'existing-message-id',
+        telegramAccountId: 'account-id',
+        userId: 'user-id',
+        telegramUserId: BigInt(987654),
+        chatId: BigInt(987654),
+        telegramMessageId: BigInt(1),
+        messageType: TelegramMessageType.TEXT,
+        content: 'makan siang 25000',
+        processingStatus: TelegramProcessingStatus.PROCESSED,
+        created: false,
+      });
+
+      expect(telegramMessageRepository.create).not.toHaveBeenCalled();
+    });
+
+    it('should preserve FAILED status for an existing message', async () => {
+      const telegramAccount = createTelegramAccount();
+
+      const existingMessage = {
+        id: 'failed-message-id',
+        telegramAccountId: 'account-id',
+        telegramMessageId: BigInt(1),
+        chatId: BigInt(987654),
+        messageType: TelegramMessageType.TEXT,
+        content: 'makan siang 25000',
+        direction: TelegramMessageDirection.INBOUND,
+        processingStatus: TelegramProcessingStatus.FAILED,
+      };
+
+      telegramAccountRepository.findByTelegramUserId.mockResolvedValue(
+        telegramAccount,
+      );
+
+      telegramMessageRepository.findByTelegramMessageId.mockResolvedValue(
+        existingMessage,
+      );
+
+      const result = await service.persist(createParsedMessage());
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 'failed-message-id',
+          processingStatus: TelegramProcessingStatus.FAILED,
+          created: false,
+        }),
+      );
+    });
+
+    it('should use the Telegram message id and chat id as bigint', async () => {
+      const telegramAccount = createTelegramAccount();
+
+      telegramAccountRepository.findByTelegramUserId.mockResolvedValue(
+        telegramAccount,
+      );
+
+      telegramMessageRepository.findByTelegramMessageId.mockResolvedValue(null);
+
+      telegramMessageRepository.create.mockResolvedValue({
+        id: 'message-id',
+        telegramAccountId: 'account-id',
+        telegramMessageId: BigInt(123),
+        chatId: BigInt(456),
+        messageType: TelegramMessageType.TEXT,
+        content: 'gaji 5000000',
+        direction: TelegramMessageDirection.INBOUND,
+        processingStatus: TelegramProcessingStatus.RECEIVED,
+      });
+
+      await service.persist(
+        createParsedMessage({
+          telegramUserId: '987654',
+          chatId: '456',
+          messageId: '123',
+          text: 'gaji 5000000',
+        }),
+      );
+
+      expect(
+        telegramMessageRepository.findByTelegramMessageId,
+      ).toHaveBeenCalledWith(BigInt(456), BigInt(123));
+    });
   });
 });

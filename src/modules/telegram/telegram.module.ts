@@ -16,6 +16,7 @@ import { TelegramCommandRouter } from './commands/telegram-command.router';
 
 import { TelegramMessageDispatcherService } from './telegram-message-dispatcher.service';
 import { TelegramIncomingMessageService } from './telegram-incoming-message.service';
+import { TelegramMessageProcessingService } from './telegram-message-processing.service';
 
 import {
   TELEGRAM_TEXT_MESSAGE_HANDLER,
@@ -47,6 +48,7 @@ import { TelegramTransactionMessageHandlerService } from './transaction-message/
 
     TelegramIncomingMessageService,
     TelegramMessageDispatcherService,
+    TelegramMessageProcessingService,
 
     BasicTransactionMessageParser,
     TransactionMessagePipelineService,
@@ -73,6 +75,8 @@ import { TelegramTransactionMessageHandlerService } from './transaction-message/
 
     TelegramMessageDispatcherService,
     TelegramIncomingMessageService,
+    TelegramMessageProcessingService,
+
     TransactionMessagePipelineService,
   ],
 })

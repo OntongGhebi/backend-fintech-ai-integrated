@@ -2,13 +2,26 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import {
   TelegramMessageDirection,
-  TelegramProcessingStatus,
   TelegramMessageType,
+  TelegramProcessingStatus,
 } from '../../../generated/prisma/enums.js';
 
 import { TelegramAccountRepository } from './repositories/telegram-account.repository';
 import { TelegramMessageRepository } from './repositories/telegram-message.repository';
 import { ParsedTelegramMessage } from './telegram-parser.types';
+
+export interface PersistedTelegramMessage {
+  id: string;
+  telegramAccountId: string;
+  userId: string;
+  telegramUserId: bigint;
+  chatId: bigint;
+  telegramMessageId: bigint;
+  messageType: TelegramMessageType;
+  content?: string;
+  processingStatus: TelegramProcessingStatus;
+  created: boolean;
+}
 
 @Injectable()
 export class TelegramIncomingMessageService {
@@ -19,7 +32,9 @@ export class TelegramIncomingMessageService {
     private readonly telegramMessageRepository: TelegramMessageRepository,
   ) {}
 
-  async persist(message: ParsedTelegramMessage) {
+  async persist(
+    message: ParsedTelegramMessage,
+  ): Promise<PersistedTelegramMessage | null> {
     const telegramAccount =
       await this.telegramAccountRepository.findByTelegramUserId(
         BigInt(message.telegramUserId),
@@ -33,10 +48,14 @@ export class TelegramIncomingMessageService {
       return null;
     }
 
+    const telegramMessageId = BigInt(message.messageId);
+
+    const chatId = BigInt(message.chatId);
+
     const existingMessage =
       await this.telegramMessageRepository.findByTelegramMessageId(
-        BigInt(message.chatId),
-        BigInt(message.messageId),
+        chatId,
+        telegramMessageId,
       );
 
     if (existingMessage) {
@@ -44,20 +63,44 @@ export class TelegramIncomingMessageService {
         `Telegram message already persisted: chatId=${message.chatId}, messageId=${message.messageId}`,
       );
 
-      return existingMessage;
+      return {
+        id: existingMessage.id,
+        telegramAccountId: telegramAccount.id,
+        userId: telegramAccount.userId,
+        telegramUserId: BigInt(message.telegramUserId),
+        chatId,
+        telegramMessageId,
+        messageType: existingMessage.messageType,
+        content: existingMessage.content ?? undefined,
+        processingStatus: existingMessage.processingStatus,
+        created: false,
+      };
     }
 
     const messageType = this.resolveMessageType(message.text);
 
-    return this.telegramMessageRepository.create({
+    const createdMessage = await this.telegramMessageRepository.create({
       telegramAccountId: telegramAccount.id,
-      telegramMessageId: BigInt(message.messageId),
-      chatId: BigInt(message.chatId),
+      telegramMessageId,
+      chatId,
       messageType,
       content: message.text ?? undefined,
       direction: TelegramMessageDirection.INBOUND,
       processingStatus: TelegramProcessingStatus.RECEIVED,
     });
+
+    return {
+      id: createdMessage.id,
+      telegramAccountId: telegramAccount.id,
+      userId: telegramAccount.userId,
+      telegramUserId: BigInt(message.telegramUserId),
+      chatId,
+      telegramMessageId,
+      messageType: createdMessage.messageType,
+      content: createdMessage.content ?? undefined,
+      processingStatus: createdMessage.processingStatus,
+      created: true,
+    };
   }
 
   private resolveMessageType(text: string | undefined): TelegramMessageType {
