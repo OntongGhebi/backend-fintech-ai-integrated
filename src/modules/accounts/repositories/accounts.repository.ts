@@ -29,6 +29,19 @@ export class AccountsRepository {
     });
   }
 
+  async findByNameAndUserId(name: string, userId: string) {
+    return this.prisma.account.findFirst({
+      where: {
+        userId,
+        name: {
+          equals: name,
+          mode: 'insensitive',
+        },
+        deletedAt: null,
+      },
+    });
+  }
+
   async findManyByUserId(userId: string) {
     return this.prisma.account.findMany({
       where: {

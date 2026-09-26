@@ -26,9 +26,12 @@ import {
 import { BasicTransactionMessageParser } from './transaction-message/transaction-message.parser';
 import { TransactionMessagePipelineService } from './transaction-message/transaction-message-pipeline.service';
 import { TelegramTransactionMessageHandlerService } from './transaction-message/telegram-transaction-message-handler.service';
+import { AccountsModule } from '../accounts/accounts.module';
+import { CategoriesModule } from '../categories/categories.module';
+import { TransactionIntentResolutionService } from './transaction-message/transaction-intent-resolution.service';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, AccountsModule, CategoriesModule],
 
   controllers: [TelegramController],
 
@@ -54,6 +57,8 @@ import { TelegramTransactionMessageHandlerService } from './transaction-message/
     TransactionMessagePipelineService,
 
     TelegramTransactionMessageHandlerService,
+
+    TransactionIntentResolutionService,
 
     {
       provide: TELEGRAM_TRANSACTION_MESSAGE_PARSER,
