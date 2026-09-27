@@ -79,6 +79,42 @@ export class TransactionConfirmationMessageService {
     ].join('\n');
   }
 
+  formatAlreadyProcessed(): string {
+    return [
+      'ℹ️ Transaksi ini sudah diproses.',
+      '',
+      'Tidak ada transaksi baru yang dibuat.',
+    ].join('\n');
+  }
+
+  formatProcessing(): string {
+    return [
+      '⏳ Transaksi sedang diproses.',
+      '',
+      'Silakan tunggu sebentar.',
+    ].join('\n');
+  }
+
+  formatTransactionCreated(transaction: {
+    id: string;
+    type: string;
+    amount: number;
+    description?: string | null;
+  }): string {
+    const type =
+      transaction.type === 'INCOME' ? '💰 Pemasukan' : '💸 Pengeluaran';
+
+    const amount = this.formatAmount(transaction.amount);
+
+    return [
+      '✅ Transaksi berhasil dibuat.',
+      '',
+      type,
+      `💵 ${amount}`,
+      `📝 ${transaction.description ?? '-'}`,
+    ].join('\n');
+  }
+
   private formatAmount(amount: number): string {
     const formatted = new Intl.NumberFormat('id-ID', {
       maximumFractionDigits: 0,

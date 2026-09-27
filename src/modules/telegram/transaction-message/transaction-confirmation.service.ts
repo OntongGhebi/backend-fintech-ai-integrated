@@ -1,18 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import {
-  PendingTransactionConfirmation,
-  TransactionConfirmationAction,
-} from './transaction-confirmation.types';
-import { ResolvedTransactionIntent } from './resolved-transaction-intent.types';
+import { randomUUID } from 'node:crypto';
 
-interface CreatedPendingConfirmationInput {
-  userId: string;
-  telegramAccountId: string;
-  telegramUserId: string;
-  chatId: string;
-  sourceMessageId: string;
-  intent: ResolvedTransactionIntent;
-}
+import {
+  CreateTransactionConfirmationInput,
+  PendingTransactionConfirmation,
+} from './transaction-confirmation.types';
+
+export type TransactionConfirmationAction = 'CONFIRM' | 'CANCEL' | 'UNKNOWN';
 
 @Injectable()
 export class TransactionConfirmationService {
@@ -21,37 +15,46 @@ export class TransactionConfirmationService {
     PendingTransactionConfirmation
   >();
 
-  private readonly confirmationTtlMs = 5 * 60 * 1000;
+  private readonly ttlMs = 5 * 60 * 1000;
 
   create(
-    input: CreatedPendingConfirmationInput,
+    input: CreateTransactionConfirmationInput,
   ): PendingTransactionConfirmation {
-    const id = crypto.randomUUID();
     const now = new Date();
+
     const confirmation: PendingTransactionConfirmation = {
-      id,
+      id: randomUUID(),
       userId: input.userId,
-      telegramAccountId: input.telegramAccountId,
-      telegramUserId: input.telegramUserId,
       chatId: input.chatId,
       sourceMessageId: input.sourceMessageId,
+      telegramAccountId: input.telegramAccountId,
+      telegramUserId: input.telegramUserId,
       intent: input.intent,
       status: 'PENDING',
       createdAt: now,
-      expiresAt: new Date(now.getTime() + this.confirmationTtlMs),
+      expiresAt: new Date(now.getTime() + this.ttlMs),
     };
 
-    this.confirmations.set(id, confirmation);
+    this.confirmations.set(confirmation.id, confirmation);
 
     return confirmation;
+  }
+
+  findById(confirmationId: string): PendingTransactionConfirmation | undefined {
+    return this.confirmations.get(confirmationId);
   }
 
   findPendingByChatId(
     chatId: string,
   ): PendingTransactionConfirmation | undefined {
-    const confirmation = Array.from(this.confirmations.values()).find(
-      (item) => item.chatId === chatId && item.status === 'PENDING',
-    );
+    const confirmations = Array.from(this.confirmations.values())
+      .filter(
+        (confirmation) =>
+          confirmation.chatId === chatId && confirmation.status === 'PENDING',
+      )
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    const confirmation = confirmations[0];
 
     if (!confirmation) {
       return undefined;
@@ -60,32 +63,44 @@ export class TransactionConfirmationService {
     if (confirmation.expiresAt.getTime() <= Date.now()) {
       confirmation.status = 'EXPIRED';
 
-      this.confirmations.set(confirmation.id, confirmation);
-
-      return undefined;
+      return confirmation;
     }
 
     return confirmation;
   }
 
-  parseAction(text: string): TransactionConfirmationAction {
-    const normalized = text.trim().toLowerCase();
+  findLatestByChatId(
+    chatId: string,
+  ): PendingTransactionConfirmation | undefined {
+    return Array.from(this.confirmations.values())
+      .filter((confirmation) => confirmation.chatId === chatId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+  }
+
+  parseAction(input: string | { text: string }): TransactionConfirmationAction {
+    const text = typeof input === 'string' ? input : input.text;
+
+    const normalized = text.trim().toUpperCase();
 
     if (
-      normalized === 'ya' ||
-      normalized === 'yaa' ||
-      normalized === 'yes' ||
-      normalized === 'y'
+      normalized === 'YA' ||
+      normalized === 'YES' ||
+      normalized === 'Y' ||
+      normalized === 'OK' ||
+      normalized === 'CONFIRM' ||
+      normalized === 'KONFIRMASI'
     ) {
       return 'CONFIRM';
     }
 
     if (
-      normalized === 'batal' ||
-      normalized === 'cancel' ||
-      normalized === 'no' ||
-      normalized === 'tidak' ||
-      normalized === 'n'
+      normalized === 'BATAL' ||
+      normalized === 'BATALKAN' ||
+      normalized === 'CANCEL' ||
+      normalized === 'CANCELLED' ||
+      normalized === 'N' ||
+      normalized === 'NO' ||
+      normalized === 'TIDAK'
     ) {
       return 'CANCEL';
     }
@@ -107,14 +122,44 @@ export class TransactionConfirmationService {
     if (confirmation.expiresAt.getTime() <= Date.now()) {
       confirmation.status = 'EXPIRED';
 
-      this.confirmations.set(confirmation.id, confirmation);
-
       return confirmation;
     }
 
     confirmation.status = 'CONFIRMED';
 
-    this.confirmations.set(confirmation.id, confirmation);
+    return confirmation;
+  }
+
+  markProcessing(
+    confirmationId: string,
+  ): PendingTransactionConfirmation | undefined {
+    const confirmation = this.confirmations.get(confirmationId);
+
+    if (!confirmation) {
+      return undefined;
+    }
+
+    if (confirmation.status !== 'CONFIRMED') {
+      return confirmation;
+    }
+
+    confirmation.status = 'PROCESSING';
+
+    return confirmation;
+  }
+
+  markCompleted(
+    confirmationId: string,
+    transactionId: string,
+  ): PendingTransactionConfirmation | undefined {
+    const confirmation = this.confirmations.get(confirmationId);
+
+    if (!confirmation) {
+      return undefined;
+    }
+
+    confirmation.status = 'COMPLETED';
+    confirmation.transactionId = transactionId;
 
     return confirmation;
   }
@@ -133,14 +178,10 @@ export class TransactionConfirmationService {
     if (confirmation.expiresAt.getTime() <= Date.now()) {
       confirmation.status = 'EXPIRED';
 
-      this.confirmations.set(confirmation.id, confirmation);
-
       return confirmation;
     }
 
     confirmation.status = 'CANCELLED';
-
-    this.confirmations.set(confirmation.id, confirmation);
 
     return confirmation;
   }
