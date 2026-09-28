@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TelegramProcessingStatus } from '../../../generated/prisma/enums';
+
 import {
   TelegramMessageDispatcherService,
   TelegramMessageDispatchContext,
@@ -45,7 +46,17 @@ export class TelegramMessageProcessingService {
       return;
     }
 
-    await this.telegramMessageRepository.markProcessing(input.messageId);
+    const claimed = await this.telegramMessageRepository.claimProcessing(
+      input.messageId,
+    );
+
+    if (!claimed) {
+      this.logger.debug(
+        `Skipping Telegram message because processing was already claimed: ${input.messageId}`,
+      );
+
+      return;
+    }
 
     const context: TelegramMessageDispatchContext = {
       userId: input.userId,

@@ -5,7 +5,8 @@ import {
   TelegramMessageDirection,
   TelegramProcessingStatus,
   TelegramMessageType,
-} from '../../../../generated/prisma/enums.js';
+} from '../../../../generated/prisma/enums';
+import { Prisma } from '../../../../generated/prisma/client';
 
 export interface CreateTelegramMessageData {
   telegramAccountId: string;
@@ -36,6 +37,33 @@ export class TelegramMessageRepository {
     });
   }
 
+  async findOrCreate(data: CreateTelegramMessageData) {
+    try {
+      return {
+        message: await this.create(data),
+        created: true,
+      };
+    } catch (error) {
+      if (!this.isTelegramMessageUniqueViolation(error)) {
+        throw error;
+      }
+
+      const existingMessage = await this.findByTelegramMessageId(
+        data.chatId,
+        data.telegramMessageId,
+      );
+
+      if (!existingMessage) {
+        throw error;
+      }
+
+      return {
+        message: existingMessage,
+        created: false,
+      };
+    }
+  }
+
   async findByTelegramMessageId(chatId: bigint, telegramMessageId: bigint) {
     return this.prisma.telegramMessage.findUnique({
       where: {
@@ -53,6 +81,20 @@ export class TelegramMessageRepository {
         id,
       },
     });
+  }
+
+  async claimProcessing(id: string): Promise<boolean> {
+    const result = await this.prisma.telegramMessage.updateMany({
+      where: {
+        id,
+        processingStatus: TelegramProcessingStatus.RECEIVED,
+      },
+      data: {
+        processingStatus: TelegramProcessingStatus.PROCESSING,
+      },
+    });
+
+    return result.count === 1;
   }
 
   async markProcessing(id: string) {
@@ -98,5 +140,12 @@ export class TelegramMessageRepository {
         processingStatus: TelegramProcessingStatus.IGNORED,
       },
     });
+  }
+
+  private isTelegramMessageUniqueViolation(error: unknown): boolean {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    );
   }
 }

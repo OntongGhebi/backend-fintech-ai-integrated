@@ -52,34 +52,9 @@ export class TelegramIncomingMessageService {
 
     const chatId = BigInt(message.chatId);
 
-    const existingMessage =
-      await this.telegramMessageRepository.findByTelegramMessageId(
-        chatId,
-        telegramMessageId,
-      );
-
-    if (existingMessage) {
-      this.logger.debug(
-        `Telegram message already persisted: chatId=${message.chatId}, messageId=${message.messageId}`,
-      );
-
-      return {
-        id: existingMessage.id,
-        telegramAccountId: telegramAccount.id,
-        userId: telegramAccount.userId,
-        telegramUserId: BigInt(message.telegramUserId),
-        chatId,
-        telegramMessageId,
-        messageType: existingMessage.messageType,
-        content: existingMessage.content ?? undefined,
-        processingStatus: existingMessage.processingStatus,
-        created: false,
-      };
-    }
-
     const messageType = this.resolveMessageType(message.text);
 
-    const createdMessage = await this.telegramMessageRepository.create({
+    const persisted = await this.telegramMessageRepository.findOrCreate({
       telegramAccountId: telegramAccount.id,
       telegramMessageId,
       chatId,
@@ -89,17 +64,23 @@ export class TelegramIncomingMessageService {
       processingStatus: TelegramProcessingStatus.RECEIVED,
     });
 
+    if (!persisted.created) {
+      this.logger.debug(
+        `Telegram message already persisted: chatId=${message.chatId}, messageId=${message.messageId}`,
+      );
+    }
+
     return {
-      id: createdMessage.id,
+      id: persisted.message.id,
       telegramAccountId: telegramAccount.id,
       userId: telegramAccount.userId,
       telegramUserId: BigInt(message.telegramUserId),
       chatId,
       telegramMessageId,
-      messageType: createdMessage.messageType,
-      content: createdMessage.content ?? undefined,
-      processingStatus: createdMessage.processingStatus,
-      created: true,
+      messageType: persisted.message.messageType,
+      content: persisted.message.content ?? undefined,
+      processingStatus: persisted.message.processingStatus,
+      created: persisted.created,
     };
   }
 

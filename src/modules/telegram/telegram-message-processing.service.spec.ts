@@ -10,7 +10,7 @@ describe('TelegramMessageProcessingService', () => {
 
   let telegramMessageRepository: {
     findById: jest.Mock;
-    markProcessing: jest.Mock;
+    claimProcessing: jest.Mock;
     markProcessed: jest.Mock;
     markFailed: jest.Mock;
   };
@@ -40,7 +40,7 @@ describe('TelegramMessageProcessingService', () => {
   beforeEach(() => {
     telegramMessageRepository = {
       findById: jest.fn(),
-      markProcessing: jest.fn(),
+      claimProcessing: jest.fn(),
       markProcessed: jest.fn(),
       markFailed: jest.fn(),
     };
@@ -64,7 +64,7 @@ describe('TelegramMessageProcessingService', () => {
 
     await service.process(createInput());
 
-    expect(telegramMessageRepository.markProcessing).not.toHaveBeenCalled();
+    expect(telegramMessageRepository.claimProcessing).not.toHaveBeenCalled();
 
     expect(telegramMessageDispatcherService.dispatch).not.toHaveBeenCalled();
 
@@ -74,27 +74,25 @@ describe('TelegramMessageProcessingService', () => {
   it('should skip messages that are not RECEIVED', async () => {
     telegramMessageRepository.findById.mockResolvedValue({
       id: createInput().messageId,
-
       processingStatus: TelegramProcessingStatus.PROCESSED,
     });
 
     await service.process(createInput());
 
-    expect(telegramMessageRepository.markProcessing).not.toHaveBeenCalled();
+    expect(telegramMessageRepository.claimProcessing).not.toHaveBeenCalled();
 
     expect(telegramMessageDispatcherService.dispatch).not.toHaveBeenCalled();
   });
 
-  it('should mark message as processing before dispatching', async () => {
+  it('should claim the message before dispatching', async () => {
     const input = createInput();
 
     telegramMessageRepository.findById.mockResolvedValue({
       id: input.messageId,
-
       processingStatus: TelegramProcessingStatus.RECEIVED,
     });
 
-    telegramMessageRepository.markProcessing.mockResolvedValue(undefined);
+    telegramMessageRepository.claimProcessing.mockResolvedValue(true);
 
     telegramMessageDispatcherService.dispatch.mockResolvedValue(undefined);
 
@@ -102,23 +100,17 @@ describe('TelegramMessageProcessingService', () => {
 
     await service.process(input);
 
-    expect(telegramMessageRepository.markProcessing).toHaveBeenCalledWith(
+    expect(telegramMessageRepository.claimProcessing).toHaveBeenCalledWith(
       input.messageId,
     );
 
     expect(telegramMessageDispatcherService.dispatch).toHaveBeenCalledWith({
       userId: input.userId,
-
       telegramAccountId: input.telegramAccountId,
-
       telegramUserId: input.telegramUserId,
-
       chatId: input.chatId,
-
       messageId: input.telegramMessageId,
-
       messageType: input.messageType,
-
       content: input.content,
     });
 
@@ -132,9 +124,10 @@ describe('TelegramMessageProcessingService', () => {
 
     telegramMessageRepository.findById.mockResolvedValue({
       id: input.messageId,
-
       processingStatus: TelegramProcessingStatus.RECEIVED,
     });
+
+    telegramMessageRepository.claimProcessing.mockResolvedValue(true);
 
     telegramMessageDispatcherService.dispatch.mockRejectedValue(
       new Error('Dispatch failed'),
@@ -142,7 +135,7 @@ describe('TelegramMessageProcessingService', () => {
 
     await expect(service.process(input)).rejects.toThrow('Dispatch failed');
 
-    expect(telegramMessageRepository.markProcessing).toHaveBeenCalledWith(
+    expect(telegramMessageRepository.claimProcessing).toHaveBeenCalledWith(
       input.messageId,
     );
 
@@ -153,14 +146,38 @@ describe('TelegramMessageProcessingService', () => {
     expect(telegramMessageRepository.markProcessed).not.toHaveBeenCalled();
   });
 
+  it('should skip when another worker already claimed the message', async () => {
+    const input = createInput();
+
+    telegramMessageRepository.findById.mockResolvedValue({
+      id: input.messageId,
+      processingStatus: TelegramProcessingStatus.RECEIVED,
+    });
+
+    telegramMessageRepository.claimProcessing.mockResolvedValue(false);
+
+    await service.process(input);
+
+    expect(telegramMessageRepository.claimProcessing).toHaveBeenCalledWith(
+      input.messageId,
+    );
+
+    expect(telegramMessageDispatcherService.dispatch).not.toHaveBeenCalled();
+
+    expect(telegramMessageRepository.markProcessed).not.toHaveBeenCalled();
+
+    expect(telegramMessageRepository.markFailed).not.toHaveBeenCalled();
+  });
+
   it('should preserve Telegram identifiers as bigint', async () => {
     const input = createInput();
 
     telegramMessageRepository.findById.mockResolvedValue({
       id: input.messageId,
-
       processingStatus: TelegramProcessingStatus.RECEIVED,
     });
+
+    telegramMessageRepository.claimProcessing.mockResolvedValue(true);
 
     telegramMessageDispatcherService.dispatch.mockResolvedValue(undefined);
 
@@ -183,9 +200,10 @@ describe('TelegramMessageProcessingService', () => {
 
     telegramMessageRepository.findById.mockResolvedValue({
       id: input.messageId,
-
       processingStatus: TelegramProcessingStatus.RECEIVED,
     });
+
+    telegramMessageRepository.claimProcessing.mockResolvedValue(true);
 
     telegramMessageDispatcherService.dispatch.mockRejectedValue(
       new Error('Dispatch failed'),

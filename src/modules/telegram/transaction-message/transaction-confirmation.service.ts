@@ -20,6 +20,15 @@ export class TransactionConfirmationService {
   create(
     input: CreateTransactionConfirmationInput,
   ): PendingTransactionConfirmation {
+    const existing = this.findBySourceMessageId(
+      input.chatId,
+      input.sourceMessageId,
+    );
+
+    if (existing) {
+      return existing;
+    }
+
     const now = new Date();
 
     const confirmation: PendingTransactionConfirmation = {
@@ -42,6 +51,19 @@ export class TransactionConfirmationService {
 
   findById(confirmationId: string): PendingTransactionConfirmation | undefined {
     return this.confirmations.get(confirmationId);
+  }
+
+  findBySourceMessageId(
+    chatId: string,
+    sourceMessageId: string,
+  ): PendingTransactionConfirmation | undefined {
+    return Array.from(this.confirmations.values())
+      .filter(
+        (confirmation) =>
+          confirmation.chatId === chatId &&
+          confirmation.sourceMessageId === sourceMessageId,
+      )
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
   }
 
   findPendingByChatId(
@@ -156,6 +178,10 @@ export class TransactionConfirmationService {
 
     if (!confirmation) {
       return undefined;
+    }
+
+    if (confirmation.status === 'COMPLETED') {
+      return confirmation;
     }
 
     confirmation.status = 'COMPLETED';
