@@ -3,12 +3,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TelegramMessageDispatchContext } from '../telegram-message-dispatcher.service';
 import { TelegramService } from '../telegram.service';
 
-import { TelegramTransactionFlowService } from './telegram-transaction-flow.service';
-import { TransactionIntentResolutionService } from './transaction-intent-resolution.service';
-import { TransactionConfirmationService } from './transaction-confirmation.service';
 import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
-import { TelegramTransactionConfirmationService } from './telegram-transaction-confirmation.service';
+import { TransactionConfirmationService } from './transaction-confirmation.service';
+import { TransactionIntentResolutionService } from './transaction-intent-resolution.service';
 import { TransactionMessagePipelineService } from './transaction-message-pipeline.service';
+import { TelegramTransactionConfirmationService } from './telegram-transaction-confirmation.service';
+import { TelegramTransactionFlowErrorService } from '../services/transaction/telegram-transaction-flow-error.service';
+import { TelegramTransactionFlowService } from './telegram-transaction-flow.service';
 
 describe('TelegramTransactionFlowService', () => {
   let service: TelegramTransactionFlowService;
@@ -35,6 +36,10 @@ describe('TelegramTransactionFlowService', () => {
 
   const telegramService = {
     sendMessage: jest.fn(),
+  };
+
+  const flowErrorService = {
+    handle: jest.fn(),
   };
 
   const context: TelegramMessageDispatchContext = {
@@ -77,6 +82,10 @@ describe('TelegramTransactionFlowService', () => {
           provide: TelegramService,
           useValue: telegramService,
         },
+        {
+          provide: TelegramTransactionFlowErrorService,
+          useValue: flowErrorService,
+        },
       ],
     }).compile();
 
@@ -87,6 +96,15 @@ describe('TelegramTransactionFlowService', () => {
     telegramService.sendMessage.mockResolvedValue({
       messageId: BigInt(200),
     });
+
+    flowErrorService.handle.mockReturnValue(
+      [
+        '⚠️ Transaksi belum dapat diproses.',
+        '',
+        'Terjadi kesalahan saat memproses transaksi Anda.',
+        'Silakan coba lagi.',
+      ].join('\n'),
+    );
   });
 
   it('should process a confirmation reply before parsing a new transaction', async () => {
@@ -355,5 +373,172 @@ describe('TelegramTransactionFlowService', () => {
     expect(confirmationService.create).not.toHaveBeenCalled();
 
     expect(telegramService.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('should handle unexpected pipeline errors safely', async () => {
+    transactionConfirmationService.handle.mockResolvedValue({
+      handled: false,
+      action: 'NONE',
+      status: 'NONE',
+      message: 'NO_PENDING',
+    });
+
+    const error = new Error('database connection failed');
+
+    pipelineService.process.mockRejectedValue(error);
+
+    await service.handle(context);
+
+    expect(flowErrorService.handle).toHaveBeenCalledWith(error);
+
+    expect(telegramService.sendMessage).toHaveBeenCalledWith({
+      chatId: '654321',
+      text: [
+        '⚠️ Transaksi belum dapat diproses.',
+        '',
+        'Terjadi kesalahan saat memproses transaksi Anda.',
+        'Silakan coba lagi.',
+      ].join('\n'),
+    });
+  });
+
+  it('should handle unexpected resolution errors safely', async () => {
+    transactionConfirmationService.handle.mockResolvedValue({
+      handled: false,
+      action: 'NONE',
+      status: 'NONE',
+      message: 'NO_PENDING',
+    });
+
+    pipelineService.process.mockResolvedValue({
+      status: 'PARSED',
+      rawText: 'beli makan 25000 dari BCA',
+      intent: {
+        intent: 'CREATE_TRANSACTION',
+        transactionType: 'EXPENSE',
+        amount: 25000,
+        description: 'beli makan dari BCA',
+        accountHint: 'BCA',
+        source: 'DETERMINISTIC',
+        confidence: 1,
+      },
+    });
+
+    const error = new Error('category repository unavailable');
+
+    resolutionService.resolve.mockRejectedValue(error);
+
+    await service.handle(context);
+
+    expect(flowErrorService.handle).toHaveBeenCalledWith(error);
+
+    expect(telegramService.sendMessage).toHaveBeenCalledWith({
+      chatId: '654321',
+      text: expect.stringContaining('Transaksi belum dapat diproses'),
+    });
+  });
+
+  it('should handle unexpected confirmation creation errors safely', async () => {
+    transactionConfirmationService.handle.mockResolvedValue({
+      handled: false,
+      action: 'NONE',
+      status: 'NONE',
+      message: 'NO_PENDING',
+    });
+
+    pipelineService.process.mockResolvedValue({
+      status: 'PARSED',
+      rawText: 'beli makan 25000 dari BCA',
+      intent: {
+        intent: 'CREATE_TRANSACTION',
+        transactionType: 'EXPENSE',
+        amount: 25000,
+        description: 'beli makan dari BCA',
+        accountHint: 'BCA',
+        source: 'DETERMINISTIC',
+        confidence: 1,
+      },
+    });
+
+    resolutionService.resolve.mockResolvedValue({
+      status: 'RESOLVED',
+      intent: {
+        intent: 'CREATE_TRANSACTION',
+        transactionType: 'EXPENSE',
+        amount: 25000,
+        description: 'beli makan dari BCA',
+        accountId: 'account-id',
+        source: 'DETERMINISTIC',
+        confidence: 1,
+        originalIntent: {
+          intent: 'CREATE_TRANSACTION',
+          transactionType: 'EXPENSE',
+          amount: 25000,
+          description: 'beli makan dari BCA',
+          accountHint: 'BCA',
+          source: 'DETERMINISTIC',
+          confidence: 1,
+        },
+      },
+    });
+
+    const error = new Error('confirmation storage failed');
+
+    confirmationService.create.mockImplementation(() => {
+      throw error;
+    });
+
+    await service.handle(context);
+
+    expect(flowErrorService.handle).toHaveBeenCalledWith(error);
+
+    expect(telegramService.sendMessage).toHaveBeenCalledWith({
+      chatId: '654321',
+      text: expect.stringContaining('Transaksi belum dapat diproses'),
+    });
+  });
+
+  it('should not expose internal error details to the user', async () => {
+    transactionConfirmationService.handle.mockResolvedValue({
+      handled: false,
+      action: 'NONE',
+      status: 'NONE',
+      message: 'NO_PENDING',
+    });
+
+    const error = new Error('PrismaClientKnownRequestError: password=secret');
+
+    pipelineService.process.mockRejectedValue(error);
+
+    await service.handle(context);
+
+    const [sentMessage] = telegramService.sendMessage.mock.calls[0];
+
+    expect(sentMessage.text).not.toContain('PrismaClient');
+
+    expect(sentMessage.text).not.toContain('password');
+
+    expect(sentMessage.text).not.toContain('secret');
+  });
+
+  it('should not throw when sending the fallback error response fails', async () => {
+    transactionConfirmationService.handle.mockResolvedValue({
+      handled: false,
+      action: 'NONE',
+      status: 'NONE',
+      message: 'NO_PENDING',
+    });
+
+    const processingError = new Error('pipeline failed');
+
+    const sendError = new Error('telegram unavailable');
+
+    pipelineService.process.mockRejectedValue(processingError);
+
+    telegramService.sendMessage.mockRejectedValueOnce(sendError);
+
+    await expect(service.handle(context)).resolves.toBeUndefined();
+
+    expect(flowErrorService.handle).toHaveBeenCalledWith(processingError);
   });
 });

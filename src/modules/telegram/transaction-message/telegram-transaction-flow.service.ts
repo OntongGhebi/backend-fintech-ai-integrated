@@ -9,6 +9,7 @@ import { TransactionIntentResolutionService } from './transaction-intent-resolut
 import { TransactionMessagePipelineService } from './transaction-message-pipeline.service';
 import { TelegramTransactionConfirmationService } from './telegram-transaction-confirmation.service';
 import { ResolvedTransactionIntent } from './resolved-transaction-intent.types';
+import { TelegramTransactionFlowErrorService } from '../services/transaction/telegram-transaction-flow-error.service';
 
 @Injectable()
 export class TelegramTransactionFlowService {
@@ -21,9 +22,20 @@ export class TelegramTransactionFlowService {
     private readonly transactionConfirmationMessageService: TransactionConfirmationMessageService,
     private readonly telegramTransactionConfirmationService: TelegramTransactionConfirmationService,
     private readonly telegramService: TelegramService,
+    private readonly telegramTransactionFlowErrorService: TelegramTransactionFlowErrorService,
   ) {}
 
   async handle(context: TelegramMessageDispatchContext): Promise<void> {
+    try {
+      await this.handleInternal(context);
+    } catch (error) {
+      await this.handleUnexpectedError(context, error);
+    }
+  }
+
+  private async handleInternal(
+    context: TelegramMessageDispatchContext,
+  ): Promise<void> {
     const confirmationResult =
       await this.telegramTransactionConfirmationService.handle({
         userId: context.userId,
@@ -143,6 +155,25 @@ export class TelegramTransactionFlowService {
       this.transactionConfirmationMessageService.format(confirmation);
 
     await this.sendMessage(context.chatId, message);
+  }
+
+  private async handleUnexpectedError(
+    context: TelegramMessageDispatchContext,
+    error: unknown,
+  ): Promise<void> {
+    const message = this.telegramTransactionFlowErrorService.handle(error);
+
+    try {
+      await this.telegramService.sendMessage({
+        chatId: context.chatId.toString(),
+        text: message,
+      });
+    } catch (sendError) {
+      this.logger.error(
+        `Failed to send Telegram flow error response to chat=${context.chatId.toString()}`,
+        sendError instanceof Error ? sendError.stack : String(sendError),
+      );
+    }
   }
 
   private async sendMessage(chatId: bigint, text: string): Promise<void> {
