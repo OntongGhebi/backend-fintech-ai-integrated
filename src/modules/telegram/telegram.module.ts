@@ -36,6 +36,7 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { ConfirmedTransactionService } from './transaction-message/confirmed-transaction.service';
 import { TelegramTransactionConfirmationService } from './transaction-message/telegram-transaction-confirmation.service';
 import { TelegramTransactionFlowService } from './transaction-message/telegram-transaction-flow.service';
+import { TelegramTransactionErrorService } from './services/transaction/telegram-transaction-error.service';
 
 @Module({
   imports: [ConfigModule, AccountsModule, CategoriesModule, TransactionsModule],
@@ -72,6 +73,7 @@ import { TelegramTransactionFlowService } from './transaction-message/telegram-t
     ConfirmedTransactionService,
     TelegramTransactionConfirmationService,
     TelegramTransactionFlowService,
+    TelegramTransactionErrorService,
 
     {
       provide: TELEGRAM_TRANSACTION_MESSAGE_PARSER,

@@ -8,6 +8,7 @@ import {
 import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
 import { TransactionConfirmationService } from './transaction-confirmation.service';
 import { PendingTransactionConfirmation } from './transaction-confirmation.types';
+import { TelegramTransactionErrorService } from '../services/transaction/telegram-transaction-error.service';
 
 describe('TelegramTransactionConfirmationService', () => {
   let service: TelegramTransactionConfirmationService;
@@ -89,6 +90,10 @@ describe('TelegramTransactionConfirmationService', () => {
     ...overrides,
   });
 
+  const errorService = {
+    handle: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -106,6 +111,10 @@ describe('TelegramTransactionConfirmationService', () => {
         {
           provide: ConfirmedTransactionService,
           useValue: confirmedTransactionService,
+        },
+        {
+          provide: TelegramTransactionErrorService,
+          useValue: errorService,
         },
       ],
     }).compile();
@@ -361,5 +370,102 @@ describe('TelegramTransactionConfirmationService', () => {
     expect(result.status).toBe('COMPLETED');
     expect(result.transactionId).toBe('transaction-id');
     expect(result.message).toBe('ALREADY_PROCESSED');
+  });
+
+  it('should keep confirmation in processing state when transaction creation fails', async () => {
+    const confirmation = createConfirmation();
+
+    transactionConfirmationService.findLatestByChatId.mockReturnValue(
+      confirmation,
+    );
+
+    transactionConfirmationService.parseAction.mockReturnValue('CONFIRM');
+
+    transactionConfirmationService.confirm.mockReturnValue({
+      ...confirmation,
+      status: 'CONFIRMED',
+    });
+
+    transactionConfirmationService.markProcessing.mockReturnValue({
+      ...confirmation,
+      status: 'PROCESSING',
+    });
+
+    confirmedTransactionService.create.mockRejectedValue(
+      new Error('database failure'),
+    );
+
+    errorService.handle.mockReturnValue(
+      'Transaksi gagal dibuat. Silakan coba lagi.',
+    );
+
+    const result = await service.handle(
+      createContext({
+        text: 'YA',
+      }),
+    );
+
+    expect(result).toEqual({
+      handled: true,
+      action: 'CONFIRM',
+      status: 'PROCESSING',
+      message: 'Transaksi gagal dibuat. Silakan coba lagi.',
+    });
+
+    expect(confirmedTransactionService.create).toHaveBeenCalledTimes(1);
+
+    expect(transactionConfirmationService.markProcessing).toHaveBeenCalledWith(
+      'confirmation-id',
+    );
+
+    expect(transactionConfirmationService.markCompleted).not.toHaveBeenCalled();
+
+    expect(errorService.handle).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('should return mapped domain error message', async () => {
+    const confirmation = createConfirmation();
+
+    transactionConfirmationService.findLatestByChatId.mockReturnValue(
+      confirmation,
+    );
+
+    transactionConfirmationService.parseAction.mockReturnValue('CONFIRM');
+
+    transactionConfirmationService.confirm.mockReturnValue({
+      ...confirmation,
+      status: 'CONFIRMED',
+    });
+
+    transactionConfirmationService.markProcessing.mockReturnValue({
+      ...confirmation,
+      status: 'PROCESSING',
+    });
+
+    confirmedTransactionService.create.mockRejectedValue(
+      new Error('unexpected database error'),
+    );
+
+    errorService.handle.mockReturnValue(
+      'Akun keuangan yang dipilih sedang tidak aktif. Silakan gunakan akun lain.',
+    );
+
+    const result = await service.handle(
+      createContext({
+        text: 'YA',
+      }),
+    );
+
+    expect(result.handled).toBe(true);
+    expect(result.action).toBe('CONFIRM');
+    expect(result.status).toBe('PROCESSING');
+
+    expect(result.message).toBe(
+      'Akun keuangan yang dipilih sedang tidak aktif. Silakan gunakan akun lain.',
+    );
+
+    expect(transactionConfirmationService.markCompleted).not.toHaveBeenCalled();
+
+    expect(errorService.handle).toHaveBeenCalledWith(expect.any(Error));
   });
 });

@@ -4,6 +4,7 @@ import { ConfirmedTransactionService } from './confirmed-transaction.service';
 import { PendingTransactionConfirmation } from './transaction-confirmation.types';
 import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
 import { TransactionConfirmationService } from './transaction-confirmation.service';
+import { TelegramTransactionErrorService } from '../services/transaction/telegram-transaction-error.service';
 
 export interface TelegramTransactionConfirmationContext {
   userId: string;
@@ -37,6 +38,7 @@ export class TelegramTransactionConfirmationService {
     private readonly transactionConfirmationService: TransactionConfirmationService,
     private readonly transactionConfirmationMessageService: TransactionConfirmationMessageService,
     private readonly confirmedTransactionService: ConfirmedTransactionService,
+    private readonly telegramTransactionErrorService: TelegramTransactionErrorService,
   ) {}
 
   async handle(
@@ -201,27 +203,36 @@ export class TelegramTransactionConfirmationService {
       return this.noPendingResult();
     }
 
-    const transaction =
-      await this.confirmedTransactionService.create(processing);
+    try {
+      const transaction =
+        await this.confirmedTransactionService.create(processing);
 
-    this.transactionConfirmationService.markCompleted(
-      processing.id,
-      transaction.id,
-    );
+      this.transactionConfirmationService.markCompleted(
+        processing.id,
+        transaction.id,
+      );
 
-    return {
-      handled: true,
-      action: 'CONFIRM',
-      status: 'COMPLETED',
-      message:
-        this.transactionConfirmationMessageService.formatTransactionCreated({
-          id: transaction.id,
-          type: transaction.type,
-          amount: Number(transaction.amount),
-          description: transaction.description,
-        }),
-      transactionId: transaction.id,
-    };
+      return {
+        handled: true,
+        action: 'CONFIRM',
+        status: 'COMPLETED',
+        message:
+          this.transactionConfirmationMessageService.formatTransactionCreated({
+            id: transaction.id,
+            type: transaction.type,
+            amount: Number(transaction.amount),
+            description: transaction.description,
+          }),
+        transactionId: transaction.id,
+      };
+    } catch (error) {
+      return {
+        handled: true,
+        action: 'CONFIRM',
+        status: 'PROCESSING',
+        message: this.telegramTransactionErrorService.handle(error),
+      };
+    }
   }
 
   private noPendingResult(): TelegramTransactionConfirmationResult {
