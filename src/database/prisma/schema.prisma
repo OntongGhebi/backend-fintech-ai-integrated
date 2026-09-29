@@ -727,6 +727,7 @@ model TelegramMessage {
   @@index([telegramAccountId])
   @@index([telegramAccountId, createdAt])
   @@index([processingStatus])
+  @@index([processingStatus, processingStartedAt])
   @@map("telegram_messages")
 }
 

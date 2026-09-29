@@ -150,6 +150,23 @@ export class TelegramMessageRepository {
     });
   }
 
+  async recoverStaleProcessing(staleBefore: Date): Promise<number> {
+    const result = await this.prisma.telegramMessage.updateMany({
+      where: {
+        processingStatus: TelegramProcessingStatus.PROCESSING,
+        processingStartedAt: {
+          lt: staleBefore,
+        },
+      },
+      data: {
+        processingStatus: TelegramProcessingStatus.RECEIVED,
+        processingStartedAt: null,
+      },
+    });
+
+    return result.count;
+  }
+
   private isTelegramMessageUniqueViolation(error: unknown): boolean {
     return (
       error instanceof Prisma.PrismaClientKnownRequestError &&
