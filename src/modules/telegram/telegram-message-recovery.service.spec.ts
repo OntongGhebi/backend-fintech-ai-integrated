@@ -21,8 +21,11 @@ describe('TelegramMessageRecoveryService', () => {
     expect(service).toBeDefined();
   });
 
-  it('should recover stale messages using the default lease timeout', async () => {
-    telegramMessageRepository.recoverStaleProcessing.mockResolvedValue(2);
+  it('should use the default lease timeout and maximum attempts', async () => {
+    telegramMessageRepository.recoverStaleProcessing.mockResolvedValue({
+      recovered: 2,
+      failed: 0,
+    });
 
     const before = Date.now();
 
@@ -30,30 +33,34 @@ describe('TelegramMessageRecoveryService', () => {
 
     const after = Date.now();
 
-    expect(result).toBe(2);
+    expect(result).toEqual({
+      recovered: 2,
+      failed: 0,
+    });
 
     expect(
       telegramMessageRepository.recoverStaleProcessing,
     ).toHaveBeenCalledTimes(1);
 
-    const staleBefore =
-      telegramMessageRepository.recoverStaleProcessing.mock.calls[0][0];
+    const [staleBefore, maxAttempts] =
+      telegramMessageRepository.recoverStaleProcessing.mock.calls[0];
 
     expect(staleBefore).toBeInstanceOf(Date);
 
+    expect(maxAttempts).toBe(3);
+
     const staleBeforeTimestamp = staleBefore.getTime();
 
-    const expectedMinimum = before - 5 * 60 * 1000;
+    expect(staleBeforeTimestamp).toBeGreaterThanOrEqual(before - 5 * 60 * 1000);
 
-    const expectedMaximum = after - 5 * 60 * 1000;
-
-    expect(staleBeforeTimestamp).toBeGreaterThanOrEqual(expectedMinimum);
-
-    expect(staleBeforeTimestamp).toBeLessThanOrEqual(expectedMaximum);
+    expect(staleBeforeTimestamp).toBeLessThanOrEqual(after - 5 * 60 * 1000);
   });
 
   it('should use a custom lease timeout', async () => {
-    telegramMessageRepository.recoverStaleProcessing.mockResolvedValue(1);
+    telegramMessageRepository.recoverStaleProcessing.mockResolvedValue({
+      recovered: 1,
+      failed: 0,
+    });
 
     const before = Date.now();
 
@@ -63,8 +70,10 @@ describe('TelegramMessageRecoveryService', () => {
 
     const after = Date.now();
 
-    const staleBefore =
-      telegramMessageRepository.recoverStaleProcessing.mock.calls[0][0];
+    const [staleBefore, maxAttempts] =
+      telegramMessageRepository.recoverStaleProcessing.mock.calls[0];
+
+    expect(maxAttempts).toBe(3);
 
     const staleBeforeTimestamp = staleBefore.getTime();
 
@@ -73,15 +82,35 @@ describe('TelegramMessageRecoveryService', () => {
     expect(staleBeforeTimestamp).toBeLessThanOrEqual(after - 60_000);
   });
 
-  it('should return zero when no stale messages are found', async () => {
-    telegramMessageRepository.recoverStaleProcessing.mockResolvedValue(0);
+  it('should report recovered and failed messages', async () => {
+    telegramMessageRepository.recoverStaleProcessing.mockResolvedValue({
+      recovered: 4,
+      failed: 2,
+    });
 
     const result = await service.recover();
 
-    expect(result).toBe(0);
+    expect(result).toEqual({
+      recovered: 4,
+      failed: 2,
+    });
   });
 
-  it('should reject a non-positive lease timeout', async () => {
+  it('should return zero counts when no stale messages exist', async () => {
+    telegramMessageRepository.recoverStaleProcessing.mockResolvedValue({
+      recovered: 0,
+      failed: 0,
+    });
+
+    const result = await service.recover();
+
+    expect(result).toEqual({
+      recovered: 0,
+      failed: 0,
+    });
+  });
+
+  it('should reject a zero lease timeout', async () => {
     await expect(
       service.recover({
         leaseTimeoutMs: 0,
@@ -109,6 +138,18 @@ describe('TelegramMessageRecoveryService', () => {
     await expect(
       service.recover({
         leaseTimeoutMs: Infinity,
+      }),
+    ).rejects.toThrow('leaseTimeoutMs must be a positive finite number');
+
+    expect(
+      telegramMessageRepository.recoverStaleProcessing,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('should reject NaN as a lease timeout', async () => {
+    await expect(
+      service.recover({
+        leaseTimeoutMs: NaN,
       }),
     ).rejects.toThrow('leaseTimeoutMs must be a positive finite number');
 

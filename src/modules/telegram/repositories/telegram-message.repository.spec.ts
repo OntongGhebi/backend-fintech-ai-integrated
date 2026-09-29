@@ -73,22 +73,32 @@ describe('TelegramMessageRepository', () => {
     expect(result).toBe(false);
   });
 
-  it('should recover stale PROCESSING messages', async () => {
-    prisma.telegramMessage.updateMany.mockResolvedValue({
-      count: 3,
-    });
+  it('should recover stale messages below the maximum attempt limit', async () => {
+    prisma.telegramMessage.updateMany
+      .mockResolvedValueOnce({
+        count: 2,
+      })
+      .mockResolvedValueOnce({
+        count: 0,
+      });
 
     const staleBefore = new Date('2026-09-29T08:00:00.000Z');
 
-    const result = await repository.recoverStaleProcessing(staleBefore);
+    const result = await repository.recoverStaleProcessing(staleBefore, 3);
 
-    expect(result).toBe(3);
+    expect(result).toEqual({
+      recovered: 2,
+      failed: 0,
+    });
 
-    expect(prisma.telegramMessage.updateMany).toHaveBeenCalledWith({
+    expect(prisma.telegramMessage.updateMany).toHaveBeenNthCalledWith(1, {
       where: {
         processingStatus: TelegramProcessingStatus.PROCESSING,
         processingStartedAt: {
           lt: staleBefore,
+        },
+        processingAttempts: {
+          lt: 3,
         },
       },
       data: {
@@ -96,18 +106,77 @@ describe('TelegramMessageRepository', () => {
         processingStartedAt: null,
       },
     });
+
+    expect(prisma.telegramMessage.updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        processingStatus: TelegramProcessingStatus.PROCESSING,
+        processingStartedAt: {
+          lt: staleBefore,
+        },
+        processingAttempts: {
+          gte: 3,
+        },
+      },
+      data: {
+        processingStatus: TelegramProcessingStatus.FAILED,
+        processingStartedAt: null,
+      },
+    });
   });
 
-  it('should return zero when no stale message exists', async () => {
-    prisma.telegramMessage.updateMany.mockResolvedValue({
-      count: 0,
-    });
+  it('should mark stale messages at the maximum attempt limit as FAILED', async () => {
+    prisma.telegramMessage.updateMany
+      .mockResolvedValueOnce({
+        count: 0,
+      })
+      .mockResolvedValueOnce({
+        count: 3,
+      });
 
     const staleBefore = new Date('2026-09-29T08:00:00.000Z');
 
-    const result = await repository.recoverStaleProcessing(staleBefore);
+    const result = await repository.recoverStaleProcessing(staleBefore, 3);
 
-    expect(result).toBe(0);
+    expect(result).toEqual({
+      recovered: 0,
+      failed: 3,
+    });
+
+    expect(prisma.telegramMessage.updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('should recover and fail stale messages in the same recovery pass', async () => {
+    prisma.telegramMessage.updateMany
+      .mockResolvedValueOnce({
+        count: 4,
+      })
+      .mockResolvedValueOnce({
+        count: 2,
+      });
+
+    const result = await repository.recoverStaleProcessing(new Date(), 3);
+
+    expect(result).toEqual({
+      recovered: 4,
+      failed: 2,
+    });
+  });
+
+  it('should return zero when no stale messages exist', async () => {
+    prisma.telegramMessage.updateMany
+      .mockResolvedValueOnce({
+        count: 0,
+      })
+      .mockResolvedValueOnce({
+        count: 0,
+      });
+
+    const result = await repository.recoverStaleProcessing(new Date(), 3);
+
+    expect(result).toEqual({
+      recovered: 0,
+      failed: 0,
+    });
   });
 
   it('should clear processing lease when marking message as processed', async () => {

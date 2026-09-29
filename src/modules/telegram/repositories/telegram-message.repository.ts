@@ -18,6 +18,11 @@ export interface CreateTelegramMessageData {
   processingStatus?: TelegramProcessingStatus;
 }
 
+export interface RecoverStaleProcessingResult {
+  recovered: number;
+  failed: number;
+}
+
 @Injectable()
 export class TelegramMessageRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -150,12 +155,18 @@ export class TelegramMessageRepository {
     });
   }
 
-  async recoverStaleProcessing(staleBefore: Date): Promise<number> {
-    const result = await this.prisma.telegramMessage.updateMany({
+  async recoverStaleProcessing(
+    staleBefore: Date,
+    maxProcessingAttempts: number,
+  ): Promise<RecoverStaleProcessingResult> {
+    const recoverResult = await this.prisma.telegramMessage.updateMany({
       where: {
         processingStatus: TelegramProcessingStatus.PROCESSING,
         processingStartedAt: {
           lt: staleBefore,
+        },
+        processingAttempts: {
+          lt: maxProcessingAttempts,
         },
       },
       data: {
@@ -164,7 +175,26 @@ export class TelegramMessageRepository {
       },
     });
 
-    return result.count;
+    const failedResult = await this.prisma.telegramMessage.updateMany({
+      where: {
+        processingStatus: TelegramProcessingStatus.PROCESSING,
+        processingStartedAt: {
+          lt: staleBefore,
+        },
+        processingAttempts: {
+          gte: maxProcessingAttempts,
+        },
+      },
+      data: {
+        processingStatus: TelegramProcessingStatus.FAILED,
+        processingStartedAt: null,
+      },
+    });
+
+    return {
+      recovered: recoverResult.count,
+      failed: failedResult.count,
+    };
   }
 
   private isTelegramMessageUniqueViolation(error: unknown): boolean {
