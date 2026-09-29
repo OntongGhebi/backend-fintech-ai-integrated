@@ -91,6 +91,10 @@ export class TelegramMessageRepository {
       },
       data: {
         processingStatus: TelegramProcessingStatus.PROCESSING,
+        processingStartedAt: new Date(),
+        processingAttempts: {
+          increment: 1,
+        },
       },
     });
 
@@ -104,6 +108,7 @@ export class TelegramMessageRepository {
       },
       data: {
         processingStatus: TelegramProcessingStatus.PROCESSING,
+        processingStartedAt: new Date(),
       },
     });
   }
@@ -115,6 +120,7 @@ export class TelegramMessageRepository {
       },
       data: {
         processingStatus: TelegramProcessingStatus.PROCESSED,
+        processingStartedAt: null,
         processedAt: new Date(),
       },
     });
@@ -127,6 +133,7 @@ export class TelegramMessageRepository {
       },
       data: {
         processingStatus: TelegramProcessingStatus.FAILED,
+        processingStartedAt: null,
       },
     });
   }
@@ -138,6 +145,7 @@ export class TelegramMessageRepository {
       },
       data: {
         processingStatus: TelegramProcessingStatus.IGNORED,
+        processingStartedAt: null,
       },
     });
   }

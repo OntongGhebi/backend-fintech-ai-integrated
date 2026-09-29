@@ -714,7 +714,9 @@ model TelegramMessage {
   direction        TelegramMessageDirection
   processingStatus TelegramProcessingStatus @default(RECEIVED)
 
-  processedAt DateTime? @db.Timestamptz(6)
+  processingStartedAt DateTime? @db.Timestamptz(6)
+  processingAttempts  Int       @default(0)
+  processedAt         DateTime? @db.Timestamptz(6)
 
   createdAt DateTime @default(now()) @db.Timestamptz(6)
 
