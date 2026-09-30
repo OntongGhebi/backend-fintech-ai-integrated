@@ -64,6 +64,30 @@ class EnvironmentVariables {
   @IsOptional()
   @IsNumberString()
   REDIS_DB?: string;
+
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  AI_ENABLED?: string;
+
+  @IsOptional()
+  @IsString()
+  AI_PROVIDER?: string;
+
+  @IsOptional()
+  @IsString()
+  AI_API_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  AI_BASE_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  AI_MODEL?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  AI_TIMEOUT_MS?: string;
 }
 
 export function validateEnvironment(

@@ -30,6 +30,7 @@ import { BudgetAlertsModule } from './modules/budget-alerts/budget-alerts.module
 import { RecurringTransactionsModule } from './modules/recurring-transactions/recurring-transactions.module';
 import { telegramConfig } from './config/telegram.config';
 import { telegramModule } from './modules/telegram/telegram.module';
+import { AiModule } from './modules/ai/ai.module';
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { telegramModule } from './modules/telegram/telegram.module';
     BudgetAlertsModule,
     RecurringTransactionsModule,
     telegramModule,
+    AiModule,
   ],
   providers: [
     {
