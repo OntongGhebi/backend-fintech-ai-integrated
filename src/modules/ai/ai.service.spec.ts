@@ -3,11 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AI_PROVIDER } from './ai.constants';
-import { AIService } from './ai.service';
-import { AIProvider } from './ai-provider.interface';
+import { AiService } from './ai.service';
+import { AIProvider } from './providers/ai-provider.interface';
 
-describe('AIService', () => {
-  let service: AIService;
+describe('AiService', () => {
+  let service: AiService;
 
   const configServiceMock = {
     get: jest.fn(),
@@ -23,7 +23,7 @@ describe('AIService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        AIService,
+        AiService,
         {
           provide: ConfigService,
           useValue: configServiceMock,
@@ -35,7 +35,7 @@ describe('AIService', () => {
       ],
     }).compile();
 
-    service = module.get<AIService>(AIService);
+    service = module.get<AiService>(AiService);
   });
 
   describe('isEnabled', () => {
@@ -59,7 +59,7 @@ describe('AIService', () => {
   describe('getProviderMetadata', () => {
     it('should return provider metadata', () => {
       const metadata = {
-        provider: 'test-provider',
+        provider: 'openai-compatible',
         model: 'test-model',
       };
 
@@ -96,7 +96,7 @@ describe('AIService', () => {
 
       const response = {
         content: 'test response',
-        provider: 'test-provider',
+        provider: 'openai-compatible',
         model: 'test-model',
         usage: {
           inputTokens: 10,
