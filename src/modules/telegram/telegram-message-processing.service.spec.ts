@@ -1,4 +1,5 @@
 import {
+  TelegramMessageDirection,
   TelegramMessageType,
   TelegramProcessingStatus,
 } from '../../../generated/prisma/enums.js';
@@ -119,6 +120,33 @@ describe('TelegramMessageProcessingService', () => {
     );
   });
 
+  it('should skip a message that has already been processed', async () => {
+    const message = {
+      id: 'message-id',
+      telegramAccountId: 'telegram-account-id',
+      telegramMessageId: 123n,
+      chatId: 456n,
+      messageType: TelegramMessageType.TEXT,
+      content: 'makan 25000',
+      direction: TelegramMessageDirection.INBOUND,
+      processingStatus: TelegramProcessingStatus.PROCESSED,
+      processingStartedAt: null,
+      processingAttempts: 1,
+      processedAt: new Date(),
+      createdAt: new Date(),
+    };
+
+    telegramMessageRepository.findById.mockResolvedValue(message);
+
+    await service.process('message-id');
+
+    expect(telegramMessageRepository.claimProcessing).not.toHaveBeenCalled();
+
+    expect(telegramMessageDispatcherService.dispatch).not.toHaveBeenCalled();
+
+    expect(telegramMessageRepository.markProcessed).not.toHaveBeenCalled();
+  });
+
   it('should mark message as FAILED when dispatch fails', async () => {
     const input = createInput();
 
@@ -193,6 +221,33 @@ describe('TelegramMessageProcessingService', () => {
     expect(typeof dispatchedContext.messageId).toBe('bigint');
 
     expect(dispatchedContext.messageId).toBe(input.telegramMessageId);
+  });
+
+  it('should not dispatch when processing claim is lost', async () => {
+    const message = {
+      id: 'message-id',
+      telegramAccountId: 'telegram-account-id',
+      telegramMessageId: 123n,
+      chatId: 456n,
+      messageType: TelegramMessageType.TEXT,
+      content: 'makan 25000',
+      direction: TelegramMessageDirection.INBOUND,
+      processingStatus: TelegramProcessingStatus.RECEIVED,
+      processingStartedAt: null,
+      processingAttempts: 0,
+      processedAt: null,
+      createdAt: new Date(),
+    };
+
+    telegramMessageRepository.findById.mockResolvedValue(message);
+
+    telegramMessageRepository.claimProcessing.mockResolvedValue(false);
+
+    await service.process('message-id');
+
+    expect(telegramMessageDispatcherService.dispatch).not.toHaveBeenCalled();
+
+    expect(telegramMessageRepository.markProcessed).not.toHaveBeenCalled();
   });
 
   it('should not mark message as processed when dispatch fails', async () => {
