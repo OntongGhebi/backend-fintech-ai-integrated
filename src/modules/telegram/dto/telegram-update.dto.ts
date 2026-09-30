@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsInt,
   IsIn,
+  IsObject,
   IsOptional,
   IsString,
   ValidateNested,
@@ -144,4 +145,21 @@ export class TelegramUpdateDto {
   @ValidateNested()
   @Type(() => TelegramMessageDto)
   message?: TelegramMessageDto;
+
+  /**
+   * Telegram supports many update types.
+   *
+   * callback_query is currently not processed by the
+   * application, but it must still be accepted at the
+   * webhook boundary so unsupported Telegram updates
+   * can be safely ignored by TelegramUpdateParserService.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Telegram callback query. Currently accepted but not processed.',
+    type: Object,
+  })
+  @IsOptional()
+  @IsObject()
+  callback_query?: Record<string, unknown>;
 }

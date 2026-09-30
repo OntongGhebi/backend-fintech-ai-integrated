@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
+import { AccountsModule } from '../accounts/accounts.module';
+import { CategoriesModule } from '../categories/categories.module';
+import { TransactionsModule } from '../transactions/transactions.module';
+
 import { TelegramService } from './telegram.service';
 import { TelegramController } from './telegram.controller';
 import { TelegramWebhookGuard } from './telegram-webhook.guard';
@@ -17,6 +21,7 @@ import { TelegramCommandRouter } from './commands/telegram-command.router';
 import { TelegramMessageDispatcherService } from './telegram-message-dispatcher.service';
 import { TelegramIncomingMessageService } from './telegram-incoming-message.service';
 import { TelegramMessageProcessingService } from './telegram-message-processing.service';
+import { TelegramMessageRecoveryService } from './telegram-message-recovery.service';
 
 import {
   TELEGRAM_TEXT_MESSAGE_HANDLER,
@@ -26,18 +31,18 @@ import {
 import { BasicTransactionMessageParser } from './transaction-message/transaction-message.parser';
 import { TransactionMessagePipelineService } from './transaction-message/transaction-message-pipeline.service';
 import { TelegramTransactionMessageHandlerService } from './transaction-message/telegram-transaction-message-handler.service';
-import { AccountsModule } from '../accounts/accounts.module';
-import { CategoriesModule } from '../categories/categories.module';
+
 import { TransactionIntentResolutionService } from './transaction-message/transaction-intent-resolution.service';
 import { TransactionConfirmationService } from './transaction-message/transaction-confirmation.service';
 import { TransactionConfirmationMessageService } from './transaction-message/transaction-confirmation-message.service';
 import { TransactionConfirmationReplyService } from './transaction-message/transaction-confirmation-reply.service';
-import { TransactionsModule } from '../transactions/transactions.module';
+
 import { ConfirmedTransactionService } from './transaction-message/confirmed-transaction.service';
 import { TelegramTransactionConfirmationService } from './transaction-message/telegram-transaction-confirmation.service';
 import { TelegramTransactionFlowService } from './transaction-message/telegram-transaction-flow.service';
+
 import { TelegramTransactionErrorService } from './services/transaction/telegram-transaction-error.service';
-import { TelegramMessageRecoveryService } from './telegram-message-recovery.service';
+import { TelegramTransactionFlowErrorService } from './services/transaction/telegram-transaction-flow-error.service';
 
 @Module({
   imports: [ConfigModule, AccountsModule, CategoriesModule, TransactionsModule],
@@ -61,6 +66,7 @@ import { TelegramMessageRecoveryService } from './telegram-message-recovery.serv
     TelegramIncomingMessageService,
     TelegramMessageDispatcherService,
     TelegramMessageProcessingService,
+    TelegramMessageRecoveryService,
 
     BasicTransactionMessageParser,
     TransactionMessagePipelineService,
@@ -71,11 +77,13 @@ import { TelegramMessageRecoveryService } from './telegram-message-recovery.serv
     TransactionConfirmationService,
     TransactionConfirmationMessageService,
     TransactionConfirmationReplyService,
+
     ConfirmedTransactionService,
     TelegramTransactionConfirmationService,
     TelegramTransactionFlowService,
+
     TelegramTransactionErrorService,
-    TelegramMessageRecoveryService,
+    TelegramTransactionFlowErrorService,
 
     {
       provide: TELEGRAM_TRANSACTION_MESSAGE_PARSER,
@@ -97,15 +105,17 @@ import { TelegramMessageRecoveryService } from './telegram-message-recovery.serv
     TelegramMessageDispatcherService,
     TelegramIncomingMessageService,
     TelegramMessageProcessingService,
+    TelegramMessageRecoveryService,
+
     TransactionMessagePipelineService,
     TransactionIntentResolutionService,
     TransactionConfirmationService,
     TransactionConfirmationMessageService,
     TransactionConfirmationReplyService,
+
     ConfirmedTransactionService,
     TelegramTransactionConfirmationService,
     TelegramTransactionFlowService,
-    TelegramMessageRecoveryService,
   ],
 })
 export class telegramModule {}

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { TransactionConfirmationService } from './transaction-confirmation.service';
-import { TransactionConfirmationAction } from './transaction-confirmation.types';
+import { TransactionConfirmationAction } from './transaction-confirmation.service';
 import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
 
 export interface TransactionConfirmationReplyContext {
