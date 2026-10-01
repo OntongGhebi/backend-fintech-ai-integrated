@@ -2,9 +2,9 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 
-import { AI_PROVIDER } from './ai.constants';
+import { AI_PROVIDER } from '../constants/ai.constants';
 import { AIService } from './ai.service';
-import { AIProvider } from './providers/ai-provider.interface';
+import { AIProvider } from '../providers/ai-provider.interface';
 
 describe('AIService', () => {
   let service: AIService;

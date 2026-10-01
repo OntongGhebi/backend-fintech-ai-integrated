@@ -5,13 +5,13 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import type { AIProvider } from './providers/ai-provider.interface';
-import { AI_PROVIDER } from './ai.constants';
+import type { AIProvider } from '../providers/ai-provider.interface';
+import { AI_PROVIDER } from '../constants/ai.constants';
 import {
   AICompletionRequest,
   AICompletionResponse,
   AIProviderMetadata,
-} from './ai.types';
+} from '../types/ai.types';
 
 @Injectable()
 export class AIService {

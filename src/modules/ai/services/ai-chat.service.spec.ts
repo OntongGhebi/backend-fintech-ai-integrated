@@ -1,7 +1,7 @@
 import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 
-import { AIMessageRole } from '../../../generated/prisma/enums';
+import { AIMessageRole } from '../../../../generated/prisma/enums';
 
 import { AIService } from './ai.service';
 import { AIChatService } from './ai-chat.service';

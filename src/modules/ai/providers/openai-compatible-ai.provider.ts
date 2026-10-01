@@ -10,7 +10,7 @@ import {
   AICompletionResponse,
   AICompletionUsage,
   AIProviderMetadata,
-} from '../ai.types';
+} from '../types/ai.types';
 
 interface OpenAICompatibleMessage {
   role: 'system' | 'user' | 'assistant';

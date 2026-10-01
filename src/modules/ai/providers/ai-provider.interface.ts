@@ -2,7 +2,7 @@ import {
   AICompletionRequest,
   AICompletionResponse,
   AIProviderMetadata,
-} from '../ai.types';
+} from '../types/ai.types';
 
 export interface AIProvider {
   getMetadata(): AIProviderMetadata;

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { AIMessageRole } from 'generated/prisma/enums';
-import { AIConversationRepository } from './repositories/ai-conversation.repository';
+import { AIConversationRepository } from '../repositories/ai-conversation.repository';
 
 @Injectable()
 export class AIConversationService {

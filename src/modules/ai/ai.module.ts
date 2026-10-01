@@ -1,17 +1,17 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-import { AI_PROVIDER } from './ai.constants';
-import { AIService } from './ai.service';
-import { AIConversationService } from './ai-conversation.service';
+import { AI_PROVIDER } from './constants/ai.constants';
+import { AIService } from './services/ai.service';
+import { AIConversationService } from './services/ai-conversation.service';
 import { AIProvider } from './providers/ai-provider.interface';
 
 import { OpenAICompatibleAIProvider } from './providers/openai-compatible-ai.provider';
 import { UnavailableAIProvider } from './providers/unavailable-ai.provider';
 
 import { AIConversationRepository } from './repositories/ai-conversation.repository';
-import { AIChatService } from './ai-chat.service';
-import { AIIntentClassifierService } from './ai-intent-classifier.service';
+import { AIChatService } from './services/ai-chat.service';
+import { AIIntentClassifierService } from './services/ai-intent-classifier.service';
 
 @Module({
   providers: [

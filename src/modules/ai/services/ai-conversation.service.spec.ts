@@ -1,10 +1,10 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 
-import { AIMessageRole } from '../../../generated/prisma/client.js';
+import { AIMessageRole } from '../../../../generated/prisma/client.js';
 
 import { AIConversationService } from './ai-conversation.service';
-import { AIConversationRepository } from './repositories/ai-conversation.repository';
+import { AIConversationRepository } from '../repositories/ai-conversation.repository.js';
 
 describe('AIConversationService', () => {
   let service: AIConversationService;

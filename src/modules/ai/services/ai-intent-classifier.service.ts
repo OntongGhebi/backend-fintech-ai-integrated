@@ -1,11 +1,11 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { AIService } from './ai.service';
 
-import { AIIntent, AIIntentClassification } from './ai-intent.types';
+import { AIIntent, AIIntentClassification } from '../types/ai-intent.types';
 import {
   AI_INTENT_CLASSIFIER_TEMPERATURE,
   AI_INTENT_SYSTEM_PROMPT,
-} from './ai-intent.constrants';
+} from '../constants/ai-intent.constants';
 
 const SUPPORTED_AI_INTENTS: readonly AIIntent[] = [
   'CREATE_TRANSACTION',

@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AIMessageRole } from '../../../generated/prisma/enums';
+import { AIMessageRole } from '../../../../generated/prisma/enums';
 import { AIService } from './ai.service';
-import { AICompletionResponse, AIMessage } from './ai.types';
+import { AICompletionResponse, AIMessage } from '../types/ai.types';
 import { AIConversationService } from './ai-conversation.service';
 
 export interface AIChatMessageResult {
