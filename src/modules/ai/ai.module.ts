@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { AI_PROVIDER } from './ai.constants';
-import { AiService } from './ai.service';
+import { AIService } from './ai.service';
 import { AIConversationService } from './ai-conversation.service';
 import { AIProvider } from './providers/ai-provider.interface';
 
@@ -10,11 +10,15 @@ import { OpenAICompatibleAIProvider } from './providers/openai-compatible-ai.pro
 import { UnavailableAIProvider } from './providers/unavailable-ai.provider';
 
 import { AIConversationRepository } from './repositories/ai-conversation.repository';
+import { AIChatService } from './ai-chat.service';
+import { AIIntentClassifierService } from './ai-intent-classifier.service';
 
 @Module({
   providers: [
-    AiService,
+    AIService,
+    AIChatService,
     AIConversationService,
+    AIIntentClassifierService,
     AIConversationRepository,
 
     OpenAICompatibleAIProvider,
@@ -46,8 +50,10 @@ import { AIConversationRepository } from './repositories/ai-conversation.reposit
     },
   ],
   exports: [
-    AiService,
+    AIService,
+    AIChatService,
     AIConversationService,
+    AIIntentClassifierService,
     AIConversationRepository,
     AI_PROVIDER,
   ],

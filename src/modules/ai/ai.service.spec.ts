@@ -3,11 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AI_PROVIDER } from './ai.constants';
-import { AiService } from './ai.service';
+import { AIService } from './ai.service';
 import { AIProvider } from './providers/ai-provider.interface';
 
-describe('AiService', () => {
-  let service: AiService;
+describe('AIService', () => {
+  let service: AIService;
 
   const configServiceMock = {
     get: jest.fn(),
@@ -23,7 +23,7 @@ describe('AiService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        AiService,
+        AIService,
         {
           provide: ConfigService,
           useValue: configServiceMock,
@@ -35,7 +35,7 @@ describe('AiService', () => {
       ],
     }).compile();
 
-    service = module.get<AiService>(AiService);
+    service = module.get<AIService>(AIService);
   });
 
   describe('isEnabled', () => {

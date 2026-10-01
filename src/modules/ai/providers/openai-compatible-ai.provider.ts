@@ -25,7 +25,7 @@ interface OpenAICompatibleResponse {
   }>;
   usage?: {
     prompt_tokens?: number;
-    compltion_tokens?: number;
+    completion_tokens?: number;
     total_tokens?: number;
   };
   model?: string;
@@ -45,7 +45,7 @@ export class OpenAICompatibleAIProvider implements AIProvider {
   }
 
   async complete(request: AICompletionRequest): Promise<AICompletionResponse> {
-    const apiKey = this.configService.get<string>('api.key', '');
+    const apiKey = this.configService.get<string>('ai.apiKey', '');
 
     const baseUrl = this.configService.get<string>('ai.baseUrl', '');
 
@@ -162,7 +162,7 @@ export class OpenAICompatibleAIProvider implements AIProvider {
 
     const inputTokens = usage.prompt_tokens ?? 0;
 
-    const outputTokens = usage.compltion_tokens ?? 0;
+    const outputTokens = usage.completion_tokens ?? 0;
 
     const totalTokens = usage.total_tokens ?? inputTokens + outputTokens;
 

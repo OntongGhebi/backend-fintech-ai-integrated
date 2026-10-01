@@ -14,7 +14,7 @@ import {
 } from './ai.types';
 
 @Injectable()
-export class AiService {
+export class AIService {
   constructor(
     private readonly configService: ConfigService,
     @Inject(AI_PROVIDER)

@@ -1,0 +1,351 @@
+import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { Test, TestingModule } from '@nestjs/testing';
+
+import { AIMessageRole } from '../../../generated/prisma/enums';
+
+import { AIService } from './ai.service';
+import { AIChatService } from './ai-chat.service';
+import { AIConversationService } from './ai-conversation.service';
+
+describe('AIChatService', () => {
+  let service: AIChatService;
+
+  const aiConversationServiceMock = {
+    findById: jest.fn(),
+    addMessage: jest.fn(),
+  };
+
+  const aiServiceMock = {
+    complete: jest.fn(),
+  };
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AIChatService,
+        {
+          provide: AIConversationService,
+          useValue: aiConversationServiceMock,
+        },
+        {
+          provide: AIService,
+          useValue: aiServiceMock,
+        },
+      ],
+    }).compile();
+
+    service = module.get<AIChatService>(AIChatService);
+  });
+
+  describe('sendMessage', () => {
+    it('should persist user message, send conversation history to AI, and persist assistant response', async () => {
+      const conversation = {
+        id: 'conversation-id',
+        userId: 'user-id',
+        title: 'Test conversation',
+        messages: [],
+      };
+
+      const userMessage = {
+        id: 'message-1',
+        role: AIMessageRole.USER,
+        content: 'Halo AI',
+        model: null,
+        createdAt: new Date('2026-09-30T10:00:00.000Z'),
+      };
+
+      const assistantMessage = {
+        id: 'message-2',
+        role: AIMessageRole.ASSISTANT,
+        content: 'Halo! Ada yang bisa saya bantu?',
+        model: 'test-model',
+        createdAt: new Date('2026-09-30T10:00:01.000Z'),
+      };
+
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce(conversation)
+        .mockResolvedValueOnce({
+          ...conversation,
+          messages: [...conversation.messages, userMessage],
+        });
+
+      aiConversationServiceMock.addMessage
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(assistantMessage);
+
+      aiServiceMock.complete.mockResolvedValue({
+        content: 'Halo! Ada yang bisa saya bantu?',
+        provider: 'openai-compatible',
+        model: 'test-model',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 8,
+          totalTokens: 18,
+        },
+      });
+
+      await expect(
+        service.sendMessage('user-id', 'conversation-id', '  Halo AI  '),
+      ).resolves.toEqual({
+        conversationId: 'conversation-id',
+        message: assistantMessage,
+        provider: 'openai-compatible',
+        model: 'test-model',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 8,
+          totalTokens: 18,
+        },
+      });
+
+      expect(aiConversationServiceMock.findById).toHaveBeenNthCalledWith(
+        1,
+        'user-id',
+        'conversation-id',
+      );
+
+      expect(aiConversationServiceMock.addMessage).toHaveBeenNthCalledWith(
+        1,
+        'user-id',
+        'conversation-id',
+        AIMessageRole.USER,
+        'Halo AI',
+      );
+
+      expect(aiConversationServiceMock.findById).toHaveBeenNthCalledWith(
+        2,
+        'user-id',
+        'conversation-id',
+      );
+
+      expect(aiServiceMock.complete).toHaveBeenCalledWith({
+        messages: [
+          {
+            role: 'user',
+            content: 'Halo AI',
+          },
+        ],
+        temperature: 0.2,
+      });
+
+      expect(aiConversationServiceMock.addMessage).toHaveBeenNthCalledWith(
+        2,
+        'user-id',
+        'conversation-id',
+        AIMessageRole.ASSISTANT,
+        'Halo! Ada yang bisa saya bantu?',
+        'test-model',
+      );
+    });
+
+    it('should reject when the conversation does not exist', async () => {
+      aiConversationServiceMock.findById.mockRejectedValue(
+        new NotFoundException('AI conversation not found'),
+      );
+
+      await expect(
+        service.sendMessage('user-id', 'conversation-id', 'Hello'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(aiConversationServiceMock.addMessage).not.toHaveBeenCalled();
+
+      expect(aiServiceMock.complete).not.toHaveBeenCalled();
+    });
+
+    it('should reject an empty message', async () => {
+      await expect(
+        service.sendMessage('user-id', 'conversation-id', '   '),
+      ).rejects.toThrow('AI message content cannot be empty');
+
+      expect(aiConversationServiceMock.findById).not.toHaveBeenCalled();
+
+      expect(aiServiceMock.complete).not.toHaveBeenCalled();
+    });
+
+    it('should not call the AI provider when persisting the user message fails', async () => {
+      aiConversationServiceMock.findById.mockResolvedValue({
+        id: 'conversation-id',
+        userId: 'user-id',
+        title: null,
+        messages: [],
+      });
+
+      aiConversationServiceMock.addMessage.mockRejectedValue(
+        new Error('Database error'),
+      );
+
+      await expect(
+        service.sendMessage('user-id', 'conversation-id', 'Hello'),
+      ).rejects.toThrow('Database error');
+
+      expect(aiServiceMock.complete).not.toHaveBeenCalled();
+    });
+
+    it('should propagate AI provider errors and not persist an assistant message', async () => {
+      const conversation = {
+        id: 'conversation-id',
+        userId: 'user-id',
+        title: null,
+        messages: [],
+      };
+
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce(conversation)
+        .mockResolvedValueOnce({
+          ...conversation,
+          messages: [
+            {
+              id: 'message-1',
+              role: AIMessageRole.USER,
+              content: 'Hello',
+              model: null,
+              createdAt: new Date(),
+            },
+          ],
+        });
+
+      aiConversationServiceMock.addMessage.mockResolvedValue({
+        id: 'message-1',
+        role: AIMessageRole.USER,
+        content: 'Hello',
+        model: null,
+        createdAt: new Date(),
+      });
+
+      aiServiceMock.complete.mockRejectedValue(
+        new ServiceUnavailableException('AI provider request failed'),
+      );
+
+      await expect(
+        service.sendMessage('user-id', 'conversation-id', 'Hello'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      expect(aiConversationServiceMock.addMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('should preserve system and assistant history', async () => {
+      const conversation = {
+        id: 'conversation-id',
+        userId: 'user-id',
+        title: null,
+        messages: [
+          {
+            id: 'message-1',
+            role: AIMessageRole.SYSTEM,
+            content: 'You are a financial assistant.',
+            model: null,
+            createdAt: new Date('2026-09-30T10:00:00.000Z'),
+          },
+          {
+            id: 'message-2',
+            role: AIMessageRole.USER,
+            content: 'Berapa saldo saya?',
+            model: null,
+            createdAt: new Date('2026-09-30T10:01:00.000Z'),
+          },
+          {
+            id: 'message-3',
+            role: AIMessageRole.ASSISTANT,
+            content: 'Saya membutuhkan akses data saldo Anda.',
+            model: 'test-model',
+            createdAt: new Date('2026-09-30T10:01:01.000Z'),
+          },
+        ],
+      };
+
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce(conversation)
+        .mockResolvedValueOnce(conversation);
+
+      aiConversationServiceMock.addMessage.mockResolvedValue({
+        id: 'message-4',
+        role: AIMessageRole.USER,
+        content: 'Lanjutkan',
+        model: null,
+        createdAt: new Date(),
+      });
+
+      aiServiceMock.complete.mockResolvedValue({
+        content: 'Baik.',
+        provider: 'openai-compatible',
+        model: 'test-model',
+      });
+
+      await service.sendMessage('user-id', 'conversation-id', 'Lanjutkan');
+
+      expect(aiServiceMock.complete).toHaveBeenCalledWith({
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a financial assistant.',
+          },
+          {
+            role: 'user',
+            content: 'Berapa saldo saya?',
+          },
+          {
+            role: 'assistant',
+            content: 'Saya membutuhkan akses data saldo Anda.',
+          },
+        ],
+        temperature: 0.2,
+      });
+    });
+
+    it('should not send unsupported tool messages to the AI provider', async () => {
+      const conversation = {
+        id: 'conversation-id',
+        userId: 'user-id',
+        title: null,
+        messages: [
+          {
+            id: 'message-1',
+            role: AIMessageRole.SYSTEM,
+            content: 'You are a financial assistant.',
+            model: null,
+            createdAt: new Date(),
+          },
+          {
+            id: 'message-2',
+            role: AIMessageRole.TOOL,
+            content: 'tool result',
+            model: null,
+            createdAt: new Date(),
+          },
+        ],
+      };
+
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce(conversation)
+        .mockResolvedValueOnce(conversation);
+
+      aiConversationServiceMock.addMessage.mockResolvedValue({
+        id: 'message-3',
+        role: AIMessageRole.USER,
+        content: 'Hello',
+        model: null,
+        createdAt: new Date(),
+      });
+
+      aiServiceMock.complete.mockResolvedValue({
+        content: 'Hello.',
+        provider: 'openai-compatible',
+        model: 'test-model',
+      });
+
+      await service.sendMessage('user-id', 'conversation-id', 'Hello');
+
+      expect(aiServiceMock.complete).toHaveBeenCalledWith({
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a financial assistant.',
+          },
+        ],
+        temperature: 0.2,
+      });
+    });
+  });
+});
