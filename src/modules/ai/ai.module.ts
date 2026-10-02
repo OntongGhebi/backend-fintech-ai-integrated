@@ -19,6 +19,7 @@ import { AITransactionConfirmationService } from './services/ai-transaction-conf
 import { AITransactionPersistenceService } from './services/ai-transaction-persistence.service';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { DatabaseModule } from 'src/database/database.module';
+import { AIConversationContextService } from './services/ai-conversation-context.service';
 
 @Module({
   imports: [DatabaseModule, TransactionsModule],
@@ -32,6 +33,7 @@ import { DatabaseModule } from 'src/database/database.module';
     AITransactionDraftService,
     AITransactionConfirmationService,
     AITransactionPersistenceService,
+    AIConversationContextService,
     AIConversationRepository,
 
     OpenAICompatibleAIProvider,
@@ -72,6 +74,7 @@ import { DatabaseModule } from 'src/database/database.module';
     AITransactionDraftService,
     AITransactionConfirmationService,
     AITransactionPersistenceService,
+    AIConversationContextService,
     AIConversationRepository,
     AI_PROVIDER,
   ],

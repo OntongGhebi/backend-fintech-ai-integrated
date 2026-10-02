@@ -3,6 +3,7 @@ import { AIMessageRole } from '../../../../generated/prisma/enums';
 import { AIService } from './ai.service';
 import { AICompletionResponse, AIMessage } from '../types/ai.types';
 import { AIConversationService } from './ai-conversation.service';
+import { AIConversationContextService } from './ai-conversation-context.service';
 
 export interface AIChatMessageResult {
   id: string;
@@ -25,6 +26,7 @@ export class AIChatService {
   constructor(
     private readonly aiConversationServie: AIConversationService,
     private readonly aiService: AIService,
+    private readonly aiConversationContextService: AIConversationContextService,
   ) {}
 
   async sendMessage(
@@ -59,7 +61,15 @@ export class AIChatService {
       conversationId,
     );
 
-    const messages = this.buildAIMessageHistory(updatedConversation.messages);
+    if (!updatedConversation) {
+      throw new NotFoundException('AI conversation not found');
+    }
+
+    const contextMessages = this.aiConversationContextService.getContext(
+      updatedConversation.messages,
+    );
+
+    const messages = this.buildAIMessageHistory(contextMessages);
 
     const completion = await this.aiService.complete({
       messages,
@@ -84,10 +94,7 @@ export class AIChatService {
   }
 
   private buildAIMessageHistory(
-    messages: Array<{
-      role: AIMessageRole;
-      content: string;
-    }>,
+    messages: Array<{ role: AIMessageRole; content: string }>,
   ): AIMessage[] {
     return messages
       .filter(

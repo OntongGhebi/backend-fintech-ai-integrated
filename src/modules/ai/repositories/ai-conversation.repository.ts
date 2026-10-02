@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma/prisma.service';
 import { AIMessageRole } from 'generated/prisma/enums';
+import {
+  AIConversationContextMessage,
+  AIConversationContextOptions,
+} from '../types/ai-conversation-context.types';
 
 @Injectable()
 export class AIConversationRepository {
@@ -104,5 +108,23 @@ export class AIConversationRepository {
         userId,
       },
     });
+  }
+
+  async findContextMessages(
+    conversationId: string,
+    userId: string,
+    options: AIConversationContextOptions = {},
+  ): Promise<AIConversationContextMessage[]> {
+    const limit = Math.max(1, Math.min(options.limit ?? 20, 100));
+    const messages = await this.prisma.aIMessage.findMany({
+      where: { conversationId, conversation: { userId } },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: { role: true, content: true },
+    });
+    return messages.reverse().map((message) => ({
+      role: message.role as AIConversationContextMessage['role'],
+      content: message.content,
+    }));
   }
 }
