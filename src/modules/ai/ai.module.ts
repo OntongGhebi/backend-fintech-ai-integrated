@@ -12,6 +12,7 @@ import { UnavailableAIProvider } from './providers/unavailable-ai.provider';
 import { AIConversationRepository } from './repositories/ai-conversation.repository';
 import { AIChatService } from './services/ai-chat.service';
 import { AIIntentClassifierService } from './services/ai-intent-classifier.service';
+import { AITransactionEntityExtractorService } from './services/ai-transaction-entity-extractor.service';
 
 @Module({
   providers: [
@@ -19,6 +20,7 @@ import { AIIntentClassifierService } from './services/ai-intent-classifier.servi
     AIChatService,
     AIConversationService,
     AIIntentClassifierService,
+    AITransactionEntityExtractorService,
     AIConversationRepository,
 
     OpenAICompatibleAIProvider,
@@ -54,6 +56,7 @@ import { AIIntentClassifierService } from './services/ai-intent-classifier.servi
     AIChatService,
     AIConversationService,
     AIIntentClassifierService,
+    AITransactionEntityExtractorService,
     AIConversationRepository,
     AI_PROVIDER,
   ],
