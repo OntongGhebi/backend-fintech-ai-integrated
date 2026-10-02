@@ -15,6 +15,7 @@ import { AIIntentClassifierService } from './services/ai-intent-classifier.servi
 import { AITransactionEntityExtractorService } from './services/ai-transaction-entity-extractor.service';
 import { AITransactionResolutionService } from './services/ai-transaction-resolution.service';
 import { AITransactionDraftService } from './services/ai-transaction-draft.service';
+import { AITransactionConfirmationService } from './services/ai-transaction-confirmation.service';
 
 @Module({
   providers: [
@@ -25,6 +26,7 @@ import { AITransactionDraftService } from './services/ai-transaction-draft.servi
     AITransactionEntityExtractorService,
     AITransactionResolutionService,
     AITransactionDraftService,
+    AITransactionConfirmationService,
     AIConversationRepository,
 
     OpenAICompatibleAIProvider,
@@ -63,6 +65,7 @@ import { AITransactionDraftService } from './services/ai-transaction-draft.servi
     AITransactionEntityExtractorService,
     AITransactionResolutionService,
     AITransactionDraftService,
+    AITransactionConfirmationService,
     AIConversationRepository,
     AI_PROVIDER,
   ],
