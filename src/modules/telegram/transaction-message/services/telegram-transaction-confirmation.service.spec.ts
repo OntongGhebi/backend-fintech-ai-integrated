@@ -7,8 +7,8 @@ import {
 } from './telegram-transaction-confirmation.service';
 import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
 import { TransactionConfirmationService } from './transaction-confirmation.service';
-import { PendingTransactionConfirmation } from './transaction-confirmation.types';
-import { TelegramTransactionErrorService } from '../services/transaction/telegram-transaction-error.service';
+import { PendingTransactionConfirmation } from '../types/transaction-confirmation.types';
+import { TelegramTransactionErrorService } from '../../services/transaction/telegram-transaction-error.service';
 
 describe('TelegramTransactionConfirmationService', () => {
   let service: TelegramTransactionConfirmationService;

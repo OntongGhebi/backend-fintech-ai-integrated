@@ -2,8 +2,8 @@ import { Injectable } from '@nestjs/common';
 import {
   TelegramMessageDto,
   TelegramUpdateDto,
-} from './dto/telegram-update.dto';
-import { ParsedTelegramMessage } from './telegram-parser.types';
+} from '../dto/telegram-update.dto';
+import { ParsedTelegramMessage } from '../types/telegram-parser.types';
 
 @Injectable()
 export class TelegramUpdateParserService {

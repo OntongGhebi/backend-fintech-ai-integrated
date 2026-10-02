@@ -8,7 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   TELEGRAM_API_BASE_URL,
   TELEGRAM_MAX_MESSAGE_LENGTH,
-} from './telegram.constants';
+} from '../constants/telegram.constants';
 import { TelegramService } from './telegram.service';
 
 describe('TelegramService', () => {

@@ -2,7 +2,7 @@ import { BasicTransactionMessageParser } from './transaction-message.parser';
 import {
   TransactionMessageInput,
   TransactionMessageParser,
-} from './transaction-message.types';
+} from './types/transaction-message.types';
 
 describe('BasicTransactionMessageParser', () => {
   let parser: TransactionMessageParser;

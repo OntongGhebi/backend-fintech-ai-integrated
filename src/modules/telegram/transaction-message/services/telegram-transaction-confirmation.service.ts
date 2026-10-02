@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 
 import { ConfirmedTransactionService } from './confirmed-transaction.service';
-import { PendingTransactionConfirmation } from './transaction-confirmation.types';
+import { PendingTransactionConfirmation } from '../types/transaction-confirmation.types';
 import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
 import { TransactionConfirmationService } from './transaction-confirmation.service';
-import { TelegramTransactionErrorService } from '../services/transaction/telegram-transaction-error.service';
+import { TelegramTransactionErrorService } from '../../services/transaction/telegram-transaction-error.service';
 
 export interface TelegramTransactionConfirmationContext {
   userId: string;

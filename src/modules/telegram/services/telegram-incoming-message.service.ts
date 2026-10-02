@@ -4,11 +4,11 @@ import {
   TelegramMessageDirection,
   TelegramMessageType,
   TelegramProcessingStatus,
-} from '../../../generated/prisma/enums.js';
+} from '../../../../generated/prisma/enums.js';
 
-import { TelegramAccountRepository } from './repositories/telegram-account.repository';
-import { TelegramMessageRepository } from './repositories/telegram-message.repository';
-import { ParsedTelegramMessage } from './telegram-parser.types';
+import { TelegramAccountRepository } from '../repositories/telegram-account.repository.js';
+import { TelegramMessageRepository } from '../repositories/telegram-message.repository.js';
+import { ParsedTelegramMessage } from '../types/telegram-parser.types.js';
 
 export interface PersistedTelegramMessage {
   id: string;

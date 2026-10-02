@@ -10,15 +10,15 @@ import {
   TELEGRAM_API_BASE_URL,
   TELEGRAM_API_TIMEOUT_MS,
   TELEGRAM_MAX_MESSAGE_LENGTH,
-} from './telegram.constants';
+} from '../constants/telegram.constants';
 import {
   TelegramApiResponse,
   TelegramBot,
   TelegramSendMessageParams,
   TelegramSendMessageResponse,
   TelegramWebhookInfo,
-} from './telegram.types';
-import { ParsedTelegramMessage } from './telegram-parser.types';
+} from '../types/telegram.types';
+import { ParsedTelegramMessage } from '../types/telegram-parser.types';
 
 @Injectable()
 export class TelegramService {

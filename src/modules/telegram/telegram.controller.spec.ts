@@ -5,13 +5,13 @@ import {
   TelegramProcessingStatus,
 } from '../../../generated/prisma/enums.js';
 
-import { TelegramAccountService } from './telegram-account.service';
+import { TelegramAccountService } from './services/telegram-account.service.js';
 import { TelegramController } from './telegram.controller';
-import { TelegramIncomingMessageService } from './telegram-incoming-message.service';
-import { TelegramMessageProcessingService } from './telegram-message-processing.service';
-import { TelegramService } from './telegram.service';
-import { TelegramUpdateParserService } from './telegram-update-parser.service';
-import { TelegramWebhookGuard } from './telegram-webhook.guard';
+import { TelegramIncomingMessageService } from './services/telegram-incoming-message.service.js';
+import { TelegramMessageProcessingService } from './services/telegram-message-processing.service.js';
+import { TelegramService } from './services/telegram.service.js';
+import { TelegramUpdateParserService } from './services/telegram-update-parser.service.js';
+import { TelegramWebhookGuard } from './guards/telegram-webhook.guard.js';
 import { ConfigService } from '@nestjs/config';
 
 describe('TelegramController', () => {

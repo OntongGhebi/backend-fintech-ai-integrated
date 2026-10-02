@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { TelegramProcessingStatus } from '../../../generated/prisma/enums';
+import { TelegramProcessingStatus } from '../../../../generated/prisma/enums';
 
 import {
   TelegramMessageDispatcherService,
   TelegramMessageDispatchContext,
 } from './telegram-message-dispatcher.service';
-import { TelegramMessageRepository } from './repositories/telegram-message.repository';
+import { TelegramMessageRepository } from '../repositories/telegram-message.repository';
 
 export interface TelegramMessageProcessingInput {
   messageId: string;

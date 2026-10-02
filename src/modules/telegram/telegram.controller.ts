@@ -10,12 +10,12 @@ import {
 
 import { AccessTokenGuard } from '../auth/guards/access-token.guard';
 
-import { TelegramAccountService } from './telegram-account.service';
-import { TelegramIncomingMessageService } from './telegram-incoming-message.service';
-import { TelegramMessageProcessingService } from './telegram-message-processing.service';
-import { TelegramService } from './telegram.service';
-import { TelegramUpdateParserService } from './telegram-update-parser.service';
-import { TelegramWebhookGuard } from './telegram-webhook.guard';
+import { TelegramAccountService } from './services/telegram-account.service';
+import { TelegramIncomingMessageService } from './services/telegram-incoming-message.service';
+import { TelegramMessageProcessingService } from './services/telegram-message-processing.service';
+import { TelegramService } from './services/telegram.service';
+import { TelegramUpdateParserService } from './services/telegram-update-parser.service';
+import { TelegramWebhookGuard } from './guards/telegram-webhook.guard';
 import { TelegramUpdateDto } from './dto/telegram-update.dto';
 
 @Controller('telegram')

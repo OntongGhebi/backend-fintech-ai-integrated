@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { timingSafeEqual } from 'node:crypto';
-import { TELEGRAM_SECRET_HEADER } from './telegram.constants';
+import { TELEGRAM_SECRET_HEADER } from '../constants/telegram.constants';
 import { IncomingHttpHeaders } from 'node:http';
 
 interface TelegramWebhookRequest {

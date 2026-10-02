@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 
-import { TelegramMessageDispatchContext } from '../telegram-message-dispatcher.service';
+import { TelegramMessageDispatchContext } from '../../services/telegram-message-dispatcher.service';
 
 import { TelegramTransactionMessageHandlerService } from './telegram-transaction-message-handler.service';
 import { TelegramTransactionFlowService } from './telegram-transaction-flow.service';

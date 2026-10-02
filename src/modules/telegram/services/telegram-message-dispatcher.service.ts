@@ -1,11 +1,11 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
-import { TelegramMessageType } from '../../../generated/prisma/enums.js';
+import { TelegramMessageType } from '../../../../generated/prisma/enums.js';
 
-import { TelegramCommandParser } from './commands/telegram-command.parser';
-import { TelegramCommandRouter } from './commands/telegram-command.router';
-import { TelegramCommandContext } from './commands/telegram-command.types';
-import { TELEGRAM_TEXT_MESSAGE_HANDLER } from './telegram.tokens';
+import { TelegramCommandParser } from '../commands/telegram-command.parser.js';
+import { TelegramCommandRouter } from '../commands/telegram-command.router.js';
+import { TelegramCommandContext } from '../commands/telegram-command.types.js';
+import { TELEGRAM_TEXT_MESSAGE_HANDLER } from '../telegram.tokens.js';
 
 export interface TelegramMessageDispatchContext {
   userId: string;

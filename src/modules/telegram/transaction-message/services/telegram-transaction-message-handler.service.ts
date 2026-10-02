@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import {
   TelegramMessageDispatchContext,
   TelegramTextMessageHandler,
-} from '../telegram-message-dispatcher.service';
+} from '../../services/telegram-message-dispatcher.service';
 
 import { TelegramTransactionFlowService } from './telegram-transaction-flow.service';
 

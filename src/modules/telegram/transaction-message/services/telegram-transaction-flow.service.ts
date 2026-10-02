@@ -1,15 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { TelegramMessageDispatchContext } from '../telegram-message-dispatcher.service';
-import { TelegramService } from '../telegram.service';
+import { TelegramMessageDispatchContext } from '../../services/telegram-message-dispatcher.service';
+import { TelegramService } from '../../services/telegram.service';
 
 import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
 import { TransactionConfirmationService } from './transaction-confirmation.service';
 import { TransactionIntentResolutionService } from './transaction-intent-resolution.service';
 import { TransactionMessagePipelineService } from './transaction-message-pipeline.service';
 import { TelegramTransactionConfirmationService } from './telegram-transaction-confirmation.service';
-import { ResolvedTransactionIntent } from './resolved-transaction-intent.types';
-import { TelegramTransactionFlowErrorService } from '../services/transaction/telegram-transaction-flow-error.service';
+import { ResolvedTransactionIntent } from '../types/resolved-transaction-intent.types';
+import { TelegramTransactionFlowErrorService } from '../../services/transaction/telegram-transaction-flow-error.service';
 
 @Injectable()
 export class TelegramTransactionFlowService {

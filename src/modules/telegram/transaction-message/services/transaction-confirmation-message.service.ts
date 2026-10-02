@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import { PendingTransactionConfirmation } from './transaction-confirmation.types';
+import { PendingTransactionConfirmation } from '../types/transaction-confirmation.types';
 
 @Injectable()
 export class TransactionConfirmationMessageService {

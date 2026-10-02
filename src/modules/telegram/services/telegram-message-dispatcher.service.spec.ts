@@ -1,8 +1,8 @@
-import { TelegramMessageType } from '../../../generated/prisma/enums.js';
+import { TelegramMessageType } from '../../../../generated/prisma/enums.js';
 
-import { TelegramCommandParser } from './commands/telegram-command.parser';
-import { TelegramCommandRouter } from './commands/telegram-command.router';
-import { TelegramCommandContext } from './commands/telegram-command.types';
+import { TelegramCommandParser } from '../commands/telegram-command.parser.js';
+import { TelegramCommandRouter } from '../commands/telegram-command.router.js';
+import { TelegramCommandContext } from '../commands/telegram-command.types.js';
 import {
   TelegramMessageDispatcherService,
   TelegramMessageDispatchContext,

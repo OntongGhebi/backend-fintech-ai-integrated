@@ -2,7 +2,7 @@ import {
   TelegramMessageDirection,
   TelegramMessageType,
   TelegramProcessingStatus,
-} from '../../../generated/prisma/enums.js';
+} from '../../../../generated/prisma/enums.js';
 
 import { TelegramIncomingMessageService } from './telegram-incoming-message.service';
 

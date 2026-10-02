@@ -1,9 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { AccountsRepository } from 'src/modules/accounts/repositories/accounts.repository';
 import { CategoriesRepository } from 'src/modules/categories/repositories/categories.repository';
-import { ResolvedTransactionIntent } from './resolved-transaction-intent.types';
-import { TransactionIntent } from './transaction-intent.types';
-import { TransactionIntentResolutionResult } from './transaction-intent-resolution.types';
+import { ResolvedTransactionIntent } from '../types/resolved-transaction-intent.types';
+import { TransactionIntent } from '../types/transaction-intent.types';
+import { TransactionIntentResolutionResult } from '../types/transaction-intent-resolution.types';
 
 @Injectable()
 export class TransactionIntentResolutionService {

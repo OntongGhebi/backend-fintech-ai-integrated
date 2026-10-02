@@ -1,7 +1,7 @@
 import {
   TelegramMessageDto,
   TelegramUpdateDto,
-} from './dto/telegram-update.dto';
+} from '../dto/telegram-update.dto';
 import { TelegramUpdateParserService } from './telegram-update-parser.service';
 
 describe('TelegramUpdateParserService', () => {

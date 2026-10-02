@@ -2,8 +2,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { TransactionType } from 'src/database/enums/transaction-type.enum';
 
-import { TransactionsService } from '../../transactions/transactions.service';
-import { PendingTransactionConfirmation } from './transaction-confirmation.types';
+import { TransactionsService } from '../../../transactions/transactions.service';
+import { PendingTransactionConfirmation } from '../types/transaction-confirmation.types';
 
 @Injectable()
 export class ConfirmedTransactionService {

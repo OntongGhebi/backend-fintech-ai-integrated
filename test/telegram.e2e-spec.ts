@@ -12,7 +12,7 @@ import {
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/database/prisma/prisma.service';
 import { EmailVerificationService } from '../src/modules/auth/services/email-verification.service';
-import { TelegramService } from '../src/modules/telegram/telegram.service';
+import { TelegramService } from '../src/modules/telegram/services/telegram.service.js';
 import { TelegramMessageRepository } from '../src/modules/telegram/repositories/telegram-message.repository';
 
 import { createE2EApp } from './helpers/create-e2e-app';

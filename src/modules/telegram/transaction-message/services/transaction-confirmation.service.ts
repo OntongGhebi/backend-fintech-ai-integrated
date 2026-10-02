@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import {
   CreateTransactionConfirmationInput,
   PendingTransactionConfirmation,
-} from './transaction-confirmation.types';
+} from '../types/transaction-confirmation.types';
 
 export type TransactionConfirmationAction = 'CONFIRM' | 'CANCEL' | 'UNKNOWN';
 

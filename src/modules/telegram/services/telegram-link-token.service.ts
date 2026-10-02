@@ -1,13 +1,13 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { randomInt } from 'node:crypto';
 
-import { RedisService } from '../../../docker/redis/redis.service';
+import { RedisService } from '../../../../docker/redis/redis.service';
 
 import {
   TELEGRAM_LINK_CODE_LENGTH,
   TELEGRAM_LINK_CODE_PREFIX,
   TELEGRAM_LINK_CODE_TTL_SECONDS,
-} from './telegram.constants';
+} from '../constants/telegram.constants';
 
 interface TelegramLinkTokenData {
   userId: string;

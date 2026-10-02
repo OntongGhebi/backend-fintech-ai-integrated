@@ -1,12 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
-import { TELEGRAM_TRANSACTION_MESSAGE_PARSER } from '../telegram.tokens';
+import { TELEGRAM_TRANSACTION_MESSAGE_PARSER } from '../../telegram.tokens';
 
 import type {
   ParsedTransactionMessage,
   TransactionMessageInput,
   TransactionMessageParser,
-} from './transaction-message.types';
+} from '../types/transaction-message.types';
 
 @Injectable()
 export class TransactionMessagePipelineService {

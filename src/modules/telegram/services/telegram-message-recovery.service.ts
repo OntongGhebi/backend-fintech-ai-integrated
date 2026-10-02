@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { TelegramMessageRepository } from './repositories/telegram-message.repository';
+import { TelegramMessageRepository } from '../repositories/telegram-message.repository';
 
 export interface TelegramMessageRecoveryOptions {
   leaseTimeoutMs?: number;

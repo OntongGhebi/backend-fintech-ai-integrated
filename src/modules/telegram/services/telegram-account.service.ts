@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 
 import { TelegramLinkTokenService } from './telegram-link-token.service';
-import { TelegramAccountRepository } from './repositories/telegram-account.repository';
+import { TelegramAccountRepository } from '../repositories/telegram-account.repository';
 
 export interface LinkTelegramAccountInput {
   userId: string;
