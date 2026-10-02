@@ -391,6 +391,50 @@ describe('TransactionsService', () => {
 
       expect(transactionsRepository.create).not.toHaveBeenCalled();
     });
+
+    it('should persist an AI transaction with AI source', async () => {
+      const dto = {
+        accountId: 'account-1',
+        categoryId: 'category-1',
+        type: TransactionType.EXPENSE,
+        amount: 50000,
+        description: 'makan siang',
+        transactionDate: '2026-10-02T10:00:00.000Z',
+      };
+
+      accountsRepository.findByIdAndUserId.mockResolvedValue({
+        id: 'account-1',
+        userId: 'user-1',
+        isActive: true,
+        currency: 'IDR',
+      });
+
+      transactionsRepository.findCategoryByIdAndUserId.mockResolvedValue({
+        id: 'category-1',
+        userId: 'user-1',
+        type: 'EXPENSE',
+        isActive: true,
+        deletedAt: null,
+      });
+
+      transactionsRepository.create.mockResolvedValue({
+        id: 'transaction-1',
+        source: TransactionSource.AI,
+      });
+
+      const result = await service.create('user-1', dto, TransactionSource.AI);
+
+      expect(transactionsRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: TransactionSource.AI,
+        }),
+      );
+
+      expect(result).toEqual({
+        id: 'transaction-1',
+        source: TransactionSource.AI,
+      });
+    });
   });
 
   describe('createTransfer', () => {
@@ -587,6 +631,60 @@ describe('TransactionsService', () => {
       );
 
       expect(transactionsRepository.createTransfer).not.toHaveBeenCalled();
+    });
+
+    it('should persist an AI transfer with AI source', async () => {
+      const dto = {
+        sourceAccountId: 'account-1',
+        destinationAccountId: 'account-2',
+        amount: 100000,
+        description: 'transfer ke tabungan',
+        transactionDate: '2026-10-02T10:00:00.000Z',
+      };
+
+      accountsRepository.findByIdAndUserId
+        .mockResolvedValueOnce({
+          id: 'account-1',
+          userId: 'user-1',
+          isActive: true,
+          currency: 'IDR',
+        })
+        .mockResolvedValueOnce({
+          id: 'account-2',
+          userId: 'user-1',
+          isActive: true,
+          currency: 'IDR',
+        });
+
+      transactionsRepository.createTransfer.mockResolvedValue({
+        sourceTransaction: {
+          id: 'transaction-source',
+          source: TransactionSource.AI,
+        },
+        destinationTransaction: {
+          id: 'transaction-destination',
+          source: TransactionSource.AI,
+        },
+      });
+
+      const result = await service.createTransfer(
+        'user-1',
+        dto,
+        TransactionSource.AI,
+      );
+
+      expect(transactionsRepository.createTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source: TransactionSource.AI,
+        }),
+        expect.objectContaining({
+          source: TransactionSource.AI,
+        }),
+      );
+
+      expect(result.transferGroupId).toEqual(expect.any(String));
+
+      expect(result.transactions).toHaveLength(2);
     });
   });
 

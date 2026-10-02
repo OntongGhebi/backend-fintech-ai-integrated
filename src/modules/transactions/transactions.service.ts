@@ -26,7 +26,11 @@ export class TransactionsService {
     private readonly accountsRepository: AccountsRepository,
   ) {}
 
-  async create(userId: string, dto: CreateTransactionDto) {
+  async create(
+    userId: string,
+    dto: CreateTransactionDto,
+    source: TransactionSource = TransactionSource.MANUAL,
+  ) {
     const account = await this.accountsRepository.findByIdAndUserId(
       dto.accountId,
       userId,
@@ -51,7 +55,31 @@ export class TransactionsService {
     }
 
     if (dto.categoryId) {
-      await this.validateCategory(dto.categoryId, userId, dto.type);
+      const category =
+        await this.transactionsRepository.findCategoryByIdAndUserId(
+          dto.categoryId,
+          userId,
+        );
+
+      if (!category) {
+        throw new NotFoundException('Category not found');
+      }
+
+      if (!category.isActive || category.deletedAt) {
+        throw new BadRequestException('Category is inactive');
+      }
+
+      if (dto.type === TransactionType.INCOME && category.type !== 'INCOME') {
+        throw new BadRequestException(
+          'Income transaction requires an income category',
+        );
+      }
+
+      if (dto.type === TransactionType.EXPENSE && category.type !== 'EXPENSE') {
+        throw new BadRequestException(
+          'Expense transaction requires an expense category',
+        );
+      }
     }
 
     return this.transactionsRepository.create({
@@ -63,7 +91,7 @@ export class TransactionsService {
       currency: 'IDR',
       description: dto.description?.trim() || null,
       transactionDate: new Date(dto.transactionDate),
-      source: TransactionSource.MANUAL,
+      source,
       status: 'ACTIVE',
       transferGroupId: null,
       metadata: Prisma.DbNull,
@@ -330,7 +358,11 @@ export class TransactionsService {
     };
   }
 
-  async createTransfer(userId: string, dto: CreateTransferDto) {
+  async createTransfer(
+    userId: string,
+    dto: CreateTransferDto,
+    source: TransactionSource = TransactionSource.MANUAL,
+  ) {
     if (dto.sourceAccountId === dto.destinationAccountId) {
       throw new BadRequestException(
         'Source and destination accounts must be different',
@@ -387,7 +419,7 @@ export class TransactionsService {
         currency: 'IDR',
         description,
         transactionDate,
-        source: TransactionSource.MANUAL,
+        source,
         status: 'ACTIVE',
         transferGroupId,
         metadata: {
@@ -403,7 +435,7 @@ export class TransactionsService {
         currency: 'IDR',
         description,
         transactionDate,
-        source: TransactionSource.MANUAL,
+        source,
         status: 'ACTIVE',
         transferGroupId,
         metadata: {

@@ -16,8 +16,12 @@ import { AITransactionEntityExtractorService } from './services/ai-transaction-e
 import { AITransactionResolutionService } from './services/ai-transaction-resolution.service';
 import { AITransactionDraftService } from './services/ai-transaction-draft.service';
 import { AITransactionConfirmationService } from './services/ai-transaction-confirmation.service';
+import { AITransactionPersistenceService } from './services/ai-transaction-persistence.service';
+import { TransactionsModule } from '../transactions/transactions.module';
+import { DatabaseModule } from 'src/database/database.module';
 
 @Module({
+  imports: [DatabaseModule, TransactionsModule],
   providers: [
     AIService,
     AIChatService,
@@ -27,6 +31,7 @@ import { AITransactionConfirmationService } from './services/ai-transaction-conf
     AITransactionResolutionService,
     AITransactionDraftService,
     AITransactionConfirmationService,
+    AITransactionPersistenceService,
     AIConversationRepository,
 
     OpenAICompatibleAIProvider,
@@ -66,6 +71,7 @@ import { AITransactionConfirmationService } from './services/ai-transaction-conf
     AITransactionResolutionService,
     AITransactionDraftService,
     AITransactionConfirmationService,
+    AITransactionPersistenceService,
     AIConversationRepository,
     AI_PROVIDER,
   ],
