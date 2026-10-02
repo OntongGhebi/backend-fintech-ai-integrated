@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AccountsModule } from '../accounts/accounts.module';
 import { CategoriesModule } from '../categories/categories.module';
 import { TransactionsModule } from '../transactions/transactions.module';
+import { AIModule } from '../ai/ai.module';
 
 import { TelegramService } from './services/telegram.service';
 import { TelegramController } from './telegram.controller';
@@ -24,6 +25,7 @@ import { TelegramMessageProcessingService } from './services/telegram-message-pr
 import { TelegramMessageRecoveryService } from './services/telegram-message-recovery.service';
 
 import {
+  TELEGRAM_DETERMINISTIC_TRANSACTION_MESSAGE_PARSER,
   TELEGRAM_TEXT_MESSAGE_HANDLER,
   TELEGRAM_TRANSACTION_MESSAGE_PARSER,
 } from './telegram.tokens';
@@ -43,9 +45,17 @@ import { TelegramTransactionFlowService } from './transaction-message/services/t
 
 import { TelegramTransactionErrorService } from './services/transaction/telegram-transaction-error.service';
 import { TelegramTransactionFlowErrorService } from './services/transaction/telegram-transaction-flow-error.service';
+import { AITransactionMessageParser } from './transaction-message/parsers/ai-transaction-message.parser';
+import { TelegramTransactionMessageParser } from './transaction-message/parsers/telegram-transaction-message.parser';
 
 @Module({
-  imports: [ConfigModule, AccountsModule, CategoriesModule, TransactionsModule],
+  imports: [
+    ConfigModule,
+    AccountsModule,
+    CategoriesModule,
+    TransactionsModule,
+    AIModule,
+  ],
 
   controllers: [TelegramController],
 
@@ -68,6 +78,9 @@ import { TelegramTransactionFlowErrorService } from './services/transaction/tele
     TelegramMessageProcessingService,
     TelegramMessageRecoveryService,
 
+    AITransactionMessageParser,
+    TelegramTransactionMessageParser,
+
     BasicTransactionMessageParser,
     TransactionMessagePipelineService,
 
@@ -86,8 +99,13 @@ import { TelegramTransactionFlowErrorService } from './services/transaction/tele
     TelegramTransactionFlowErrorService,
 
     {
-      provide: TELEGRAM_TRANSACTION_MESSAGE_PARSER,
+      provide: TELEGRAM_DETERMINISTIC_TRANSACTION_MESSAGE_PARSER,
       useExisting: BasicTransactionMessageParser,
+    },
+
+    {
+      provide: TELEGRAM_TRANSACTION_MESSAGE_PARSER,
+      useExisting: TelegramTransactionMessageParser,
     },
 
     {

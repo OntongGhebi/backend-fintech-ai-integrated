@@ -30,6 +30,11 @@ describe('Recurring Transactions E2E', () => {
 
   const password = 'Password123!';
 
+  const futureStartDate = new Date();
+  futureStartDate.setUTCFullYear(futureStartDate.getUTCFullYear() + 1);
+  const futureEndDate = new Date(futureStartDate);
+  futureEndDate.setUTCFullYear(futureEndDate.getUTCFullYear() + 1);
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -132,8 +137,8 @@ describe('Recurring Transactions E2E', () => {
           amount: '150000',
           description: 'Monthly internet subscription',
           frequency: 'MONTHLY',
-          startDate: '2026-09-01',
-          endDate: '2027-09-01',
+          startDate: futureStartDate.toISOString().slice(0, 10),
+          endDate: futureEndDate.toISOString().slice(0, 10),
         })
         .expect(201);
 
@@ -155,6 +160,10 @@ describe('Recurring Transactions E2E', () => {
       expect(response.body.id).toEqual(expect.any(String));
 
       expect(response.body.nextRunAt).toEqual(expect.any(String));
+
+      expect(new Date(response.body.nextRunAt).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
 
       recurringTransactionId = response.body.id;
     });

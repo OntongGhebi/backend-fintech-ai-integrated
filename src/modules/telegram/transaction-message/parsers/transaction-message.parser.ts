@@ -4,7 +4,7 @@ import {
   ParsedTransactionMessage,
   TransactionMessageInput,
   TransactionMessageParser,
-} from './types/transaction-message.types';
+} from '../types/transaction-message.types';
 
 type TransactionType = 'INCOME' | 'EXPENSE';
 
