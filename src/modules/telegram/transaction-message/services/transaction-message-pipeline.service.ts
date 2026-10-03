@@ -35,6 +35,12 @@ export class TransactionMessagePipelineService {
         );
         break;
 
+      case 'ERROR':
+        this.logger.error(
+          `Telegram transaction message processing failed: messageId=${input.messageId.toString()}, errorCode=${result.errorCode}`,
+        );
+        break;
+
       case 'PARSED':
         this.logger.debug(
           `Telegram transaction message parsed: messageId=${input.messageId.toString()}`,

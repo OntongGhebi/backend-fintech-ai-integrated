@@ -99,6 +99,34 @@ export class TransactionConfirmationMessageService {
     ].join('\n');
   }
 
+  formatAIError(
+    errorCode: 'AI_UNAVAILABLE' | 'AI_TIMEOUT' | 'AI_PROVIDER_ERROR',
+  ): string {
+    switch (errorCode) {
+      case 'AI_TIMEOUT':
+        return [
+          '⏱️ AI sedang membutuhkan waktu terlalu lama untuk memproses pesan.',
+          '',
+          'Silakan coba kirim kembali beberapa saat lagi.',
+        ].join('\n');
+
+      case 'AI_UNAVAILABLE':
+        return [
+          '⚠️ AI sedang tidak tersedia.',
+          '',
+          'Silakan coba lagi beberapa saat lagi.',
+        ].join('\n');
+
+      case 'AI_PROVIDER_ERROR':
+      default:
+        return [
+          '⚠️ Terjadi masalah saat memproses pesan dengan AI.',
+          '',
+          'Silakan coba kembali beberapa saat lagi.',
+        ].join('\n');
+    }
+  }
+
   formatTransactionCreated(transaction: {
     id: string;
     type: string;

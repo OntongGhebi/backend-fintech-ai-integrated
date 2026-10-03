@@ -1,7 +1,10 @@
 import { TransactionIntent } from './transaction-intent.types';
 
 export type TransactionMessageParseStatus =
-  'PARSED' | 'UNSUPPORTED' | 'INVALID';
+  'PARSED' | 'UNSUPPORTED' | 'INVALID' | 'ERROR';
+
+export type TransactionMessageAIErrorCode =
+  'AI_UNAVAILABLE' | 'AI_TIMEOUT' | 'AI_PROVIDER_ERROR';
 
 export interface TransactionMessageInput {
   userId: string;
@@ -16,6 +19,7 @@ export interface ParsedTransactionMessage {
   status: TransactionMessageParseStatus;
   rawText: string;
   intent?: TransactionIntent;
+  errorCode?: TransactionMessageAIErrorCode;
 }
 
 export interface TransactionMessageParser {

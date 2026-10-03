@@ -28,22 +28,34 @@ export class AITransactionMessageParser implements TransactionMessageParser {
       };
     }
 
-    try {
-      const result = await this.aiTransactionIntelligenceService.analyze({
-        userId: input.userId,
-        text,
-      });
+    const result = await this.aiTransactionIntelligenceService.analyze({
+      userId: input.userId,
+      text,
+    });
 
-      if (result.status === 'UNSUPPORTED') {
-        return {
-          status: 'UNSUPPORTED',
-          rawText: input.text,
-        };
-      }
+    if (result.status === 'ERROR') {
+      this.logger.error(
+        `AI transaction intelligence failed: messageId=${input.messageId.toString()}, errorCode=${result.errorCode}`,
+      );
 
-      if (!result.intent || !result.entities) {
+      return {
+        status: 'ERROR',
+        rawText: input.text,
+        errorCode: result.errorCode,
+      };
+    }
+
+    if (result.status === 'UNSUPPORTED') {
+      return {
+        status: 'UNSUPPORTED',
+        rawText: input.text,
+      };
+    }
+
+    if (result.status === 'NEEDS_INFORMATION') {
+      if (!result.entities || !result.intent) {
         this.logger.warn(
-          `AI transaction intelligence returned incomplete result for message=${input.messageId.toString()}`,
+          `AI transaction intelligence returned incomplete information: messageId=${input.messageId.toString()}`,
         );
 
         return {
@@ -55,7 +67,7 @@ export class AITransactionMessageParser implements TransactionMessageParser {
       const { type, amount, description, accountHint, categoryHint } =
         result.entities;
 
-      if (!amount || amount <= 0) {
+      if (amount === undefined || amount <= 0 || !Number.isFinite(amount)) {
         return {
           status: 'INVALID',
           rawText: input.text,
@@ -76,13 +88,6 @@ export class AITransactionMessageParser implements TransactionMessageParser {
         };
       }
 
-      /**
-       * Telegram transaction intent currently supports
-       * income and expense only.
-       *
-       * Transfer will be integrated through a dedicated
-       * Telegram transfer flow in a later phase.
-       */
       if (type === 'TRANSFER') {
         return {
           status: 'UNSUPPORTED',
@@ -90,18 +95,6 @@ export class AITransactionMessageParser implements TransactionMessageParser {
         };
       }
 
-      /**
-       * Even when AI intelligence returns NEEDS_INFORMATION,
-       * the extracted transaction intent can still be passed
-       * to the existing Telegram resolution flow.
-       *
-       * This allows the existing flow to respond with:
-       * - NEEDS_ACCOUNT
-       * - NOT_FOUND
-       * - INVALID
-       *
-       * instead of silently dropping the transaction.
-       */
       return {
         status: 'PARSED',
         rawText: input.text,
@@ -117,17 +110,64 @@ export class AITransactionMessageParser implements TransactionMessageParser {
           source: 'AI',
         },
       };
-    } catch (error) {
+    }
+
+    if (!result.intent || !result.entities) {
       this.logger.warn(
-        `AI Telegram transaction intelligence failed for message=${input.messageId.toString()}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `AI transaction intelligence returned incomplete result: messageId=${input.messageId.toString()}`,
       );
 
+      return {
+        status: 'INVALID',
+        rawText: input.text,
+      };
+    }
+
+    const { type, amount, description, accountHint, categoryHint } =
+      result.entities;
+
+    if (amount === undefined || amount <= 0 || !Number.isFinite(amount)) {
+      return {
+        status: 'INVALID',
+        rawText: input.text,
+      };
+    }
+
+    if (type !== 'INCOME' && type !== 'EXPENSE' && type !== 'TRANSFER') {
       return {
         status: 'UNSUPPORTED',
         rawText: input.text,
       };
     }
+
+    if (!description?.trim()) {
+      return {
+        status: 'INVALID',
+        rawText: input.text,
+      };
+    }
+
+    if (type === 'TRANSFER') {
+      return {
+        status: 'UNSUPPORTED',
+        rawText: input.text,
+      };
+    }
+
+    return {
+      status: 'PARSED',
+      rawText: input.text,
+      intent: {
+        intent: 'CREATE_TRANSACTION',
+        transactionType: type,
+        amount,
+        description: description.trim(),
+        categoryHint: categoryHint?.trim() || undefined,
+        accountHint: accountHint?.trim() || undefined,
+        transactionDate: undefined,
+        confidence: result.intent.confidence,
+        source: 'AI',
+      },
+    };
   }
 }

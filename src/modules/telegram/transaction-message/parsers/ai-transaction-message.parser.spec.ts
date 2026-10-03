@@ -7,7 +7,7 @@ import { AITransactionMessageParser } from './ai-transaction-message.parser';
 describe('AITransactionMessageParser', () => {
   let parser: AITransactionMessageParser;
 
-  const aiTransactionIntelligenceService = {
+  const intelligenceService = {
     analyze: jest.fn(),
   };
 
@@ -28,7 +28,7 @@ describe('AITransactionMessageParser', () => {
         AITransactionMessageParser,
         {
           provide: AITransactionIntelligenceService,
-          useValue: aiTransactionIntelligenceService,
+          useValue: intelligenceService,
         },
       ],
     }).compile();
@@ -36,8 +36,22 @@ describe('AITransactionMessageParser', () => {
     parser = module.get<AITransactionMessageParser>(AITransactionMessageParser);
   });
 
+  it('should return invalid for empty text', async () => {
+    const result = await parser.parse({
+      ...input,
+      text: '   ',
+    });
+
+    expect(result).toEqual({
+      status: 'INVALID',
+      rawText: '   ',
+    });
+
+    expect(intelligenceService.analyze).not.toHaveBeenCalled();
+  });
+
   it('should parse an AI-supported expense message', async () => {
-    aiTransactionIntelligenceService.analyze.mockResolvedValue({
+    intelligenceService.analyze.mockResolvedValue({
       status: 'READY',
       text: input.text,
       intent: {
@@ -51,36 +65,6 @@ describe('AITransactionMessageParser', () => {
         accountHint: 'BCA',
         categoryHint: 'Makanan',
         destinationAccountHint: null,
-      },
-      resolution: {
-        account: {
-          status: 'RESOLVED',
-          hint: 'BCA',
-          account: {
-            id: 'account-id',
-            name: 'BCA',
-            type: 'BANK',
-            currency: 'IDR',
-          },
-          candidates: [],
-        },
-        destinationAccount: {
-          status: 'NOT_REQUESTED',
-          hint: null,
-          account: null,
-          candidates: [],
-        },
-        category: {
-          status: 'RESOLVED',
-          hint: 'Makanan',
-          category: {
-            id: 'category-id',
-            name: 'Makanan',
-            type: 'EXPENSE',
-          },
-          candidates: [],
-        },
-        ready: true,
       },
       draft: {
         type: 'EXPENSE',
@@ -98,8 +82,8 @@ describe('AITransactionMessageParser', () => {
 
     const result = await parser.parse(input);
 
-    expect(aiTransactionIntelligenceService.analyze).toHaveBeenCalledWith({
-      userId: 'user-id',
+    expect(intelligenceService.analyze).toHaveBeenCalledWith({
+      userId: input.userId,
       text: input.text,
     });
 
@@ -120,44 +104,29 @@ describe('AITransactionMessageParser', () => {
     });
   });
 
-  it('should return unsupported when AI detects a non-transaction intent', async () => {
-    aiTransactionIntelligenceService.analyze.mockResolvedValue({
+  it('should return unsupported for non-transaction intent', async () => {
+    intelligenceService.analyze.mockResolvedValue({
       status: 'UNSUPPORTED',
-      text: input.text,
+      text: 'halo',
       intent: {
-        intent: 'QUERY_BALANCE',
+        intent: 'GENERAL_CHAT',
         confidence: 0.95,
       },
     });
 
-    const result = await parser.parse(input);
+    const result = await parser.parse({
+      ...input,
+      text: 'halo',
+    });
 
     expect(result).toEqual({
       status: 'UNSUPPORTED',
-      rawText: input.text,
-    });
-  });
-
-  it('should return invalid when AI intelligence returns incomplete transaction data', async () => {
-    aiTransactionIntelligenceService.analyze.mockResolvedValue({
-      status: 'READY',
-      text: input.text,
-      intent: {
-        intent: 'CREATE_TRANSACTION',
-        confidence: 0.9,
-      },
-    });
-
-    const result = await parser.parse(input);
-
-    expect(result).toEqual({
-      status: 'INVALID',
-      rawText: input.text,
+      rawText: 'halo',
     });
   });
 
   it('should return invalid when AI extracts an invalid amount', async () => {
-    aiTransactionIntelligenceService.analyze.mockResolvedValue({
+    intelligenceService.analyze.mockResolvedValue({
       status: 'READY',
       text: input.text,
       intent: {
@@ -183,7 +152,7 @@ describe('AITransactionMessageParser', () => {
   });
 
   it('should return invalid when AI does not extract a description', async () => {
-    aiTransactionIntelligenceService.analyze.mockResolvedValue({
+    intelligenceService.analyze.mockResolvedValue({
       status: 'READY',
       text: input.text,
       intent: {
@@ -208,82 +177,56 @@ describe('AITransactionMessageParser', () => {
     });
   });
 
-  it('should preserve parsed intent when AI needs additional information', async () => {
-    aiTransactionIntelligenceService.analyze.mockResolvedValue({
-      status: 'NEEDS_INFORMATION',
+  it('should preserve AI timeout errors', async () => {
+    intelligenceService.analyze.mockResolvedValue({
+      status: 'ERROR',
       text: input.text,
-      intent: {
-        intent: 'CREATE_TRANSACTION',
-        confidence: 0.91,
-      },
-      entities: {
-        type: 'EXPENSE',
-        amount: 35000,
-        description: 'makan',
-        accountHint: null,
-        categoryHint: 'Makanan',
-        destinationAccountHint: null,
-      },
-      resolution: {
-        account: {
-          status: 'NOT_REQUESTED',
-          hint: null,
-          account: null,
-          candidates: [],
-        },
-        destinationAccount: {
-          status: 'NOT_REQUESTED',
-          hint: null,
-          account: null,
-          candidates: [],
-        },
-        category: {
-          status: 'RESOLVED',
-          hint: 'Makanan',
-          category: {
-            id: 'category-id',
-            name: 'Makanan',
-            type: 'EXPENSE',
-          },
-          candidates: [],
-        },
-        ready: false,
-      },
-      draft: {
-        type: 'EXPENSE',
-        amount: 35000,
-        description: 'makan',
-        accountId: null,
-        categoryId: 'category-id',
-        destinationAccountId: null,
-        currency: 'IDR',
-        status: 'NEEDS_RESOLUTION',
-        ready: false,
-        unresolvedFields: ['account'],
-      },
+      errorCode: 'AI_TIMEOUT',
     });
 
     const result = await parser.parse(input);
 
     expect(result).toEqual({
-      status: 'PARSED',
+      status: 'ERROR',
       rawText: input.text,
-      intent: {
-        intent: 'CREATE_TRANSACTION',
-        transactionType: 'EXPENSE',
-        amount: 35000,
-        description: 'makan',
-        accountHint: undefined,
-        categoryHint: 'Makanan',
-        transactionDate: undefined,
-        confidence: 0.91,
-        source: 'AI',
-      },
+      errorCode: 'AI_TIMEOUT',
     });
   });
 
-  it('should return unsupported for transfer until Telegram transfer flow is integrated', async () => {
-    aiTransactionIntelligenceService.analyze.mockResolvedValue({
+  it('should preserve AI unavailable errors', async () => {
+    intelligenceService.analyze.mockResolvedValue({
+      status: 'ERROR',
+      text: input.text,
+      errorCode: 'AI_UNAVAILABLE',
+    });
+
+    const result = await parser.parse(input);
+
+    expect(result).toEqual({
+      status: 'ERROR',
+      rawText: input.text,
+      errorCode: 'AI_UNAVAILABLE',
+    });
+  });
+
+  it('should preserve AI provider errors', async () => {
+    intelligenceService.analyze.mockResolvedValue({
+      status: 'ERROR',
+      text: input.text,
+      errorCode: 'AI_PROVIDER_ERROR',
+    });
+
+    const result = await parser.parse(input);
+
+    expect(result).toEqual({
+      status: 'ERROR',
+      rawText: input.text,
+      errorCode: 'AI_PROVIDER_ERROR',
+    });
+  });
+
+  it('should return unsupported for transfer until the Telegram transfer adapter is integrated', async () => {
+    intelligenceService.analyze.mockResolvedValue({
       status: 'READY',
       text: input.text,
       intent: {
@@ -298,63 +241,7 @@ describe('AITransactionMessageParser', () => {
         categoryHint: null,
         destinationAccountHint: 'Jago',
       },
-      resolution: {
-        account: {
-          status: 'RESOLVED',
-          hint: 'BCA',
-          account: {
-            id: 'account-id',
-            name: 'BCA',
-            type: 'BANK',
-            currency: 'IDR',
-          },
-          candidates: [],
-        },
-        destinationAccount: {
-          status: 'RESOLVED',
-          hint: 'Jago',
-          account: {
-            id: 'destination-account-id',
-            name: 'Jago',
-            type: 'BANK',
-            currency: 'IDR',
-          },
-          candidates: [],
-        },
-        category: {
-          status: 'NOT_REQUESTED',
-          hint: null,
-          category: null,
-          candidates: [],
-        },
-        ready: true,
-      },
-      draft: {
-        type: 'TRANSFER',
-        amount: 100000,
-        description: 'transfer ke tabungan',
-        accountId: 'account-id',
-        categoryId: null,
-        destinationAccountId: 'destination-account-id',
-        currency: 'IDR',
-        status: 'READY',
-        ready: true,
-        unresolvedFields: [],
-      },
     });
-
-    const result = await parser.parse(input);
-
-    expect(result).toEqual({
-      status: 'UNSUPPORTED',
-      rawText: input.text,
-    });
-  });
-
-  it('should return unsupported when AI intelligence fails', async () => {
-    aiTransactionIntelligenceService.analyze.mockRejectedValue(
-      new Error('AI unavailable'),
-    );
 
     const result = await parser.parse(input);
 

@@ -7,7 +7,7 @@ describe('TransactionConfirmationMessageService', () => {
     service = new TransactionConfirmationMessageService();
   });
 
-  const confirmation = {
+  const createConfirmation = (overrides: Record<string, unknown> = {}) => ({
     id: 'confirmation-id',
     userId: 'user-id',
     telegramAccountId: 'telegram-account-id',
@@ -37,17 +37,43 @@ describe('TransactionConfirmationMessageService', () => {
         confidence: 1,
       },
     },
-  };
+    ...overrides,
+  });
 
   it('should format pending transaction confirmation', () => {
-    const result = service.format(confirmation);
+    const result = service.format(createConfirmation());
 
     expect(result).toContain('Konfirmasi transaksi');
+
     expect(result).toContain('Pengeluaran');
+
     expect(result).toContain('Rp25.000');
+
     expect(result).toContain('beli makan');
+
     expect(result).toContain('YA');
+
     expect(result).toContain('BATAL');
+  });
+
+  it('should indicate AI processing source', () => {
+    const confirmation = createConfirmation();
+
+    confirmation.intent.processingSource = 'AI';
+
+    const result = service.format(confirmation as never);
+
+    expect(result).toContain('Transaksi dipahami menggunakan AI');
+  });
+
+  it('should not indicate AI processing source for deterministic transactions', () => {
+    const confirmation = createConfirmation();
+
+    confirmation.intent.processingSource = 'DETERMINISTIC';
+
+    const result = service.format(confirmation as never);
+
+    expect(result).not.toContain('Transaksi dipahami menggunakan AI');
   });
 
   it('should format confirmed message', () => {
@@ -72,31 +98,21 @@ describe('TransactionConfirmationMessageService', () => {
     expect(service.formatUnknownAction()).toContain('belum memahami');
   });
 
-  it('should indicate when a transaction was processed through AI', () => {
-    const aiConfirmation = {
-      ...confirmation,
-      intent: {
-        ...confirmation.intent,
-        processingSource: 'AI' as const,
-      },
-    };
+  it('should format AI unavailable error', () => {
+    const result = service.formatAIError('AI_UNAVAILABLE');
 
-    const result = service.format(aiConfirmation);
-
-    expect(result).toContain('🤖 Transaksi dipahami menggunakan AI.');
+    expect(result).toContain('AI sedang tidak tersedia');
   });
 
-  it('should not indicate AI processing for deterministic transactions', () => {
-    const deterministicConfirmation = {
-      ...confirmation,
-      intent: {
-        ...confirmation.intent,
-        processingSource: 'DETERMINISTIC' as const,
-      },
-    };
+  it('should format AI timeout error', () => {
+    const result = service.formatAIError('AI_TIMEOUT');
 
-    const result = service.format(deterministicConfirmation);
+    expect(result).toContain('membutuhkan waktu terlalu lama');
+  });
 
-    expect(result).not.toContain('🤖 Transaksi dipahami menggunakan AI.');
+  it('should format AI provider error', () => {
+    const result = service.formatAIError('AI_PROVIDER_ERROR');
+
+    expect(result).toContain('masalah saat memproses pesan dengan AI');
   });
 });

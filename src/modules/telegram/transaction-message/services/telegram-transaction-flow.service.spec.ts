@@ -28,6 +28,7 @@ describe('TelegramTransactionFlowService', () => {
 
   const confirmationMessageService = {
     format: jest.fn(),
+    formatAIError: jest.fn((errorCode: string) => `AI_ERROR:${errorCode}`),
   };
 
   const transactionConfirmationService = {
@@ -540,5 +541,157 @@ describe('TelegramTransactionFlowService', () => {
     await expect(service.handle(context)).resolves.toBeUndefined();
 
     expect(flowErrorService.handle).toHaveBeenCalledWith(processingError);
+  });
+
+  it('should send AI unavailable message when AI is unavailable', async () => {
+    transactionConfirmationService.handle.mockResolvedValue({
+      handled: false,
+      action: 'NONE',
+      status: 'NONE',
+      message: '',
+    });
+
+    pipelineService.process.mockResolvedValue({
+      status: 'ERROR',
+      rawText: context.content,
+      errorCode: 'AI_UNAVAILABLE',
+    });
+
+    await service.handle(context);
+
+    expect(confirmationMessageService.formatAIError).toHaveBeenCalledWith(
+      'AI_UNAVAILABLE',
+    );
+
+    expect(telegramService.sendMessage).toHaveBeenCalledWith({
+      chatId: '654321',
+      text: 'AI_ERROR:AI_UNAVAILABLE',
+    });
+
+    expect(resolutionService.resolve).not.toHaveBeenCalled();
+
+    expect(confirmationService.create).not.toHaveBeenCalled();
+  });
+
+  it('should send AI timeout message when AI times out', async () => {
+    transactionConfirmationService.handle.mockResolvedValue({
+      handled: false,
+      action: 'NONE',
+      status: 'NONE',
+      message: '',
+    });
+
+    pipelineService.process.mockResolvedValue({
+      status: 'ERROR',
+      rawText: context.content,
+      errorCode: 'AI_TIMEOUT',
+    });
+
+    await service.handle(context);
+
+    expect(confirmationMessageService.formatAIError).toHaveBeenCalledWith(
+      'AI_TIMEOUT',
+    );
+
+    expect(telegramService.sendMessage).toHaveBeenCalledWith({
+      chatId: '654321',
+      text: 'AI_ERROR:AI_TIMEOUT',
+    });
+
+    expect(resolutionService.resolve).not.toHaveBeenCalled();
+  });
+
+  it('should send AI provider error message', async () => {
+    transactionConfirmationService.handle.mockResolvedValue({
+      handled: false,
+      action: 'NONE',
+      status: 'NONE',
+      message: '',
+    });
+
+    pipelineService.process.mockResolvedValue({
+      status: 'ERROR',
+      rawText: context.content,
+      errorCode: 'AI_PROVIDER_ERROR',
+    });
+
+    await service.handle(context);
+
+    expect(confirmationMessageService.formatAIError).toHaveBeenCalledWith(
+      'AI_PROVIDER_ERROR',
+    );
+
+    expect(telegramService.sendMessage).toHaveBeenCalledWith({
+      chatId: '654321',
+      text: 'AI_ERROR:AI_PROVIDER_ERROR',
+    });
+
+    expect(confirmationService.create).not.toHaveBeenCalled();
+  });
+
+  it('should continue normal transaction flow for parsed messages', async () => {
+    transactionConfirmationService.handle.mockResolvedValue({
+      handled: false,
+      action: 'NONE',
+      status: 'NONE',
+      message: '',
+    });
+
+    pipelineService.process.mockResolvedValue({
+      status: 'PARSED',
+      rawText: context.content,
+      intent: {
+        intent: 'CREATE_TRANSACTION',
+        transactionType: 'EXPENSE',
+        amount: 25000,
+        description: 'beli makan',
+        accountHint: 'BCA',
+        categoryHint: 'Makanan',
+        source: 'AI',
+        confidence: 0.98,
+      },
+    });
+
+    resolutionService.resolve.mockResolvedValue({
+      status: 'RESOLVED',
+      intent: {
+        intent: 'CREATE_TRANSACTION',
+        transactionType: 'EXPENSE',
+        amount: 25000,
+        description: 'beli makan',
+        accountId: 'account-id',
+        categoryId: 'category-id',
+        source: 'AI',
+        confidence: 0.98,
+        originalIntent: {
+          intent: 'CREATE_TRANSACTION',
+          transactionType: 'EXPENSE',
+          amount: 25000,
+          description: 'beli makan',
+          accountHint: 'BCA',
+          categoryHint: 'Makanan',
+          source: 'AI',
+          confidence: 0.98,
+        },
+        processingSource: 'AI',
+      },
+    });
+
+    confirmationService.create.mockReturnValue({
+      id: 'confirmation-id',
+    });
+
+    confirmationMessageService.format.mockReturnValue('CONFIRMATION');
+
+    await service.handle(context);
+
+    expect(resolutionService.resolve).toHaveBeenCalled();
+
+    expect(confirmationService.create).toHaveBeenCalled();
+
+    expect(telegramService.sendMessage).toHaveBeenCalledWith({
+      chatId: '654321',
+      text: 'CONFIRMATION',
+    });
   });
 });

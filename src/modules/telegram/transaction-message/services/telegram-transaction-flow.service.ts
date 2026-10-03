@@ -2,14 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { TelegramMessageDispatchContext } from '../../services/telegram-message-dispatcher.service';
 import { TelegramService } from '../../services/telegram.service';
+import { TelegramTransactionFlowErrorService } from '../../services/transaction/telegram-transaction-flow-error.service';
 
 import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
 import { TransactionConfirmationService } from './transaction-confirmation.service';
 import { TransactionIntentResolutionService } from './transaction-intent-resolution.service';
 import { TransactionMessagePipelineService } from './transaction-message-pipeline.service';
 import { TelegramTransactionConfirmationService } from './telegram-transaction-confirmation.service';
+
 import { ResolvedTransactionIntent } from '../types/resolved-transaction-intent.types';
-import { TelegramTransactionFlowErrorService } from '../../services/transaction/telegram-transaction-flow-error.service';
 
 @Injectable()
 export class TelegramTransactionFlowService {
@@ -66,6 +67,30 @@ export class TelegramTransactionFlowService {
       messageId: context.messageId,
       text: context.content ?? '',
     });
+
+    if (parsed.status === 'ERROR') {
+      if (!parsed.errorCode) {
+        this.logger.error(
+          `AI transaction parsing failed without error code: messageId=${context.messageId.toString()}`,
+        );
+
+        await this.sendMessage(
+          context.chatId,
+          '⚠️ Terjadi masalah saat memproses pesan. Silakan coba lagi.',
+        );
+
+        return;
+      }
+
+      await this.sendMessage(
+        context.chatId,
+        this.transactionConfirmationMessageService.formatAIError(
+          parsed.errorCode,
+        ),
+      );
+
+      return;
+    }
 
     if (parsed.status !== 'PARSED' || !parsed.intent) {
       return;

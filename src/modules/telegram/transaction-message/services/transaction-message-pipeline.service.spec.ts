@@ -133,6 +133,26 @@ describe('TransactionMessagePipelineService', () => {
     expect(result).toEqual(parsedResult);
   });
 
+  it('should return AI error result without modification', async () => {
+    const input = createInput();
+
+    const parsedResult: ParsedTransactionMessage = {
+      status: 'ERROR',
+      rawText: input.text,
+      errorCode: 'AI_TIMEOUT',
+    };
+
+    parser.parse.mockResolvedValue(parsedResult);
+
+    const result = await service.process(input);
+
+    expect(result).toEqual(parsedResult);
+
+    expect(result.status).toBe('ERROR');
+
+    expect(result.errorCode).toBe('AI_TIMEOUT');
+  });
+
   it('should propagate parser errors', async () => {
     const input = createInput();
 
