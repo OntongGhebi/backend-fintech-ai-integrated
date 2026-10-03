@@ -365,5 +365,53 @@ describe('AIChatService', () => {
         temperature: 0.2,
       });
     });
+    it('should not persist an assistant message when AI completion fails', async () => {
+      const conversation = {
+        id: 'conversation-id',
+        userId: 'user-id',
+        title: null,
+        messages: [],
+      };
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce(conversation)
+        .mockResolvedValueOnce({
+          ...conversation,
+          messages: [
+            ...conversation.messages,
+            {
+              id: 'user-message-id',
+              role: AIMessageRole.USER,
+              content: 'Hello',
+              model: null,
+              createdAt: new Date(),
+            },
+          ],
+        });
+
+      aiConversationServiceMock.addMessage.mockResolvedValueOnce({
+        id: 'user-message-id',
+        role: AIMessageRole.USER,
+        content: 'Hello',
+        model: null,
+        createdAt: new Date(),
+      });
+
+      aiServiceMock.complete.mockRejectedValue(
+        new ServiceUnavailableException('AI service is currently unavailable'),
+      );
+
+      await expect(
+        service.sendMessage('user-id', 'conversation-id', 'Hello'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      expect(aiConversationServiceMock.addMessage).toHaveBeenCalledTimes(1);
+
+      expect(aiConversationServiceMock.addMessage).toHaveBeenCalledWith(
+        'user-id',
+        'conversation-id',
+        AIMessageRole.USER,
+        'Hello',
+      );
+    });
   });
 });

@@ -24,7 +24,7 @@ export interface AIChatResult {
 @Injectable()
 export class AIChatService {
   constructor(
-    private readonly aiConversationServie: AIConversationService,
+    private readonly aiConversationService: AIConversationService,
     private readonly aiService: AIService,
     private readonly aiConversationContextService: AIConversationContextService,
   ) {}
@@ -40,7 +40,7 @@ export class AIChatService {
       throw new Error('AI message content cannot be empty');
     }
 
-    const conversation = await this.aiConversationServie.findById(
+    const conversation = await this.aiConversationService.findById(
       userId,
       conversationId,
     );
@@ -49,14 +49,14 @@ export class AIChatService {
       throw new NotFoundException('AI conversation not found');
     }
 
-    await this.aiConversationServie.addMessage(
+    await this.aiConversationService.addMessage(
       userId,
       conversationId,
       AIMessageRole.USER,
       normalizedContent,
     );
 
-    const updatedConversation = await this.aiConversationServie.findById(
+    const updatedConversation = await this.aiConversationService.findById(
       userId,
       conversationId,
     );
@@ -76,7 +76,7 @@ export class AIChatService {
       temperature: 0.2,
     });
 
-    const assistantMessage = await this.aiConversationServie.addMessage(
+    const assistantMessage = await this.aiConversationService.addMessage(
       userId,
       conversationId,
       AIMessageRole.ASSISTANT,
@@ -94,7 +94,10 @@ export class AIChatService {
   }
 
   private buildAIMessageHistory(
-    messages: Array<{ role: AIMessageRole; content: string }>,
+    messages: Array<{
+      role: AIMessageRole;
+      content: string;
+    }>,
   ): AIMessage[] {
     return messages
       .filter(
@@ -113,10 +116,13 @@ export class AIChatService {
     switch (role) {
       case AIMessageRole.SYSTEM:
         return 'system';
+
       case AIMessageRole.USER:
         return 'user';
+
       case AIMessageRole.ASSISTANT:
         return 'assistant';
+
       default:
         throw new Error(`Unknown AI message role: ${role}`);
     }

@@ -1,6 +1,6 @@
 import { ServiceUnavailableException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 
 import { AI_PROVIDER } from '../constants/ai.constants';
 import { AIService } from './ai.service';
@@ -9,13 +9,13 @@ import { AIProvider } from '../providers/ai-provider.interface';
 describe('AIService', () => {
   let service: AIService;
 
-  const configServiceMock = {
-    get: jest.fn(),
-  };
-
-  const providerMock: AIProvider = {
+  const provider: jest.Mocked<AIProvider> = {
     getMetadata: jest.fn(),
     complete: jest.fn(),
+  };
+
+  const configService = {
+    get: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -26,11 +26,11 @@ describe('AIService', () => {
         AIService,
         {
           provide: ConfigService,
-          useValue: configServiceMock,
+          useValue: configService,
         },
         {
           provide: AI_PROVIDER,
-          useValue: providerMock,
+          useValue: provider,
         },
       ],
     }).compile();
@@ -40,19 +40,16 @@ describe('AIService', () => {
 
   describe('isEnabled', () => {
     it('should return true when AI is enabled', () => {
-      configServiceMock.get.mockReturnValue(true);
+      configService.get.mockReturnValue(true);
 
       expect(service.isEnabled()).toBe(true);
-
-      expect(configServiceMock.get).toHaveBeenCalledWith('ai.enabled', false);
+      expect(configService.get).toHaveBeenCalledWith('ai.enabled', false);
     });
 
     it('should return false when AI is disabled', () => {
-      configServiceMock.get.mockReturnValue(false);
+      configService.get.mockReturnValue(false);
 
       expect(service.isEnabled()).toBe(false);
-
-      expect(configServiceMock.get).toHaveBeenCalledWith('ai.enabled', false);
     });
   });
 
@@ -63,11 +60,10 @@ describe('AIService', () => {
         model: 'test-model',
       };
 
-      providerMock.getMetadata.mockReturnValue(metadata);
+      provider.getMetadata.mockReturnValue(metadata);
 
       expect(service.getProviderMetadata()).toEqual(metadata);
-
-      expect(providerMock.getMetadata).toHaveBeenCalledTimes(1);
+      expect(provider.getMetadata).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -76,54 +72,73 @@ describe('AIService', () => {
       messages: [
         {
           role: 'user' as const,
-          content: 'test message',
+          content: 'Hello',
         },
       ],
+      temperature: 0.2,
     };
 
     it('should reject when AI is disabled', async () => {
-      configServiceMock.get.mockReturnValue(false);
+      configService.get.mockReturnValue(false);
 
       await expect(service.complete(request)).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
 
-      expect(providerMock.complete).not.toHaveBeenCalled();
+      expect(provider.complete).not.toHaveBeenCalled();
     });
 
-    it('should delegate to the configured provider', async () => {
-      configServiceMock.get.mockReturnValue(true);
+    it('should delegate completion to provider', async () => {
+      configService.get.mockReturnValue(true);
 
       const response = {
-        content: 'test response',
+        content: 'Hello!',
         provider: 'openai-compatible',
         model: 'test-model',
         usage: {
           inputTokens: 10,
-          outputTokens: 20,
-          totalTokens: 30,
+          outputTokens: 5,
+          totalTokens: 15,
         },
       };
 
-      providerMock.complete.mockResolvedValue(response);
+      provider.complete.mockResolvedValue(response);
 
       await expect(service.complete(request)).resolves.toEqual(response);
 
-      expect(providerMock.complete).toHaveBeenCalledTimes(1);
-
-      expect(providerMock.complete).toHaveBeenCalledWith(request);
+      expect(provider.complete).toHaveBeenCalledWith(request);
     });
 
-    it('should propagate provider errors', async () => {
-      configServiceMock.get.mockReturnValue(true);
+    it('should preserve ServiceUnavailableException from provider', async () => {
+      configService.get.mockReturnValue(true);
 
-      const error = new Error('AI provider request failed');
+      const error = new ServiceUnavailableException('Provider unavailable');
 
-      providerMock.complete.mockRejectedValue(error);
+      provider.complete.mockRejectedValue(error);
 
-      await expect(service.complete(request)).rejects.toThrow(
-        'AI provider request failed',
-      );
+      await expect(service.complete(request)).rejects.toBe(error);
+    });
+
+    it('should normalize unexpected provider errors', async () => {
+      configService.get.mockReturnValue(true);
+
+      provider.complete.mockRejectedValue(new Error('Connection refused'));
+
+      await expect(service.complete(request)).rejects.toMatchObject({
+        constructor: ServiceUnavailableException,
+        message: 'AI service is currently unavailable',
+      });
+    });
+
+    it('should normalize string provider errors', async () => {
+      configService.get.mockReturnValue(true);
+
+      provider.complete.mockRejectedValue('provider failure');
+
+      await expect(service.complete(request)).rejects.toMatchObject({
+        constructor: ServiceUnavailableException,
+        message: 'AI service is currently unavailable',
+      });
     });
   });
 });

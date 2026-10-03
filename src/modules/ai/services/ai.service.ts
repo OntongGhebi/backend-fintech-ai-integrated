@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -12,9 +13,11 @@ import {
   AICompletionResponse,
   AIProviderMetadata,
 } from '../types/ai.types';
+import { AI_ERROR_MESSAGES } from '../constants/ai-error.constants';
 
 @Injectable()
 export class AIService {
+  private readonly logger = new Logger(AIService.name);
   constructor(
     private readonly configService: ConfigService,
     @Inject(AI_PROVIDER)
@@ -31,9 +34,26 @@ export class AIService {
 
   async complete(request: AICompletionRequest): Promise<AICompletionResponse> {
     if (!this.isEnabled()) {
-      throw new ServiceUnavailableException('AI service is disabled');
+      throw new ServiceUnavailableException(
+        AI_ERROR_MESSAGES.SERVICE_UNAVAILABLE,
+      );
     }
 
-    return this.provider.complete(request);
+    try {
+      return await this.provider.complete(request);
+    } catch (error) {
+      this.logger.error(
+        AI_ERROR_MESSAGES.PROVIDER_FAILED,
+        error instanceof Error ? error.stack : String(error),
+      );
+
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
+
+      throw new ServiceUnavailableException(
+        AI_ERROR_MESSAGES.SERVICE_UNAVAILABLE,
+      );
+    }
   }
 }
