@@ -71,4 +71,32 @@ describe('TransactionConfirmationMessageService', () => {
   it('should format unknown action message', () => {
     expect(service.formatUnknownAction()).toContain('belum memahami');
   });
+
+  it('should indicate when a transaction was processed through AI', () => {
+    const aiConfirmation = {
+      ...confirmation,
+      intent: {
+        ...confirmation.intent,
+        processingSource: 'AI' as const,
+      },
+    };
+
+    const result = service.format(aiConfirmation);
+
+    expect(result).toContain('🤖 Transaksi dipahami menggunakan AI.');
+  });
+
+  it('should not indicate AI processing for deterministic transactions', () => {
+    const deterministicConfirmation = {
+      ...confirmation,
+      intent: {
+        ...confirmation.intent,
+        processingSource: 'DETERMINISTIC' as const,
+      },
+    };
+
+    const result = service.format(deterministicConfirmation);
+
+    expect(result).not.toContain('🤖 Transaksi dipahami menggunakan AI.');
+  });
 });

@@ -27,7 +27,7 @@ describe('TelegramTransactionConfirmationService', () => {
 
   const transactionConfirmationMessageService = {
     format: jest.fn(),
-    formatConfirmed: jest.fn(),
+    formatConfirmed: jest.fn().mockReturnValue('CONFIRMED'),
     formatCancelled: jest.fn().mockReturnValue('CANCELLED'),
     formatExpired: jest.fn().mockReturnValue('EXPIRED'),
     formatNoPendingConfirmation: jest.fn().mockReturnValue('NO_PENDING'),
@@ -467,5 +467,38 @@ describe('TelegramTransactionConfirmationService', () => {
     expect(transactionConfirmationService.markCompleted).not.toHaveBeenCalled();
 
     expect(errorService.handle).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('should not process a confirmation twice when the confirmation is already confirmed', async () => {
+    const confirmation = createConfirmation();
+
+    transactionConfirmationService.findLatestByChatId.mockReturnValue({
+      ...confirmation,
+      status: 'CONFIRMED',
+    });
+
+    const result = await service.handle(
+      createContext({
+        text: 'YA',
+      }),
+    );
+
+    expect(result).toEqual({
+      handled: true,
+      action: 'NONE',
+      status: 'CONFIRMED',
+      message: 'CONFIRMED',
+    });
+
+    expect(
+      transactionConfirmationMessageService.formatConfirmed,
+    ).toHaveBeenCalledTimes(1);
+    expect(transactionConfirmationService.confirm).not.toHaveBeenCalled();
+
+    expect(
+      transactionConfirmationService.markProcessing,
+    ).not.toHaveBeenCalled();
+
+    expect(confirmedTransactionService.create).not.toHaveBeenCalled();
   });
 });

@@ -5,6 +5,8 @@ import {
   TransactionIntent,
 } from './transaction-intent.types';
 
+export type TransactionIntentProcessingSource = 'DETERMINISTIC' | 'AI';
+
 export interface ResolvedTransactionIntent {
   intent: TelegramTransactionIntentType;
   transactionType?: TelegramTransactionType;
@@ -15,5 +17,6 @@ export interface ResolvedTransactionIntent {
   transactionDate?: Date;
   confidence?: number;
   source: TelegramTransactionIntentSource;
+  processingSource?: TransactionIntentProcessingSource;
   originalIntent: TransactionIntent;
 }

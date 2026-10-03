@@ -33,6 +33,10 @@ export class TransactionConfirmationMessageService {
       lines.push(category);
     }
 
+    if (intent.processingSource === 'AI') {
+      lines.push('', '🤖 Transaksi dipahami menggunakan AI.');
+    }
+
     lines.push(
       '',
       'Apakah transaksi ini benar?',

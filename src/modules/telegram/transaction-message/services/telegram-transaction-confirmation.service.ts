@@ -88,8 +88,15 @@ export class TelegramTransactionConfirmationService {
         return this.noPendingResult();
 
       case 'PENDING':
-      case 'CONFIRMED':
         break;
+
+      case 'CONFIRMED':
+        return {
+          handled: true,
+          action: 'NONE',
+          status: 'CONFIRMED',
+          message: this.transactionConfirmationMessageService.formatConfirmed(),
+        };
 
       default:
         return this.noPendingResult();
@@ -148,6 +155,10 @@ export class TelegramTransactionConfirmationService {
       };
     }
 
+    if (confirmation.status !== 'CONFIRMED') {
+      return this.noPendingResult();
+    }
+
     return this.processConfirmed(confirmation);
   }
 
@@ -167,6 +178,10 @@ export class TelegramTransactionConfirmationService {
         status: 'EXPIRED',
         message: this.transactionConfirmationMessageService.formatExpired(),
       };
+    }
+
+    if (result.status !== 'CANCELLED') {
+      return this.noPendingResult();
     }
 
     return {

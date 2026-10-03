@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+
 import { AccountsRepository } from 'src/modules/accounts/repositories/accounts.repository';
 import { CategoriesRepository } from 'src/modules/categories/repositories/categories.repository';
+
 import { ResolvedTransactionIntent } from '../types/resolved-transaction-intent.types';
 import { TransactionIntent } from '../types/transaction-intent.types';
 import { TransactionIntentResolutionResult } from '../types/transaction-intent-resolution.types';
@@ -108,7 +110,7 @@ export class TransactionIntentResolutionService {
       ) {
         return {
           status: 'INVALID',
-          message: 'The selected caetgory is not an income category',
+          message: 'The selected category is not an income category',
         };
       }
 
@@ -135,6 +137,8 @@ export class TransactionIntentResolutionService {
       transactionDate: transactionIntent.transactionDate,
       confidence: transactionIntent.confidence,
       source: transactionIntent.source,
+      processingSource:
+        transactionIntent.source === 'AI' ? 'AI' : 'DETERMINISTIC',
       originalIntent: transactionIntent,
     };
 
