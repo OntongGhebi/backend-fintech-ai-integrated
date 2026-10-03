@@ -21,6 +21,7 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { DatabaseModule } from 'src/database/database.module';
 import { AIConversationContextService } from './services/ai-conversation-context.service';
 import { AIRetryService } from './services/ai-retry.service';
+import { AIUsageService } from './services/ai-usage.service';
 
 @Module({
   imports: [DatabaseModule, TransactionsModule],
@@ -30,6 +31,7 @@ import { AIRetryService } from './services/ai-retry.service';
     AIConversationService,
     AIConversationContextService,
     AIRetryService,
+    AIUsageService,
 
     AIIntentClassifierService,
     AITransactionEntityExtractorService,
@@ -74,6 +76,7 @@ import { AIRetryService } from './services/ai-retry.service';
     AIConversationService,
     AIConversationContextService,
     AIRetryService,
+    AIUsageService,
 
     AIIntentClassifierService,
     AITransactionEntityExtractorService,

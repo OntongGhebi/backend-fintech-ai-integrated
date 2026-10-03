@@ -7,7 +7,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 
 import { AI_PROVIDER } from '../constants/ai.constants';
-import { AI_ERROR_MESSAGES } from '../constants/ai-error.constants';
+import {
+  AI_USAGE_FEATURES,
+  AIUsageFeature,
+} from '../constants/ai-usage.constants';
+
 import type { AIProvider } from '../providers/ai-provider.interface';
 import {
   AICompletionRequest,
@@ -15,6 +19,8 @@ import {
   AIProviderMetadata,
 } from '../types/ai.types';
 import { AIRetryService } from './ai-retry.service';
+import { AIUsageService } from './ai-usage.service';
+import { AI_ERROR_MESSAGES } from '../constants/ai-error.constants';
 
 @Injectable()
 export class AIService {
@@ -25,6 +31,7 @@ export class AIService {
     @Inject(AI_PROVIDER)
     private readonly provider: AIProvider,
     private readonly aiRetryService: AIRetryService,
+    private readonly aiUsageService: AIUsageService,
   ) {}
 
   isEnabled(): boolean {
@@ -35,7 +42,13 @@ export class AIService {
     return this.provider.getMetadata();
   }
 
-  async complete(request: AICompletionRequest): Promise<AICompletionResponse> {
+  async complete(
+    request: AICompletionRequest,
+    options?: {
+      userId?: string;
+      feature?: AIUsageFeature;
+    },
+  ): Promise<AICompletionResponse> {
     if (!this.isEnabled()) {
       throw new ServiceUnavailableException(
         AI_ERROR_MESSAGES.SERVICE_UNAVAILABLE,
@@ -43,9 +56,19 @@ export class AIService {
     }
 
     try {
-      return await this.aiRetryService.execute(() =>
+      const completion = await this.aiRetryService.execute(() =>
         this.provider.complete(request),
       );
+
+      if (options?.userId) {
+        await this.aiUsageService.recordCompletion(
+          options.userId,
+          completion,
+          options.feature ?? AI_USAGE_FEATURES.CHAT,
+        );
+      }
+
+      return completion;
     } catch (error) {
       this.logger.error(
         AI_ERROR_MESSAGES.PROVIDER_FAILED,

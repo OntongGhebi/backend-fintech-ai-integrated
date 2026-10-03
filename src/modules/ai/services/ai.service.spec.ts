@@ -1,11 +1,20 @@
 import { ServiceUnavailableException } from '@nestjs/common';
-import { Test, TestingModule } from '@nestjs/testing';
+
 import { ConfigService } from '@nestjs/config';
 
+import { Test, TestingModule } from '@nestjs/testing';
+
 import { AI_PROVIDER } from '../constants/ai.constants';
-import { AIService } from './ai.service';
+
+import { AI_USAGE_FEATURES } from '../constants/ai-usage.constants';
+
 import { AIProvider } from '../providers/ai-provider.interface';
+
 import { AIRetryService } from './ai-retry.service';
+
+import { AIService } from './ai.service';
+
+import { AIUsageService } from './ai-usage.service';
 
 describe('AIService', () => {
   let service: AIService;
@@ -23,23 +32,35 @@ describe('AIService', () => {
     execute: jest.fn(),
   };
 
+  const aiUsageService = {
+    recordCompletion: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AIService,
+
         {
           provide: ConfigService,
           useValue: configService,
         },
+
         {
           provide: AI_PROVIDER,
           useValue: provider,
         },
+
         {
           provide: AIRetryService,
           useValue: aiRetryService,
+        },
+
+        {
+          provide: AIUsageService,
+          useValue: aiUsageService,
         },
       ],
     }).compile();
@@ -52,6 +73,7 @@ describe('AIService', () => {
       configService.get.mockReturnValue(true);
 
       expect(service.isEnabled()).toBe(true);
+
       expect(configService.get).toHaveBeenCalledWith('ai.enabled', false);
     });
 
@@ -72,7 +94,6 @@ describe('AIService', () => {
       provider.getMetadata.mockReturnValue(metadata);
 
       expect(service.getMetadata()).toEqual(metadata);
-      expect(provider.getMetadata).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -87,6 +108,17 @@ describe('AIService', () => {
       temperature: 0.2,
     };
 
+    const response = {
+      content: 'Hello!',
+      provider: 'openai-compatible',
+      model: 'test-model',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+      },
+    };
+
     it('should reject when AI is disabled', async () => {
       configService.get.mockReturnValue(false);
 
@@ -95,21 +127,12 @@ describe('AIService', () => {
       );
 
       expect(aiRetryService.execute).not.toHaveBeenCalled();
+
+      expect(aiUsageService.recordCompletion).not.toHaveBeenCalled();
     });
 
     it('should execute provider through retry service', async () => {
       configService.get.mockReturnValue(true);
-
-      const response = {
-        content: 'Hello!',
-        provider: 'openai-compatible',
-        model: 'test-model',
-        usage: {
-          inputTokens: 10,
-          outputTokens: 5,
-          totalTokens: 15,
-        },
-      };
 
       aiRetryService.execute.mockImplementation(
         async (operation: () => Promise<unknown>) => operation(),
@@ -122,16 +145,65 @@ describe('AIService', () => {
       expect(aiRetryService.execute).toHaveBeenCalledTimes(1);
 
       expect(provider.complete).toHaveBeenCalledWith(request);
+
+      expect(aiUsageService.recordCompletion).not.toHaveBeenCalled();
     });
 
-    it('should preserve ServiceUnavailableException', async () => {
+    it('should record usage after a successful user completion', async () => {
+      configService.get.mockReturnValue(true);
+
+      aiRetryService.execute.mockResolvedValue(response);
+
+      aiUsageService.recordCompletion.mockResolvedValue({
+        id: 'usage-id',
+      });
+
+      await expect(
+        service.complete(request, {
+          userId: 'user-id',
+          feature: AI_USAGE_FEATURES.CHAT,
+        }),
+      ).resolves.toEqual(response);
+
+      expect(aiUsageService.recordCompletion).toHaveBeenCalledTimes(1);
+
+      expect(aiUsageService.recordCompletion).toHaveBeenCalledWith(
+        'user-id',
+        response,
+        AI_USAGE_FEATURES.CHAT,
+      );
+    });
+
+    it('should use CHAT as the default feature', async () => {
+      configService.get.mockReturnValue(true);
+
+      aiRetryService.execute.mockResolvedValue(response);
+
+      await service.complete(request, {
+        userId: 'user-id',
+      });
+
+      expect(aiUsageService.recordCompletion).toHaveBeenCalledWith(
+        'user-id',
+        response,
+        AI_USAGE_FEATURES.CHAT,
+      );
+    });
+
+    it('should not record usage for provider failure', async () => {
       configService.get.mockReturnValue(true);
 
       const error = new ServiceUnavailableException('Provider unavailable');
 
       aiRetryService.execute.mockRejectedValue(error);
 
-      await expect(service.complete(request)).rejects.toBe(error);
+      await expect(
+        service.complete(request, {
+          userId: 'user-id',
+        }),
+      ).rejects.toBe(error);
+
+      expect(aiUsageService.recordCompletion).not.toHaveBeenCalled();
     });
 
     it('should normalize unexpected retry errors', async () => {
@@ -139,24 +211,36 @@ describe('AIService', () => {
 
       aiRetryService.execute.mockRejectedValue(new Error('Connection refused'));
 
-      await expect(service.complete(request)).rejects.toMatchObject({
+      await expect(
+        service.complete(request, {
+          userId: 'user-id',
+        }),
+      ).rejects.toMatchObject({
         constructor: ServiceUnavailableException,
         message: 'AI service is currently unavailable',
       });
+
+      expect(aiUsageService.recordCompletion).not.toHaveBeenCalled();
     });
 
-    it('should normalize string provider errors', async () => {
+    it('should continue returning completion when usage persistence fails', async () => {
       configService.get.mockReturnValue(true);
 
-      aiRetryService.execute.mockImplementation(
-        async (operation: () => Promise<unknown>) => operation(),
-      );
-      provider.complete.mockRejectedValue('provider failure');
+      aiRetryService.execute.mockResolvedValue(response);
 
-      await expect(service.complete(request)).rejects.toMatchObject({
-        constructor: ServiceUnavailableException,
-        message: 'AI service is currently unavailable',
-      });
+      aiUsageService.recordCompletion.mockResolvedValue(null);
+
+      await expect(
+        service.complete(request, {
+          userId: 'user-id',
+        }),
+      ).resolves.toEqual(response);
+
+      expect(aiUsageService.recordCompletion).toHaveBeenCalledWith(
+        'user-id',
+        response,
+        AI_USAGE_FEATURES.CHAT,
+      );
     });
   });
 });

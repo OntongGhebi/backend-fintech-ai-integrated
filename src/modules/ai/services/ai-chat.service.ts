@@ -4,6 +4,7 @@ import { AIService } from './ai.service';
 import { AICompletionResponse, AIMessage } from '../types/ai.types';
 import { AIConversationService } from './ai-conversation.service';
 import { AIConversationContextService } from './ai-conversation-context.service';
+import { AI_USAGE_FEATURES } from '../constants/ai-usage.constants';
 
 export interface AIChatMessageResult {
   id: string;
@@ -71,10 +72,16 @@ export class AIChatService {
 
     const messages = this.buildAIMessageHistory(contextMessages);
 
-    const completion = await this.aiService.complete({
-      messages,
-      temperature: 0.2,
-    });
+    const completion = await this.aiService.complete(
+      {
+        messages,
+        temperature: 0.2,
+      },
+      {
+        userId,
+        feature: AI_USAGE_FEATURES.CHAT,
+      },
+    );
 
     const assistantMessage = await this.aiConversationService.addMessage(
       userId,
