@@ -1,12 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { AIIntentClassifierService } from '../../../ai/services/ai-intent-classifier.service';
-import { AITransactionEntityExtractorService } from '../../../ai/services/ai-transaction-entity-extractor.service';
+import { AITransactionIntelligenceService } from '../../../ai/services/ai-transaction-intelligence.service';
 
 import type {
+  ParsedTransactionMessage,
   TransactionMessageInput,
   TransactionMessageParser,
-  ParsedTransactionMessage,
 } from '../types/transaction-message.types';
 
 @Injectable()
@@ -14,8 +13,7 @@ export class AITransactionMessageParser implements TransactionMessageParser {
   private readonly logger = new Logger(AITransactionMessageParser.name);
 
   constructor(
-    private readonly aiIntentClassifierService: AIIntentClassifierService,
-    private readonly aiTransactionEntityExtractorService: AITransactionEntityExtractorService,
+    private readonly aiTransactionIntelligenceService: AITransactionIntelligenceService,
   ) {}
 
   async parse(
@@ -31,76 +29,97 @@ export class AITransactionMessageParser implements TransactionMessageParser {
     }
 
     try {
-      const intent = await this.aiIntentClassifierService.classify(text);
+      const result = await this.aiTransactionIntelligenceService.analyze({
+        userId: input.userId,
+        text,
+      });
 
-      if (intent.intent !== 'CREATE_TRANSACTION') {
+      if (result.status === 'UNSUPPORTED') {
         return {
           status: 'UNSUPPORTED',
           rawText: input.text,
         };
       }
 
-      const entities =
-        await this.aiTransactionEntityExtractorService.extract(text);
+      if (!result.intent || !result.entities) {
+        this.logger.warn(
+          `AI transaction intelligence returned incomplete result for message=${input.messageId.toString()}`,
+        );
 
-      if (entities.amount === undefined || entities.amount <= 0) {
         return {
           status: 'INVALID',
           rawText: input.text,
         };
       }
 
-      if (
-        entities.type !== 'INCOME' &&
-        entities.type !== 'EXPENSE' &&
-        entities.type !== 'TRANSFER'
-      ) {
-        return {
-          status: 'UNSUPPORTED',
-          rawText: input.text,
-        };
-      }
+      const { type, amount, description, accountHint, categoryHint } =
+        result.entities;
 
-      if (!entities.description?.trim()) {
+      if (!amount || amount <= 0) {
         return {
           status: 'INVALID',
           rawText: input.text,
         };
       }
 
-      if (entities.type === 'TRANSFER') {
+      if (type !== 'INCOME' && type !== 'EXPENSE' && type !== 'TRANSFER') {
         return {
           status: 'UNSUPPORTED',
           rawText: input.text,
         };
       }
 
+      if (!description?.trim()) {
+        return {
+          status: 'INVALID',
+          rawText: input.text,
+        };
+      }
+
+      /**
+       * Telegram transaction intent currently supports
+       * income and expense only.
+       *
+       * Transfer will be integrated through a dedicated
+       * Telegram transfer flow in a later phase.
+       */
+      if (type === 'TRANSFER') {
+        return {
+          status: 'UNSUPPORTED',
+          rawText: input.text,
+        };
+      }
+
+      /**
+       * Even when AI intelligence returns NEEDS_INFORMATION,
+       * the extracted transaction intent can still be passed
+       * to the existing Telegram resolution flow.
+       *
+       * This allows the existing flow to respond with:
+       * - NEEDS_ACCOUNT
+       * - NOT_FOUND
+       * - INVALID
+       *
+       * instead of silently dropping the transaction.
+       */
       return {
         status: 'PARSED',
         rawText: input.text,
-
         intent: {
           intent: 'CREATE_TRANSACTION',
-          transactionType: entities.type,
-
-          amount: entities.amount,
-
-          description: entities.description.trim(),
-
-          categoryHint: entities.categoryHint ?? undefined,
-
-          accountHint: entities.accountHint ?? undefined,
-
+          transactionType: type,
+          amount,
+          description: description.trim(),
+          categoryHint: categoryHint?.trim() || undefined,
+          accountHint: accountHint?.trim() || undefined,
           transactionDate: undefined,
-
-          confidence: intent.confidence,
-
+          confidence: result.intent.confidence,
           source: 'AI',
         },
       };
     } catch (error) {
       this.logger.warn(
-        `AI Telegram transaction parsing failed for message=${input.messageId.toString()}: ${
+        `AI Telegram transaction intelligence failed for message=${input.messageId.toString()}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
