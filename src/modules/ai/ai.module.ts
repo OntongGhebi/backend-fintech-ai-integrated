@@ -20,6 +20,7 @@ import { AITransactionPersistenceService } from './services/ai-transaction-persi
 import { TransactionsModule } from '../transactions/transactions.module';
 import { DatabaseModule } from 'src/database/database.module';
 import { AIConversationContextService } from './services/ai-conversation-context.service';
+import { AIRetryService } from './services/ai-retry.service';
 
 @Module({
   imports: [DatabaseModule, TransactionsModule],
@@ -27,13 +28,16 @@ import { AIConversationContextService } from './services/ai-conversation-context
     AIService,
     AIChatService,
     AIConversationService,
+    AIConversationContextService,
+    AIRetryService,
+
     AIIntentClassifierService,
     AITransactionEntityExtractorService,
     AITransactionResolutionService,
     AITransactionDraftService,
     AITransactionConfirmationService,
     AITransactionPersistenceService,
-    AIConversationContextService,
+
     AIConversationRepository,
 
     OpenAICompatibleAIProvider,
@@ -68,13 +72,16 @@ import { AIConversationContextService } from './services/ai-conversation-context
     AIService,
     AIChatService,
     AIConversationService,
+    AIConversationContextService,
+    AIRetryService,
+
     AIIntentClassifierService,
     AITransactionEntityExtractorService,
     AITransactionResolutionService,
     AITransactionDraftService,
     AITransactionConfirmationService,
     AITransactionPersistenceService,
-    AIConversationContextService,
+
     AIConversationRepository,
     AI_PROVIDER,
   ],

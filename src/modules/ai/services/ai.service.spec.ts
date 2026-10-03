@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { AI_PROVIDER } from '../constants/ai.constants';
 import { AIService } from './ai.service';
 import { AIProvider } from '../providers/ai-provider.interface';
+import { AIRetryService } from './ai-retry.service';
 
 describe('AIService', () => {
   let service: AIService;
@@ -16,6 +17,10 @@ describe('AIService', () => {
 
   const configService = {
     get: jest.fn(),
+  };
+
+  const aiRetryService = {
+    execute: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -31,6 +36,10 @@ describe('AIService', () => {
         {
           provide: AI_PROVIDER,
           useValue: provider,
+        },
+        {
+          provide: AIRetryService,
+          useValue: aiRetryService,
         },
       ],
     }).compile();
@@ -53,7 +62,7 @@ describe('AIService', () => {
     });
   });
 
-  describe('getProviderMetadata', () => {
+  describe('getMetadata', () => {
     it('should return provider metadata', () => {
       const metadata = {
         provider: 'openai-compatible',
@@ -62,7 +71,7 @@ describe('AIService', () => {
 
       provider.getMetadata.mockReturnValue(metadata);
 
-      expect(service.getProviderMetadata()).toEqual(metadata);
+      expect(service.getMetadata()).toEqual(metadata);
       expect(provider.getMetadata).toHaveBeenCalledTimes(1);
     });
   });
@@ -85,10 +94,10 @@ describe('AIService', () => {
         ServiceUnavailableException,
       );
 
-      expect(provider.complete).not.toHaveBeenCalled();
+      expect(aiRetryService.execute).not.toHaveBeenCalled();
     });
 
-    it('should delegate completion to provider', async () => {
+    it('should execute provider through retry service', async () => {
       configService.get.mockReturnValue(true);
 
       const response = {
@@ -102,27 +111,33 @@ describe('AIService', () => {
         },
       };
 
+      aiRetryService.execute.mockImplementation(
+        async (operation: () => Promise<unknown>) => operation(),
+      );
+
       provider.complete.mockResolvedValue(response);
 
       await expect(service.complete(request)).resolves.toEqual(response);
 
+      expect(aiRetryService.execute).toHaveBeenCalledTimes(1);
+
       expect(provider.complete).toHaveBeenCalledWith(request);
     });
 
-    it('should preserve ServiceUnavailableException from provider', async () => {
+    it('should preserve ServiceUnavailableException', async () => {
       configService.get.mockReturnValue(true);
 
       const error = new ServiceUnavailableException('Provider unavailable');
 
-      provider.complete.mockRejectedValue(error);
+      aiRetryService.execute.mockRejectedValue(error);
 
       await expect(service.complete(request)).rejects.toBe(error);
     });
 
-    it('should normalize unexpected provider errors', async () => {
+    it('should normalize unexpected retry errors', async () => {
       configService.get.mockReturnValue(true);
 
-      provider.complete.mockRejectedValue(new Error('Connection refused'));
+      aiRetryService.execute.mockRejectedValue(new Error('Connection refused'));
 
       await expect(service.complete(request)).rejects.toMatchObject({
         constructor: ServiceUnavailableException,
@@ -133,6 +148,9 @@ describe('AIService', () => {
     it('should normalize string provider errors', async () => {
       configService.get.mockReturnValue(true);
 
+      aiRetryService.execute.mockImplementation(
+        async (operation: () => Promise<unknown>) => operation(),
+      );
       provider.complete.mockRejectedValue('provider failure');
 
       await expect(service.complete(request)).rejects.toMatchObject({
