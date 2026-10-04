@@ -2,28 +2,35 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { AI_PROVIDER } from './constants/ai.constants';
+
 import { AIService } from './services/ai.service';
-import { AIConversationService } from './services/ai-conversation.service';
-import { AIProvider } from './providers/ai-provider.interface';
-
-import { OpenAICompatibleAIProvider } from './providers/openai-compatible-ai.provider';
-import { UnavailableAIProvider } from './providers/unavailable-ai.provider';
-
-import { AIConversationRepository } from './repositories/ai-conversation.repository';
 import { AIChatService } from './services/ai-chat.service';
+import { AIConversationService } from './services/ai-conversation.service';
+import { AIConversationContextService } from './services/ai-conversation-context.service';
+
 import { AIIntentClassifierService } from './services/ai-intent-classifier.service';
 import { AITransactionEntityExtractorService } from './services/ai-transaction-entity-extractor.service';
 import { AITransactionResolutionService } from './services/ai-transaction-resolution.service';
 import { AITransactionDraftService } from './services/ai-transaction-draft.service';
 import { AITransactionConfirmationService } from './services/ai-transaction-confirmation.service';
 import { AITransactionPersistenceService } from './services/ai-transaction-persistence.service';
-import { TransactionsModule } from '../transactions/transactions.module';
-import { DatabaseModule } from 'src/database/database.module';
-import { AIConversationContextService } from './services/ai-conversation-context.service';
-import { AIRetryService } from './services/ai-retry.service';
-import { AIUsageService } from './services/ai-usage.service';
 import { AITransactionIntelligenceService } from './services/ai-transaction-intelligence.service';
 import { AITransactionValidationService } from './services/ai-transaction-validation.service';
+
+import { AIRetryService } from './services/ai-retry.service';
+import { AIUsageService } from './services/ai-usage.service';
+
+import { AIPromptSafetyService } from './services/ai-prompt-safety.service';
+import { AIPromptBuilderService } from './services/ai-prompt-builder.service';
+
+import { AIConversationRepository } from './repositories/ai-conversation.repository';
+
+import { OpenAICompatibleAIProvider } from './providers/openai-compatible-ai.provider';
+import { UnavailableAIProvider } from './providers/unavailable-ai.provider';
+import { AIProvider } from './providers/ai-provider.interface';
+
+import { TransactionsModule } from '../transactions/transactions.module';
+import { DatabaseModule } from 'src/database/database.module';
 
 @Module({
   imports: [DatabaseModule, TransactionsModule],
@@ -32,6 +39,7 @@ import { AITransactionValidationService } from './services/ai-transaction-valida
     AIChatService,
     AIConversationService,
     AIConversationContextService,
+
     AIRetryService,
     AIUsageService,
 
@@ -43,6 +51,9 @@ import { AITransactionValidationService } from './services/ai-transaction-valida
     AITransactionPersistenceService,
     AITransactionIntelligenceService,
     AITransactionValidationService,
+
+    AIPromptSafetyService,
+    AIPromptBuilderService,
 
     AIConversationRepository,
 
@@ -79,6 +90,7 @@ import { AITransactionValidationService } from './services/ai-transaction-valida
     AIChatService,
     AIConversationService,
     AIConversationContextService,
+
     AIRetryService,
     AIUsageService,
 
@@ -90,6 +102,9 @@ import { AITransactionValidationService } from './services/ai-transaction-valida
     AITransactionPersistenceService,
     AITransactionIntelligenceService,
     AITransactionValidationService,
+
+    AIPromptSafetyService,
+    AIPromptBuilderService,
 
     AIConversationRepository,
     AI_PROVIDER,
