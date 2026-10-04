@@ -31,6 +31,7 @@ import { AIProvider } from './providers/ai-provider.interface';
 
 import { TransactionsModule } from '../transactions/transactions.module';
 import { DatabaseModule } from 'src/database/database.module';
+import { AIPrivacyService } from './services/ai-privacy.service';
 
 @Module({
   imports: [DatabaseModule, TransactionsModule],
@@ -39,6 +40,7 @@ import { DatabaseModule } from 'src/database/database.module';
     AIChatService,
     AIConversationService,
     AIConversationContextService,
+    AIPrivacyService,
 
     AIRetryService,
     AIUsageService,
@@ -90,6 +92,7 @@ import { DatabaseModule } from 'src/database/database.module';
     AIChatService,
     AIConversationService,
     AIConversationContextService,
+    AIPrivacyService,
 
     AIRetryService,
     AIUsageService,

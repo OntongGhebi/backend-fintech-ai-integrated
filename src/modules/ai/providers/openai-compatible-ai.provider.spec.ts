@@ -2,6 +2,7 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { OpenAICompatibleAIProvider } from './openai-compatible-ai.provider';
+import { AIPrivacyService } from '../services/ai-privacy.service';
 
 describe('OpenAICompatibleAIProvider', () => {
   let provider: OpenAICompatibleAIProvider;
@@ -10,11 +11,16 @@ describe('OpenAICompatibleAIProvider', () => {
     get: jest.fn(),
   };
 
+  let privacyService: AIPrivacyService;
+
   beforeEach(() => {
     jest.clearAllMocks();
 
+    privacyService = new AIPrivacyService();
+
     provider = new OpenAICompatibleAIProvider(
       configServiceMock as unknown as ConfigService,
+      privacyService,
     );
   });
 
@@ -272,6 +278,59 @@ describe('OpenAICompatibleAIProvider', () => {
       fetchMock.mockRestore();
     });
 
+    it('should not expose secrets from provider error bodies', async () => {
+      configServiceMock.get.mockImplementation(
+        (key: string, fallback: string) => {
+          if (key === 'ai.apiKey') {
+            return 'test-api-key';
+          }
+
+          if (key === 'ai.baseUrl') {
+            return 'https://example.com/v1';
+          }
+
+          if (key === 'ai.model') {
+            return 'test-model';
+          }
+
+          return fallback;
+        },
+      );
+
+      const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'Authorization: Bearer leaked-secret-token api_key=sk-secret-value',
+            },
+          }),
+          {
+            status: 401,
+          },
+        ),
+      );
+
+      const loggerErrorSpy = jest
+        .spyOn((provider as any).logger, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(provider.complete(request)).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+
+      const logMessage = loggerErrorSpy.mock.calls[0][0];
+
+      expect(logMessage).not.toContain('leaked-secret-token');
+
+      expect(logMessage).not.toContain('sk-secret-value');
+
+      expect(logMessage).toContain('[REDACTED]');
+
+      loggerErrorSpy.mockRestore();
+      fetchMock.mockRestore();
+    });
+
     it('should reject an empty provider response', async () => {
       configServiceMock.get.mockImplementation(
         (key: string, fallback: string) => {
@@ -310,6 +369,49 @@ describe('OpenAICompatibleAIProvider', () => {
 
       await expect(provider.complete(request)).rejects.toBeInstanceOf(
         ServiceUnavailableException,
+      );
+
+      fetchMock.mockRestore();
+    });
+
+    it('should reject an excessively large provider response', async () => {
+      configServiceMock.get.mockImplementation(
+        (key: string, fallback: string) => {
+          if (key === 'ai.apiKey') {
+            return 'test-api-key';
+          }
+
+          if (key === 'ai.baseUrl') {
+            return 'https://example.com/v1';
+          }
+
+          if (key === 'ai.model') {
+            return 'test-model';
+          }
+
+          return fallback;
+        },
+      );
+
+      const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: 'a'.repeat(12_001),
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+          },
+        ),
+      );
+
+      await expect(provider.complete(request)).rejects.toThrow(
+        'AI provider response exceeds the maximum allowed length',
       );
 
       fetchMock.mockRestore();

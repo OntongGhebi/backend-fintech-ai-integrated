@@ -4,13 +4,17 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AIProvider } from './ai-provider.interface';
+
+import type { AIProvider } from './ai-provider.interface';
+
 import {
   AICompletionRequest,
   AICompletionResponse,
   AICompletionUsage,
   AIProviderMetadata,
 } from '../types/ai.types';
+
+import { AIPrivacyService } from '../services/ai-privacy.service';
 
 interface OpenAICompatibleMessage {
   role: 'system' | 'user' | 'assistant';
@@ -35,7 +39,10 @@ interface OpenAICompatibleResponse {
 export class OpenAICompatibleAIProvider implements AIProvider {
   private readonly logger = new Logger(OpenAICompatibleAIProvider.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly aiPrivacyService: AIPrivacyService,
+  ) {}
 
   getMetadata(): AIProviderMetadata {
     return {
@@ -78,7 +85,7 @@ export class OpenAICompatibleAIProvider implements AIProvider {
         },
         body: JSON.stringify({
           model,
-          messages: request.messages,
+          messages: request.messages as OpenAICompatibleMessage[],
           temperature: request.temperature ?? 0,
           max_tokens: request.maxTokens,
           response_format:
@@ -94,8 +101,11 @@ export class OpenAICompatibleAIProvider implements AIProvider {
       if (!response.ok) {
         const errorBody = await response.text();
 
+        const sanitizedErrorBody =
+          this.aiPrivacyService.sanitizeProviderErrorBody(errorBody);
+
         this.logger.error(
-          `AI provider request failed: status=${response.status}, body=${errorBody}`,
+          `AI provider request failed: status=${response.status}, body=${sanitizedErrorBody}`,
         );
 
         throw new ServiceUnavailableException('AI provider request failed');
@@ -103,9 +113,28 @@ export class OpenAICompatibleAIProvider implements AIProvider {
 
       const data = (await response.json()) as OpenAICompatibleResponse;
 
-      const content = data.choices?.[0]?.message?.content;
+      const rawContent = data.choices?.[0]?.message?.content;
 
-      if (typeof content !== 'string' || content.trim().length === 0) {
+      if (typeof rawContent !== 'string') {
+        throw new ServiceUnavailableException(
+          'AI provider returned an empty response',
+        );
+      }
+
+      let content: string;
+
+      try {
+        content = this.aiPrivacyService.validateResponseContent(rawContent);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.includes('exceeds the maximum allowed length')
+        ) {
+          throw new ServiceUnavailableException(
+            'AI provider response exceeds the maximum allowed length',
+          );
+        }
+
         throw new ServiceUnavailableException(
           'AI provider returned an empty response',
         );
@@ -128,9 +157,12 @@ export class OpenAICompatibleAIProvider implements AIProvider {
         throw new ServiceUnavailableException('AI provider request timed out');
       }
 
+      const safeErrorMessage = this.aiPrivacyService.sanitizeLogMessage(
+        error instanceof Error ? error.message : String(error),
+      );
+
       this.logger.error(
-        'AI provider request failed unexpectedly',
-        error instanceof Error ? error.stack : String(error),
+        `AI provider request failed unexpectedly: ${safeErrorMessage}`,
       );
 
       throw new ServiceUnavailableException('AI provider request failed');
