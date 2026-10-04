@@ -45,6 +45,17 @@ export class AITransactionMessageParser implements TransactionMessageParser {
       };
     }
 
+    if (result.status === 'INVALID') {
+      this.logger.warn(
+        `AI transaction intelligence rejected output: messageId=${input.messageId.toString()}, reason=${result.validationReason ?? 'unknown'}`,
+      );
+
+      return {
+        status: 'INVALID',
+        rawText: input.text,
+      };
+    }
+
     if (result.status === 'UNSUPPORTED') {
       return {
         status: 'UNSUPPORTED',

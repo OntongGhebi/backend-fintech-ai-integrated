@@ -23,6 +23,7 @@ import { AIConversationContextService } from './services/ai-conversation-context
 import { AIRetryService } from './services/ai-retry.service';
 import { AIUsageService } from './services/ai-usage.service';
 import { AITransactionIntelligenceService } from './services/ai-transaction-intelligence.service';
+import { AITransactionValidationService } from './services/ai-transaction-validation.service';
 
 @Module({
   imports: [DatabaseModule, TransactionsModule],
@@ -41,6 +42,7 @@ import { AITransactionIntelligenceService } from './services/ai-transaction-inte
     AITransactionConfirmationService,
     AITransactionPersistenceService,
     AITransactionIntelligenceService,
+    AITransactionValidationService,
 
     AIConversationRepository,
 
@@ -87,6 +89,7 @@ import { AITransactionIntelligenceService } from './services/ai-transaction-inte
     AITransactionConfirmationService,
     AITransactionPersistenceService,
     AITransactionIntelligenceService,
+    AITransactionValidationService,
 
     AIConversationRepository,
     AI_PROVIDER,

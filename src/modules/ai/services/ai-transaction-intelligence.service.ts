@@ -4,6 +4,7 @@ import { AIIntentClassifierService } from './ai-intent-classifier.service';
 import { AITransactionDraftService } from './ai-transaction-draft.service';
 import { AITransactionEntityExtractorService } from './ai-transaction-entity-extractor.service';
 import { AITransactionResolutionService } from './ai-transaction-resolution.service';
+import { AITransactionValidationService } from './ai-transaction-validation.service';
 
 import type { AIIntentClassification } from '../types/ai-intent.types';
 import type { AITransactionDraft } from '../types/ai-transaction-draft.types';
@@ -11,7 +12,7 @@ import type { AITransactionEntities } from '../types/ai-transaction.types';
 import type { AITransactionResolutionResult } from '../types/ai-transaction-resolution.types';
 
 export type AITransactionIntelligenceStatus =
-  'UNSUPPORTED' | 'NEEDS_INFORMATION' | 'READY' | 'ERROR';
+  'UNSUPPORTED' | 'NEEDS_INFORMATION' | 'READY' | 'INVALID' | 'ERROR';
 
 export type AITransactionIntelligenceErrorCode =
   'AI_UNAVAILABLE' | 'AI_TIMEOUT' | 'AI_PROVIDER_ERROR';
@@ -28,6 +29,7 @@ export interface AITransactionIntelligenceResult {
   entities?: AITransactionEntities;
   resolution?: AITransactionResolutionResult;
   draft?: AITransactionDraft;
+  validationReason?: string;
   errorCode?: AITransactionIntelligenceErrorCode;
 }
 
@@ -38,6 +40,7 @@ export class AITransactionIntelligenceService {
     private readonly aiTransactionEntityExtractorService: AITransactionEntityExtractorService,
     private readonly aiTransactionResolutionService: AITransactionResolutionService,
     private readonly aiTransactionDraftService: AITransactionDraftService,
+    private readonly aiTransactionValidationService: AITransactionValidationService,
   ) {}
 
   async analyze(
@@ -61,18 +64,82 @@ export class AITransactionIntelligenceService {
         };
       }
 
-      const entities =
+      const intentValidation =
+        this.aiTransactionValidationService.validateIntent(intent);
+
+      if (!intentValidation.valid) {
+        return {
+          status: 'INVALID',
+          text: normalizedText,
+          intent,
+          validationReason: intentValidation.reason,
+        };
+      }
+
+      const extractedEntities =
         await this.aiTransactionEntityExtractorService.extract(normalizedText);
+
+      const entityValidation =
+        this.aiTransactionValidationService.normalizeEntities(
+          extractedEntities,
+        );
+
+      if (!entityValidation.valid || !entityValidation.value) {
+        return {
+          status: 'INVALID',
+          text: normalizedText,
+          intent,
+          entities: extractedEntities,
+          validationReason: entityValidation.reason,
+        };
+      }
+
+      const entities = entityValidation.value;
 
       const resolution = await this.aiTransactionResolutionService.resolve(
         input.userId,
         entities,
       );
 
+      const resolutionValidation =
+        this.aiTransactionValidationService.validateResolution(
+          entities,
+          resolution,
+        );
+
+      if (!resolutionValidation.valid || !resolutionValidation.value) {
+        return {
+          status: 'INVALID',
+          text: normalizedText,
+          intent,
+          entities,
+          resolution,
+          validationReason: resolutionValidation.reason,
+        };
+      }
+
       const draft = this.aiTransactionDraftService.buildDraft(
         entities,
         resolution,
       );
+
+      const draftValidation = this.aiTransactionValidationService.validateDraft(
+        entities,
+        resolution,
+        draft,
+      );
+
+      if (!draftValidation.valid || !draftValidation.value) {
+        return {
+          status: 'INVALID',
+          text: normalizedText,
+          intent,
+          entities,
+          resolution,
+          draft,
+          validationReason: draftValidation.reason,
+        };
+      }
 
       if (!draft.ready) {
         return {

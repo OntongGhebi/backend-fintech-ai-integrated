@@ -95,8 +95,8 @@ describe('AITransactionMessageParser', () => {
         transactionType: 'EXPENSE',
         amount: 35000,
         description: 'tadi siang aku habis buat makan',
-        accountHint: 'BCA',
         categoryHint: 'Makanan',
+        accountHint: 'BCA',
         transactionDate: undefined,
         confidence: 0.96,
         source: 'AI',
@@ -125,7 +125,27 @@ describe('AITransactionMessageParser', () => {
     });
   });
 
-  it('should return invalid when AI extracts an invalid amount', async () => {
+  it('should reject an AI validation failure', async () => {
+    intelligenceService.analyze.mockResolvedValue({
+      status: 'INVALID',
+      text: input.text,
+      intent: {
+        intent: 'CREATE_TRANSACTION',
+        confidence: 0.52,
+      },
+      validationReason:
+        'AI intent confidence is below the minimum threshold of 0.8',
+    });
+
+    const result = await parser.parse(input);
+
+    expect(result).toEqual({
+      status: 'INVALID',
+      rawText: input.text,
+    });
+  });
+
+  it('should reject invalid amount returned by AI', async () => {
     intelligenceService.analyze.mockResolvedValue({
       status: 'READY',
       text: input.text,
@@ -151,7 +171,7 @@ describe('AITransactionMessageParser', () => {
     });
   });
 
-  it('should return invalid when AI does not extract a description', async () => {
+  it('should reject when AI does not extract a description', async () => {
     intelligenceService.analyze.mockResolvedValue({
       status: 'READY',
       text: input.text,
