@@ -79,6 +79,30 @@ export class AIService {
         throw error;
       }
 
+      if (error instanceof Error) {
+        const normalizedMessage = error.message.toLowerCase();
+
+        const isExplicitProviderFailure =
+          /ai provider request failed|provider request failed|provider.*failed/i.test(
+            normalizedMessage,
+          );
+
+        const isNetworkOrInfrastructureFailure =
+          /connection refused|timed out|timeout|econnreset|econnrefused|socket hang up|network error|rate limit|too many requests|service unavailable|temporarily unavailable|internal server error|bad gateway|gateway timeout/i.test(
+            normalizedMessage,
+          );
+
+        if (isExplicitProviderFailure) {
+          throw error;
+        }
+
+        if (isNetworkOrInfrastructureFailure) {
+          throw new ServiceUnavailableException(
+            AI_ERROR_MESSAGES.SERVICE_UNAVAILABLE,
+          );
+        }
+      }
+
       throw new ServiceUnavailableException(
         AI_ERROR_MESSAGES.SERVICE_UNAVAILABLE,
       );

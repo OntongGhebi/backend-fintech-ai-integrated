@@ -24,6 +24,7 @@ import { AIPromptSafetyService } from './services/ai-prompt-safety.service';
 import { AIPromptBuilderService } from './services/ai-prompt-builder.service';
 
 import { AIConversationRepository } from './repositories/ai-conversation.repository';
+import { AIUsageRepository } from './repositories/ai-usage.repository';
 
 import { OpenAICompatibleAIProvider } from './providers/openai-compatible-ai.provider';
 import { UnavailableAIProvider } from './providers/unavailable-ai.provider';
@@ -58,6 +59,7 @@ import { AIPrivacyService } from './services/ai-privacy.service';
     AIPromptBuilderService,
 
     AIConversationRepository,
+    AIUsageRepository,
 
     OpenAICompatibleAIProvider,
     UnavailableAIProvider,
@@ -110,6 +112,7 @@ import { AIPrivacyService } from './services/ai-privacy.service';
     AIPromptBuilderService,
 
     AIConversationRepository,
+    AIUsageRepository,
     AI_PROVIDER,
   ],
 })

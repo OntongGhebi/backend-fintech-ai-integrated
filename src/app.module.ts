@@ -10,6 +10,7 @@ import { APP_GUARD } from '@nestjs/core';
 // import { DatabaseModule } from './database/database.module';
 import { validateEnvironment } from './config/env.validation';
 import appConfig from './config/app.config';
+import aiConfig from './config/ai.config';
 import jwtConfig from './config/jwt.config';
 import redisConfig from './config/redis.config';
 import databaseConfig from './config/database.config';
@@ -40,6 +41,7 @@ import { AIModule } from './modules/ai/ai.module';
       validate: validateEnvironment,
       load: [
         appConfig,
+        aiConfig,
         databaseConfig,
         redisConfig,
         jwtConfig,
