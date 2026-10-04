@@ -67,7 +67,10 @@ export class AIChatService {
     }
 
     const contextMessages = this.aiConversationContextService.getContext(
-      updatedConversation.messages,
+      updatedConversation.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
     );
 
     const messages = this.buildAIMessageHistory(contextMessages);

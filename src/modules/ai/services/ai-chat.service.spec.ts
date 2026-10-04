@@ -497,5 +497,165 @@ describe('AIChatService', () => {
         },
       );
     });
+
+    it('should reject empty content', async () => {
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', '   '),
+      ).rejects.toThrow('AI message content cannot be empty');
+
+      expect(aiConversationServiceMock.findById).not.toHaveBeenCalled();
+    });
+
+    it('should reject a missing conversation', async () => {
+      aiConversationServiceMock.findById.mockResolvedValue(null);
+
+      await expect(
+        service.sendMessage('user-1', 'conversation-1', 'hello'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should send a bounded conversation context to AIService', async () => {
+      const messages = Array.from({ length: 30 }, (_, index) => ({
+        id: `message-${index}`,
+        role: index % 2 === 0 ? AIMessageRole.USER : AIMessageRole.ASSISTANT,
+        content: `message-${index}`,
+        model: null,
+        createdAt: new Date(2026, 0, 1, 0, index),
+      }));
+
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce({
+          id: 'conversation-1',
+          userId: 'user-1',
+          messages: [],
+        })
+        .mockResolvedValueOnce({
+          id: 'conversation-1',
+          userId: 'user-1',
+          messages,
+        });
+
+      aiConversationServiceMock.addMessage
+        .mockResolvedValueOnce({
+          id: 'user-message',
+          role: AIMessageRole.USER,
+          content: 'latest',
+          model: null,
+          createdAt: new Date(),
+        })
+        .mockResolvedValueOnce({
+          id: 'assistant-message',
+          role: AIMessageRole.ASSISTANT,
+          content: 'response',
+          model: 'test-model',
+          createdAt: new Date(),
+        });
+
+      aiServiceMock.complete.mockResolvedValue({
+        content: 'response',
+        provider: 'test-provider',
+        model: 'test-model',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        },
+      });
+
+      const result = await service.sendMessage(
+        'user-1',
+        'conversation-1',
+        'latest',
+      );
+
+      expect(aiServiceMock.complete).toHaveBeenCalledTimes(1);
+
+      const request = aiServiceMock.complete.mock.calls[0][0];
+
+      expect(request.messages).toHaveLength(20);
+
+      expect(result).toEqual({
+        conversationId: 'conversation-1',
+        message: {
+          id: 'assistant-message',
+          role: AIMessageRole.ASSISTANT,
+          content: 'response',
+          model: 'test-model',
+          createdAt: expect.any(Date),
+        },
+        provider: 'test-provider',
+        model: 'test-model',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          totalTokens: 15,
+        },
+      });
+    });
+
+    it('should preserve system messages inside context', async () => {
+      const messages = [
+        {
+          id: 'system-1',
+          role: AIMessageRole.SYSTEM,
+          content: 'You are a financial assistant.',
+          model: null,
+          createdAt: new Date(2026, 0, 1),
+        },
+        ...Array.from({ length: 25 }, (_, index) => ({
+          id: `message-${index}`,
+          role: AIMessageRole.USER,
+          content: `message-${index}`,
+          model: null,
+          createdAt: new Date(2026, 0, 1, 0, index + 1),
+        })),
+      ];
+
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce({
+          id: 'conversation-1',
+          userId: 'user-1',
+          messages: [],
+        })
+        .mockResolvedValueOnce({
+          id: 'conversation-1',
+          userId: 'user-1',
+          messages,
+        });
+
+      aiConversationServiceMock.addMessage
+        .mockResolvedValueOnce({
+          id: 'user-message',
+          role: AIMessageRole.USER,
+          content: 'latest',
+          model: null,
+          createdAt: new Date(),
+        })
+        .mockResolvedValueOnce({
+          id: 'assistant-message',
+          role: AIMessageRole.ASSISTANT,
+          content: 'response',
+          model: 'test-model',
+          createdAt: new Date(),
+        });
+
+      aiServiceMock.complete.mockResolvedValue({
+        content: 'response',
+        provider: 'test-provider',
+        model: 'test-model',
+        usage: undefined,
+      });
+
+      await service.sendMessage('user-1', 'conversation-1', 'latest');
+
+      const request = aiServiceMock.complete.mock.calls[0][0];
+
+      expect(request.messages).toHaveLength(20);
+
+      expect(request.messages[0]).toEqual({
+        role: 'system',
+        content: 'You are a financial assistant.',
+      });
+    });
   });
 });
