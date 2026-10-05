@@ -12,6 +12,7 @@ describe('DashboardService', () => {
     getExpenseAnalytics: jest.Mock;
     getCategoryAnalytics: jest.Mock;
     getAccountAnalytics: jest.Mock;
+    getBudgetPerformance: jest.Mock;
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -23,6 +24,7 @@ describe('DashboardService', () => {
       getExpenseAnalytics: jest.fn(),
       getCategoryAnalytics: jest.fn(),
       getAccountAnalytics: jest.fn(),
+      getBudgetPerformance: jest.fn(),
     };
 
     service = new DashboardService(
@@ -842,6 +844,232 @@ describe('DashboardService', () => {
       );
 
       expect(dashboardRepository.getAccountAnalytics).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getBudgetPerformance', () => {
+    const foodCategoryId = '11111111-1111-4111-8111-111111111111';
+
+    const transportCategoryId = '22222222-2222-4222-8222-222222222222';
+
+    it('should calculate budget performance', async () => {
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [
+          {
+            id: '33333333-3333-4333-8333-333333333333',
+            name: 'Food Budget',
+            categoryId: foodCategoryId,
+            amount: '3000000',
+            category: {
+              id: foodCategoryId,
+              name: 'Food',
+            },
+          },
+          {
+            id: '44444444-4444-4444-8444-444444444444',
+            name: 'Transport Budget',
+            categoryId: transportCategoryId,
+            amount: '2000000',
+            category: {
+              id: transportCategoryId,
+              name: 'Transport',
+            },
+          },
+        ],
+        transactions: [
+          {
+            categoryId: foodCategoryId,
+            _sum: {
+              amount: '2250000',
+            },
+            _count: {
+              _all: 12,
+            },
+          },
+          {
+            categoryId: transportCategoryId,
+            _sum: {
+              amount: '500000',
+            },
+            _count: {
+              _all: 3,
+            },
+          },
+        ],
+      });
+
+      const result = await service.getBudgetPerformance(userId);
+
+      expect(dashboardRepository.getBudgetPerformance).toHaveBeenCalledWith(
+        userId,
+        {
+          startDate: undefined,
+          endDate: undefined,
+        },
+      );
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        budgets: [
+          {
+            budgetId: '33333333-3333-4333-8333-333333333333',
+            budgetName: 'Food Budget',
+            categoryId: foodCategoryId,
+            categoryName: 'Food',
+            budgetAmount: '3000000',
+            actualAmount: '2250000',
+            remainingAmount: '750000',
+            usagePercentage: '75',
+            transactionCount: 12,
+            status: 'ON_TRACK',
+          },
+          {
+            budgetId: '44444444-4444-4444-8444-444444444444',
+            budgetName: 'Transport Budget',
+            categoryId: transportCategoryId,
+            categoryName: 'Transport',
+            budgetAmount: '2000000',
+            actualAmount: '500000',
+            remainingAmount: '1500000',
+            usagePercentage: '25',
+            transactionCount: 3,
+            status: 'ON_TRACK',
+          },
+        ],
+        totalBudgetAmount: '5000000',
+        totalActualAmount: '2750000',
+        totalRemainingAmount: '2250000',
+      });
+    });
+
+    it('should mark budget as near limit at 80 percent', async () => {
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [
+          {
+            id: '33333333-3333-4333-8333-333333333333',
+            name: 'Food Budget',
+            categoryId: foodCategoryId,
+            amount: '1000000',
+            category: {
+              id: foodCategoryId,
+              name: 'Food',
+            },
+          },
+        ],
+        transactions: [
+          {
+            categoryId: foodCategoryId,
+            _sum: {
+              amount: '800000',
+            },
+            _count: {
+              _all: 5,
+            },
+          },
+        ],
+      });
+
+      const result = await service.getBudgetPerformance(userId);
+
+      expect(result.budgets[0].usagePercentage).toBe('80');
+
+      expect(result.budgets[0].status).toBe('NEAR_LIMIT');
+    });
+
+    it('should mark budget as over budget when usage exceeds 100 percent', async () => {
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [
+          {
+            id: '33333333-3333-4333-8333-333333333333',
+            name: 'Food Budget',
+            categoryId: foodCategoryId,
+            amount: '1000000',
+            category: {
+              id: foodCategoryId,
+              name: 'Food',
+            },
+          },
+        ],
+        transactions: [
+          {
+            categoryId: foodCategoryId,
+            _sum: {
+              amount: '1250000',
+            },
+            _count: {
+              _all: 10,
+            },
+          },
+        ],
+      });
+
+      const result = await service.getBudgetPerformance(userId);
+
+      expect(result.budgets[0].usagePercentage).toBe('125');
+
+      expect(result.budgets[0].remainingAmount).toBe('-250000');
+
+      expect(result.budgets[0].status).toBe('OVER_BUDGET');
+    });
+
+    it('should return zero actual amount when a budget has no transactions', async () => {
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [
+          {
+            id: '33333333-3333-4333-8333-333333333333',
+            name: 'Food Budget',
+            categoryId: foodCategoryId,
+            amount: '3000000',
+            category: {
+              id: foodCategoryId,
+              name: 'Food',
+            },
+          },
+        ],
+        transactions: [],
+      });
+
+      const result = await service.getBudgetPerformance(userId);
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        budgets: [
+          {
+            budgetId: '33333333-3333-4333-8333-333333333333',
+            budgetName: 'Food Budget',
+            categoryId: foodCategoryId,
+            categoryName: 'Food',
+            budgetAmount: '3000000',
+            actualAmount: '0',
+            remainingAmount: '3000000',
+            usagePercentage: '0',
+            transactionCount: 0,
+            status: 'ON_TRACK',
+          },
+        ],
+        totalBudgetAmount: '3000000',
+        totalActualAmount: '0',
+        totalRemainingAmount: '3000000',
+      });
+    });
+
+    it('should validate the date range', async () => {
+      const startDate = new Date('2026-09-30T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-01T00:00:00.000Z');
+
+      await expect(
+        service.getBudgetPerformance(userId, {
+          startDate,
+          endDate,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'startDate must be earlier than or equal to endDate',
+        ),
+      );
+
+      expect(dashboardRepository.getBudgetPerformance).not.toHaveBeenCalled();
     });
   });
 });

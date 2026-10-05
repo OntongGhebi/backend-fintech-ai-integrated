@@ -312,4 +312,109 @@ export class DashboardRepository {
       transactionCount,
     };
   }
+
+  async getBudgetPerformance(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ) {
+    const budgetWhere = {
+      userId,
+      deletedAt: null,
+      ...(options.startDate || options.endDate
+        ? {
+            OR: [
+              ...(options.startDate
+                ? [
+                    {
+                      startDate: {
+                        gte: options.startDate,
+                      },
+                    },
+                  ]
+                : []),
+              ...(options.endDate
+                ? [
+                    {
+                      endDate: {
+                        lte: options.endDate,
+                      },
+                    },
+                  ]
+                : []),
+            ],
+          }
+        : {}),
+    };
+
+    const budgets = await this.prisma.budget.findMany({
+      where: budgetWhere,
+      include: {
+        category: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    if (budgets.length === 0) {
+      return {
+        budgets: [],
+        transactions: [],
+      };
+    }
+
+    const categoryIds = budgets
+      .map((budget) => budget.categoryId)
+      .filter((categoryId): categoryId is string => categoryId !== null);
+
+    if (categoryIds.length === 0) {
+      return {
+        budgets,
+        transactions: [],
+      };
+    }
+
+    const transactionWhere = {
+      userId,
+      deletedAt: null,
+      status: 'ACTIVE' as const,
+      currency: 'IDR',
+      type: 'EXPENSE' as const,
+      categoryId: {
+        in: categoryIds,
+      },
+      ...(options.startDate || options.endDate
+        ? {
+            transactionDate: {
+              ...(options.startDate
+                ? {
+                    gte: options.startDate,
+                  }
+                : {}),
+              ...(options.endDate
+                ? {
+                    lte: options.endDate,
+                  }
+                : {}),
+            },
+          }
+        : {}),
+    };
+
+    const transactions = await this.prisma.transaction.groupBy({
+      by: ['categoryId'],
+      where: transactionWhere,
+      _sum: {
+        amount: true,
+      },
+      _count: {
+        _all: true,
+      },
+    });
+
+    return {
+      budgets,
+      transactions,
+    };
+  }
 }

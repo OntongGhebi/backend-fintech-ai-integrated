@@ -62,6 +62,30 @@ export interface DashboardAccountAnalytics {
   transactionCount: number;
 }
 
+export type DashboardBudgetPerformanceStatus =
+  'ON_TRACK' | 'NEAR_LIMIT' | 'OVER_BUDGET';
+
+export interface DashboardBudgetPerformanceItem {
+  budgetId: string;
+  budgetName: string;
+  categoryId: string;
+  categoryName: string;
+  budgetAmount: string;
+  actualAmount: string;
+  remainingAmount: string;
+  usagePercentage: string;
+  transactionCount: number;
+  status: DashboardBudgetPerformanceStatus;
+}
+
+export interface DashboardBudgetPerformance {
+  currency: string;
+  budgets: DashboardBudgetPerformanceItem[];
+  totalBudgetAmount: string;
+  totalActualAmount: string;
+  totalRemainingAmount: string;
+}
+
 export interface DashboardMetric {
   value: number;
   currency: string;

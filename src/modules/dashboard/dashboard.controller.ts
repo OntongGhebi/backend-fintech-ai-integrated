@@ -20,6 +20,8 @@ import { GetDashboardCategoryAnalyticsQueryDto } from './dto/get-dashboard-categ
 import { DashboardCategoryAnalyticsResponseDto } from './dto/dashboard-category-analytics-response.dto';
 import { GetDashboardAccountAnalyticsQueryDto } from './dto/get-dashboard-account-analytics-query.dto';
 import { DashboardAccountAnalyticsResponseDto } from './dto/dashboard-account-analytcs-response.dto';
+import { DashboardBudgetPerformanceResponseDto } from './dto/dashboard-budget-performance-response.dto';
+import { GetDashboardBudgetPerformanceQueryDto } from './dto/get-dashboard-budget-performance-query.dto';
 
 @Controller('dashboard')
 @ApiTags('Dashboard')
@@ -133,6 +135,25 @@ export class DashboardController {
     const type = String(query.type) === 'INCOME' ? 'INCOME' : 'EXPENSE';
 
     return this.dashboardService.getAccountAnalytics(userId, type, {
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+    });
+  }
+
+  @Get('budgets/performance')
+  @ApiOperation({
+    summary: 'Get budget performance',
+  })
+  @ApiOkResponse({
+    type: DashboardBudgetPerformanceResponseDto,
+    description: 'Budget performance retrieved successfully.',
+  })
+  async getBudgetPerformance(
+    @CurrentUser('id') userId: string,
+    @Query()
+    query: GetDashboardBudgetPerformanceQueryDto,
+  ): Promise<DashboardBudgetPerformanceResponseDto> {
+    return this.dashboardService.getBudgetPerformance(userId, {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
     });

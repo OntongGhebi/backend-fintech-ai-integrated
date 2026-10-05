@@ -1,3 +1,4 @@
+import { expect } from '@jest/globals';
 import { DashboardRepository } from './dashboard.repository';
 
 describe('DashboardRepository', () => {
@@ -15,6 +16,9 @@ describe('DashboardRepository', () => {
     account: {
       findMany: jest.Mock;
     };
+    budget: {
+      findMany: jest.Mock;
+    };
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -30,6 +34,9 @@ describe('DashboardRepository', () => {
         findMany: jest.fn(),
       },
       account: {
+        findMany: jest.fn(),
+      },
+      budget: {
         findMany: jest.fn(),
       },
     };
@@ -793,6 +800,150 @@ describe('DashboardRepository', () => {
         totalAmount: null,
         transactionCount: 0,
       });
+    });
+  });
+
+  describe('getBudgetPerformance', () => {
+    it('should load budgets and aggregate actual expenses', async () => {
+      const categoryId = '11111111-1111-4111-8111-111111111111';
+
+      const budgetId = '22222222-2222-4222-8222-222222222222';
+
+      prisma.budget.findMany.mockResolvedValue([
+        {
+          id: budgetId,
+          name: 'Food Budget',
+          categoryId,
+          amount: '3000000',
+          category: {
+            id: categoryId,
+            name: 'Food',
+          },
+        },
+      ]);
+
+      prisma.transaction.groupBy.mockResolvedValue([
+        {
+          categoryId,
+          _sum: {
+            amount: '2250000',
+          },
+          _count: {
+            _all: 12,
+          },
+        },
+      ]);
+
+      const result = await repository.getBudgetPerformance(userId);
+
+      expect(prisma.budget.findMany).toHaveBeenCalledWith({
+        where: {
+          userId,
+          deletedAt: null,
+        },
+        include: {
+          category: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith({
+        by: ['categoryId'],
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'EXPENSE',
+          categoryId: {
+            in: [categoryId],
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+        _count: {
+          _all: true,
+        },
+      });
+
+      expect(result).toEqual({
+        budgets: [
+          {
+            id: budgetId,
+            name: 'Food Budget',
+            categoryId,
+            amount: '3000000',
+            category: {
+              id: categoryId,
+              name: 'Food',
+            },
+          },
+        ],
+        transactions: [
+          {
+            categoryId,
+            _sum: {
+              amount: '2250000',
+            },
+            _count: {
+              _all: 12,
+            },
+          },
+        ],
+      });
+    });
+
+    it('should return empty data without querying transactions when there are no budgets', async () => {
+      prisma.budget.findMany.mockResolvedValue([]);
+
+      const result = await repository.getBudgetPerformance(userId);
+
+      expect(prisma.transaction.groupBy).not.toHaveBeenCalled();
+
+      expect(result).toEqual({
+        budgets: [],
+        transactions: [],
+      });
+    });
+
+    it('should apply date range to transaction analytics', async () => {
+      prisma.budget.findMany.mockResolvedValue([
+        {
+          id: '22222222-2222-4222-8222-222222222222',
+          name: 'Food Budget',
+          categoryId: '11111111-1111-4111-8111-111111111111',
+          amount: '3000000',
+          category: {
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'Food',
+          },
+        },
+      ]);
+
+      prisma.transaction.groupBy.mockResolvedValue([]);
+
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-30T23:59:59.999Z');
+
+      await repository.getBudgetPerformance(userId, {
+        startDate,
+        endDate,
+      });
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            transactionDate: {
+              gte: startDate,
+              lte: endDate,
+            },
+          }),
+        }),
+      );
     });
   });
 });

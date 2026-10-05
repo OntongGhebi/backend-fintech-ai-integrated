@@ -2,12 +2,18 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { Prisma } from '../../../generated/prisma/client';
 
-import { DASHBOARD_DEFAULT_CURRENCY } from './dashboard.constants';
+import {
+  DASHBOARD_BUDGET_NEAR_LIMIT_PERCENTAGE,
+  DASHBOARD_DEFAULT_CURRENCY,
+} from './dashboard.constants';
 
 import {
   DashboardAccountAnalytics,
   DashboardAccountAnalyticsItem,
   DashboardArchitecture,
+  DashboardBudgetPerformance,
+  DashboardBudgetPerformanceItem,
+  DashboardBudgetPerformanceStatus,
   DashboardCategoryAnalytics,
   DashboardCategoryAnalyticsItem,
   DashboardExpenseAnalytics,
@@ -270,6 +276,108 @@ export class DashboardService {
       accounts,
       totalAmount: totalAmountValue.toString(),
       transactionCount: result.transactionCount,
+    };
+  }
+
+  async getBudgetPerformance(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ): Promise<DashboardBudgetPerformance> {
+    const normalizedOptions = this.normalizeQuery(options);
+
+    const result = await this.dashboardRepository.getBudgetPerformance(
+      userId,
+      normalizedOptions,
+    );
+
+    let totalBudgetAmount = new Prisma.Decimal(0);
+
+    let totalActualAmount = new Prisma.Decimal(0);
+
+    const transactionMap = new Map<
+      string,
+      {
+        amount: Prisma.Decimal;
+        count: number;
+      }
+    >();
+
+    for (const transaction of result.transactions) {
+      if (!transaction.categoryId) {
+        continue;
+      }
+
+      transactionMap.set(transaction.categoryId, {
+        amount: new Prisma.Decimal(
+          (transaction._sum.amount ?? new Prisma.Decimal(0)).toString(),
+        ),
+        count: transaction._count._all,
+      });
+    }
+
+    const budgets: DashboardBudgetPerformanceItem[] = result.budgets.flatMap(
+      (budget) => {
+        if (!budget.categoryId) {
+          return [];
+        }
+
+        const budgetAmount = new Prisma.Decimal(budget.amount);
+
+        const transaction = transactionMap.get(budget.categoryId);
+
+        const actualAmount = transaction?.amount ?? new Prisma.Decimal(0);
+
+        const transactionCount = transaction?.count ?? 0;
+
+        const remainingAmount = budgetAmount.minus(actualAmount);
+
+        const usagePercentage = budgetAmount.greaterThan(0)
+          ? actualAmount.div(budgetAmount).times(100)
+          : new Prisma.Decimal(0);
+
+        let status: DashboardBudgetPerformanceStatus;
+
+        if (usagePercentage.greaterThan(100)) {
+          status = 'OVER_BUDGET';
+        } else if (
+          usagePercentage.greaterThanOrEqualTo(
+            DASHBOARD_BUDGET_NEAR_LIMIT_PERCENTAGE,
+          )
+        ) {
+          status = 'NEAR_LIMIT';
+        } else {
+          status = 'ON_TRACK';
+        }
+
+        totalBudgetAmount = totalBudgetAmount.plus(budgetAmount);
+
+        totalActualAmount = totalActualAmount.plus(actualAmount);
+
+        return [
+          {
+            budgetId: budget.id,
+            budgetName: budget.name,
+            categoryId: budget.categoryId,
+            categoryName: budget.category?.name ?? budget.categoryId,
+            budgetAmount: budgetAmount.toString(),
+            actualAmount: actualAmount.toString(),
+            remainingAmount: remainingAmount.toString(),
+            usagePercentage: usagePercentage.toString(),
+            transactionCount,
+            status,
+          },
+        ];
+      },
+    );
+
+    const totalRemainingAmount = totalBudgetAmount.minus(totalActualAmount);
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      budgets,
+      totalBudgetAmount: totalBudgetAmount.toString(),
+      totalActualAmount: totalActualAmount.toString(),
+      totalRemainingAmount: totalRemainingAmount.toString(),
     };
   }
 }
