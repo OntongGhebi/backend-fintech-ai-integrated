@@ -98,4 +98,51 @@ export class DashboardRepository {
       transactionCount,
     };
   }
+
+  async getExpenseAnalytics(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ) {
+    const where = {
+      userId,
+      deletedAt: null,
+      status: 'ACTIVE' as const,
+      currency: 'IDR',
+      type: 'EXPENSE' as const,
+      ...(options.startDate || options.endDate
+        ? {
+            transactionDate: {
+              ...(options.startDate
+                ? {
+                    gte: options.startDate,
+                  }
+                : {}),
+              ...(options.endDate
+                ? {
+                    lte: options.endDate,
+                  }
+                : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [aggregate, transactionCount] = await Promise.all([
+      this.prisma.transaction.aggregate({
+        where,
+        _sum: {
+          amount: true,
+        },
+      }),
+
+      this.prisma.transaction.count({
+        where,
+      }),
+    ]);
+
+    return {
+      totalExpense: aggregate._sum.amount,
+      transactionCount,
+    };
+  }
 }

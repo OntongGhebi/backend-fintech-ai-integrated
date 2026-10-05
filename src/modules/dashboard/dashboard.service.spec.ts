@@ -9,6 +9,7 @@ describe('DashboardService', () => {
   let dashboardRepository: {
     getFinancialSummary: jest.Mock;
     getIncomeAnalytics: jest.Mock;
+    getExpenseAnalytics: jest.Mock;
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -17,6 +18,7 @@ describe('DashboardService', () => {
     dashboardRepository = {
       getFinancialSummary: jest.fn(),
       getIncomeAnalytics: jest.fn(),
+      getExpenseAnalytics: jest.fn(),
     };
 
     service = new DashboardService(
@@ -298,6 +300,106 @@ describe('DashboardService', () => {
       );
 
       expect(dashboardRepository.getIncomeAnalytics).not.toHaveBeenCalled();
+    });
+  });
+  describe('getExpenseAnalytics', () => {
+    it('should calculate total expense and average expense', async () => {
+      dashboardRepository.getExpenseAnalytics.mockResolvedValue({
+        totalExpense: '3750000',
+        transactionCount: 10,
+      });
+
+      const result = await service.getExpenseAnalytics(userId);
+
+      expect(dashboardRepository.getExpenseAnalytics).toHaveBeenCalledWith(
+        userId,
+        {
+          startDate: undefined,
+          endDate: undefined,
+        },
+      );
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        totalExpense: '3750000',
+        transactionCount: 10,
+        averageExpense: '375000',
+      });
+    });
+
+    it('should return zero average expense when there are no expense transactions', async () => {
+      dashboardRepository.getExpenseAnalytics.mockResolvedValue({
+        totalExpense: null,
+        transactionCount: 0,
+      });
+
+      const result = await service.getExpenseAnalytics(userId);
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        totalExpense: '0',
+        transactionCount: 0,
+        averageExpense: '0',
+      });
+    });
+
+    it('should preserve decimal precision when calculating average expense', async () => {
+      dashboardRepository.getExpenseAnalytics.mockResolvedValue({
+        totalExpense: '1000000.50',
+        transactionCount: 4,
+      });
+
+      const result = await service.getExpenseAnalytics(userId);
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        totalExpense: '1000000.50',
+        transactionCount: 4,
+        averageExpense: '250000.125',
+      });
+    });
+
+    it('should forward the date range to the repository', async () => {
+      dashboardRepository.getExpenseAnalytics.mockResolvedValue({
+        totalExpense: '3000000',
+        transactionCount: 3,
+      });
+
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-30T23:59:59.999Z');
+
+      await service.getExpenseAnalytics(userId, {
+        startDate,
+        endDate,
+      });
+
+      expect(dashboardRepository.getExpenseAnalytics).toHaveBeenCalledWith(
+        userId,
+        {
+          startDate,
+          endDate,
+        },
+      );
+    });
+
+    it('should reject an invalid date range', async () => {
+      const startDate = new Date('2026-09-30T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-01T00:00:00.000Z');
+
+      await expect(
+        service.getExpenseAnalytics(userId, {
+          startDate,
+          endDate,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'startDate must be earlier than or equal to endDate',
+        ),
+      );
+
+      expect(dashboardRepository.getExpenseAnalytics).not.toHaveBeenCalled();
     });
   });
 });

@@ -6,6 +6,7 @@ import { DASHBOARD_DEFAULT_CURRENCY } from './dashboard.constants';
 
 import {
   DashboardArchitecture,
+  DashboardExpenseAnalytics,
   DashboardIncomeAnalytics,
   DashboardQueryOptions,
   DashboardSummary,
@@ -106,6 +107,35 @@ export class DashboardService {
       totalIncome: totalIncomeValue.toString(),
       transactionCount,
       averageIncome: averageIncome.toString(),
+    };
+  }
+
+  async getExpenseAnalytics(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ): Promise<DashboardExpenseAnalytics> {
+    const normalizedOptions = this.normalizeQuery(options);
+
+    const result = await this.dashboardRepository.getExpenseAnalytics(
+      userId,
+      normalizedOptions,
+    );
+
+    const totalExpenseValue = result.totalExpense ?? new Prisma.Decimal(0);
+    const totalExpense = new Prisma.Decimal(totalExpenseValue.toString());
+
+    const transactionCount = result.transactionCount;
+
+    const averageExpense =
+      transactionCount > 0
+        ? totalExpense.div(transactionCount)
+        : new Prisma.Decimal(0);
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      totalExpense: totalExpenseValue.toString(),
+      transactionCount,
+      averageExpense: averageExpense.toString(),
     };
   }
 }

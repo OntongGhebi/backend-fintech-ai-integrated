@@ -23,6 +23,13 @@ export interface DashboardIncomeAnalytics {
   averageIncome: string;
 }
 
+export interface DashboardExpenseAnalytics {
+  currency: string;
+  totalExpense: string;
+  transactionCount: number;
+  averageExpense: string;
+}
+
 export interface DashboardMetric {
   value: number;
   currency: string;
