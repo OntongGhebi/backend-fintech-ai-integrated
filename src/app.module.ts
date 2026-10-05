@@ -32,6 +32,7 @@ import { RecurringTransactionsModule } from './modules/recurring-transactions/re
 import { telegramConfig } from './config/telegram.config';
 import { telegramModule } from './modules/telegram/telegram.module';
 import { AIModule } from './modules/ai/ai.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { AIModule } from './modules/ai/ai.module';
     RecurringTransactionsModule,
     telegramModule,
     AIModule,
+    DashboardModule,
   ],
   providers: [
     {
