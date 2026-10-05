@@ -11,9 +11,9 @@ export interface DashboardQueryOptions {
 
 export interface DashboardSummary {
   currency: string;
-  totalIncome: number;
-  totalExpense: number;
-  netCashFlow: number;
+  totalIncome: string;
+  totalExpense: string;
+  netCashFlow: string;
   transactionCount: number;
 }
 

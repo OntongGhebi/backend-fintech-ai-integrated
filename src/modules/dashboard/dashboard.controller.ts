@@ -1,24 +1,56 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
-import { Request } from 'express';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+
+import {
+  ApiBearerAuth,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
+
 import { AccessTokenGuard } from '../auth/guards/access-token.guard';
+import { CurrentUser } from '../auth/decorators/current-user-decorator';
+
 import { DashboardService } from './dashboard.service';
 
-interface AuthenticatedRequest extends Request {
-  user: {
-    sub: string;
-  };
-}
+import { GetDashboardSummaryQueryDto } from './dto/get-dashboard-summary-query.dto';
+import { DashboardSummaryResponseDto } from './dto/dashboard-summary-response.dto';
 
 @Controller('dashboard')
+@ApiTags('Dashboard')
 @UseGuards(AccessTokenGuard)
+@ApiBearerAuth()
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   @Get('architecture')
-  getArchitectture(@Req() request: AuthenticatedRequest) {
+  @ApiOperation({
+    summary: 'Get dashboard architecture information',
+  })
+  @ApiOkResponse({
+    description: 'Dashboard architecture information retrieved successfully.',
+  })
+  getArchitecture(@CurrentUser('id') userId: string) {
     return {
-      userId: request.user.sub,
+      userId,
       ...this.dashboardService.getArchitecture(),
     };
+  }
+
+  @Get('summary')
+  @ApiOperation({
+    summary: 'Get financial summary',
+  })
+  @ApiOkResponse({
+    type: DashboardSummaryResponseDto,
+    description: 'Financial summary retrieved successfully.',
+  })
+  async getSummary(
+    @CurrentUser('id') userId: string,
+    @Query() query: GetDashboardSummaryQueryDto,
+  ): Promise<DashboardSummaryResponseDto> {
+    return this.dashboardService.getFinancialSummary(userId, {
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+    });
   }
 }
