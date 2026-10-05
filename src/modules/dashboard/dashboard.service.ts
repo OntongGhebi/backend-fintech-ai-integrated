@@ -5,6 +5,8 @@ import { Prisma } from '../../../generated/prisma/client';
 import { DASHBOARD_DEFAULT_CURRENCY } from './dashboard.constants';
 
 import {
+  DashboardAccountAnalytics,
+  DashboardAccountAnalyticsItem,
   DashboardArchitecture,
   DashboardCategoryAnalytics,
   DashboardCategoryAnalyticsItem,
@@ -202,6 +204,70 @@ export class DashboardService {
       currency: DASHBOARD_DEFAULT_CURRENCY,
       type,
       categories,
+      totalAmount: totalAmountValue.toString(),
+      transactionCount: result.transactionCount,
+    };
+  }
+
+  async getAccountAnalytics(
+    userId: string,
+    type: 'INCOME' | 'EXPENSE' = 'EXPENSE',
+    options: DashboardQueryOptions = {},
+  ): Promise<DashboardAccountAnalytics> {
+    if (type !== 'INCOME' && type !== 'EXPENSE') {
+      throw new BadRequestException(
+        'Account analytics only supports income and expense transactions',
+      );
+    }
+
+    const normalizedOptions = this.normalizeQuery(options);
+
+    const result = await this.dashboardRepository.getAccountAnalytics(
+      userId,
+      type,
+      normalizedOptions,
+    );
+
+    const totalAmountValue = result.totalAmount ?? new Prisma.Decimal(0);
+    const totalAmount = new Prisma.Decimal(totalAmountValue.toString());
+
+    const accountMap = new Map(
+      result.accounts.map((account) => [account.id, account.name]),
+    );
+
+    const accounts: DashboardAccountAnalyticsItem[] = result.groupedAccounts
+      .map((item) => {
+        const accountId = item.accountId;
+
+        const amountValue = item._sum.amount ?? new Prisma.Decimal(0);
+        const amount = new Prisma.Decimal(amountValue.toString());
+
+        const transactionCount = item._count._all;
+
+        const percentage = totalAmount.greaterThan(0)
+          ? amount.div(totalAmount).times(100)
+          : new Prisma.Decimal(0);
+
+        return {
+          accountId,
+          accountName: accountMap.get(accountId) ?? 'Unknown',
+          totalAmount: amount.toString(),
+          transactionCount,
+          percentage: percentage.toString(),
+        };
+      })
+      .sort((a, b) => {
+        const amountA = new Prisma.Decimal(a.totalAmount);
+
+        const amountB = new Prisma.Decimal(b.totalAmount);
+
+        return amountB.comparedTo(amountA);
+      });
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      type,
+      accounts,
       totalAmount: totalAmountValue.toString(),
       transactionCount: result.transactionCount,
     };

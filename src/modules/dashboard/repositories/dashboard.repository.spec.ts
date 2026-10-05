@@ -12,6 +12,9 @@ describe('DashboardRepository', () => {
     category: {
       findMany: jest.Mock;
     };
+    account: {
+      findMany: jest.Mock;
+    };
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -24,6 +27,9 @@ describe('DashboardRepository', () => {
         aggregate: jest.fn(),
       },
       category: {
+        findMany: jest.fn(),
+      },
+      account: {
         findMany: jest.fn(),
       },
     };
@@ -625,6 +631,165 @@ describe('DashboardRepository', () => {
       expect(result).toEqual({
         groupedCategories: [],
         categories: [],
+        totalAmount: null,
+        transactionCount: 0,
+      });
+    });
+  });
+
+  describe('getAccountAnalytics', () => {
+    it('should aggregate accounts and resolve account names', async () => {
+      const accountId = '11111111-1111-4111-8111-111111111111';
+
+      prisma.transaction.groupBy.mockResolvedValue([
+        {
+          accountId,
+          _sum: {
+            amount: '2500000',
+          },
+          _count: {
+            _all: 8,
+          },
+        },
+      ]);
+
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: '2500000',
+        },
+      });
+
+      prisma.transaction.count.mockResolvedValue(8);
+
+      prisma.account.findMany.mockResolvedValue([
+        {
+          id: accountId,
+          name: 'BCA',
+        },
+      ]);
+
+      const result = await repository.getAccountAnalytics(userId, 'EXPENSE');
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith({
+        by: ['accountId'],
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'EXPENSE',
+        },
+        _sum: {
+          amount: true,
+        },
+        _count: {
+          _all: true,
+        },
+      });
+
+      expect(prisma.account.findMany).toHaveBeenCalledWith({
+        where: {
+          id: {
+            in: [accountId],
+          },
+          userId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      expect(result).toEqual({
+        groupedAccounts: [
+          {
+            accountId,
+            _sum: {
+              amount: '2500000',
+            },
+            _count: {
+              _all: 8,
+            },
+          },
+        ],
+        accounts: [
+          {
+            id: accountId,
+            name: 'BCA',
+          },
+        ],
+        totalAmount: '2500000',
+        transactionCount: 8,
+      });
+    });
+
+    it('should apply date range', async () => {
+      prisma.transaction.groupBy.mockResolvedValue([]);
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: null,
+        },
+      });
+      prisma.transaction.count.mockResolvedValue(0);
+
+      prisma.account.findMany.mockResolvedValue([]);
+
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-30T23:59:59.999Z');
+
+      await repository.getAccountAnalytics(userId, 'INCOME', {
+        startDate,
+        endDate,
+      });
+
+      const expectedWhere = {
+        userId,
+        deletedAt: null,
+        status: 'ACTIVE',
+        currency: 'IDR',
+        type: 'INCOME',
+        transactionDate: {
+          gte: startDate,
+          lte: endDate,
+        },
+      };
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expectedWhere,
+        }),
+      );
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
+        where: expectedWhere,
+        _sum: {
+          amount: true,
+        },
+      });
+
+      expect(prisma.transaction.count).toHaveBeenCalledWith({
+        where: expectedWhere,
+      });
+    });
+
+    it('should not query accounts when there are no grouped accounts', async () => {
+      prisma.transaction.groupBy.mockResolvedValue([]);
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: null,
+        },
+      });
+      prisma.transaction.count.mockResolvedValue(0);
+
+      const result = await repository.getAccountAnalytics(userId, 'EXPENSE');
+
+      expect(prisma.account.findMany).not.toHaveBeenCalled();
+
+      expect(result).toEqual({
+        groupedAccounts: [],
+        accounts: [],
         totalAmount: null,
         transactionCount: 0,
       });

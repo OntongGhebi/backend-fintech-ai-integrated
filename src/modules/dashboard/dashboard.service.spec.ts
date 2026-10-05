@@ -11,6 +11,7 @@ describe('DashboardService', () => {
     getIncomeAnalytics: jest.Mock;
     getExpenseAnalytics: jest.Mock;
     getCategoryAnalytics: jest.Mock;
+    getAccountAnalytics: jest.Mock;
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -21,6 +22,7 @@ describe('DashboardService', () => {
       getIncomeAnalytics: jest.fn(),
       getExpenseAnalytics: jest.fn(),
       getCategoryAnalytics: jest.fn(),
+      getAccountAnalytics: jest.fn(),
     };
 
     service = new DashboardService(
@@ -622,6 +624,224 @@ describe('DashboardService', () => {
       );
 
       expect(dashboardRepository.getCategoryAnalytics).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getAccountAnalytics', () => {
+    it('should calculate account breakdown', async () => {
+      dashboardRepository.getAccountAnalytics.mockResolvedValue({
+        groupedAccounts: [
+          {
+            accountId: '11111111-1111-4111-8111-111111111111',
+            _sum: {
+              amount: '2500000',
+            },
+            _count: {
+              _all: 8,
+            },
+          },
+          {
+            accountId: '22222222-2222-4222-8222-222222222222',
+            _sum: {
+              amount: '1500000',
+            },
+            _count: {
+              _all: 5,
+            },
+          },
+        ],
+        accounts: [
+          {
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'BCA',
+          },
+          {
+            id: '22222222-2222-4222-8222-222222222222',
+            name: 'Cash',
+          },
+        ],
+        totalAmount: '4000000',
+        transactionCount: 13,
+      });
+
+      const result = await service.getAccountAnalytics(userId, 'EXPENSE');
+
+      expect(dashboardRepository.getAccountAnalytics).toHaveBeenCalledWith(
+        userId,
+        'EXPENSE',
+        {
+          startDate: undefined,
+          endDate: undefined,
+        },
+      );
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        type: 'EXPENSE',
+        accounts: [
+          {
+            accountId: '11111111-1111-4111-8111-111111111111',
+            accountName: 'BCA',
+            totalAmount: '2500000',
+            transactionCount: 8,
+            percentage: '62.5',
+          },
+          {
+            accountId: '22222222-2222-4222-8222-222222222222',
+            accountName: 'Cash',
+            totalAmount: '1500000',
+            transactionCount: 5,
+            percentage: '37.5',
+          },
+        ],
+        totalAmount: '4000000',
+        transactionCount: 13,
+      });
+    });
+
+    it('should default to expense analytics', async () => {
+      dashboardRepository.getAccountAnalytics.mockResolvedValue({
+        groupedAccounts: [],
+        accounts: [],
+        totalAmount: null,
+        transactionCount: 0,
+      });
+
+      const result = await service.getAccountAnalytics(userId);
+
+      expect(dashboardRepository.getAccountAnalytics).toHaveBeenCalledWith(
+        userId,
+        'EXPENSE',
+        {
+          startDate: undefined,
+          endDate: undefined,
+        },
+      );
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        type: 'EXPENSE',
+        accounts: [],
+        totalAmount: '0',
+        transactionCount: 0,
+      });
+    });
+
+    it('should support income account analytics', async () => {
+      dashboardRepository.getAccountAnalytics.mockResolvedValue({
+        groupedAccounts: [
+          {
+            accountId: '11111111-1111-4111-8111-111111111111',
+            _sum: {
+              amount: '5000000',
+            },
+            _count: {
+              _all: 2,
+            },
+          },
+        ],
+        accounts: [
+          {
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'BCA',
+          },
+        ],
+        totalAmount: '5000000',
+        transactionCount: 2,
+      });
+
+      const result = await service.getAccountAnalytics(userId, 'INCOME');
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        type: 'INCOME',
+        accounts: [
+          {
+            accountId: '11111111-1111-4111-8111-111111111111',
+            accountName: 'BCA',
+            totalAmount: '5000000',
+            transactionCount: 2,
+            percentage: '100',
+          },
+        ],
+        totalAmount: '5000000',
+        transactionCount: 2,
+      });
+    });
+
+    it('should sort accounts by total amount descending', async () => {
+      dashboardRepository.getAccountAnalytics.mockResolvedValue({
+        groupedAccounts: [
+          {
+            accountId: '11111111-1111-4111-8111-111111111111',
+            _sum: {
+              amount: '500000',
+            },
+            _count: {
+              _all: 1,
+            },
+          },
+          {
+            accountId: '22222222-2222-4222-8222-222222222222',
+            _sum: {
+              amount: '2000000',
+            },
+            _count: {
+              _all: 3,
+            },
+          },
+        ],
+        accounts: [
+          {
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'Cash',
+          },
+          {
+            id: '22222222-2222-4222-8222-222222222222',
+            name: 'BCA',
+          },
+        ],
+        totalAmount: '2500000',
+        transactionCount: 4,
+      });
+
+      const result = await service.getAccountAnalytics(userId, 'EXPENSE');
+
+      expect(result.accounts.map((account) => account.accountName)).toEqual([
+        'BCA',
+        'Cash',
+      ]);
+    });
+
+    it('should reject an invalid transaction type', async () => {
+      await expect(
+        service.getAccountAnalytics(userId, 'TRANSFER' as 'INCOME' | 'EXPENSE'),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Account analytics only supports income and expense transactions',
+        ),
+      );
+
+      expect(dashboardRepository.getAccountAnalytics).not.toHaveBeenCalled();
+    });
+
+    it('should reject an invalid date range', async () => {
+      const startDate = new Date('2026-09-30T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-01T00:00:00.000Z');
+
+      await expect(
+        service.getAccountAnalytics(userId, 'EXPENSE', {
+          startDate,
+          endDate,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'startDate must be earlier than or equal to endDate',
+        ),
+      );
+
+      expect(dashboardRepository.getAccountAnalytics).not.toHaveBeenCalled();
     });
   });
 });

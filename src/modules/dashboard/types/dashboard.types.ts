@@ -46,6 +46,22 @@ export interface DashboardCategoryAnalytics {
   transactionCount: number;
 }
 
+export interface DashboardAccountAnalyticsItem {
+  accountId: string;
+  accountName: string;
+  totalAmount: string;
+  transactionCount: number;
+  percentage: string;
+}
+
+export interface DashboardAccountAnalytics {
+  currency: string;
+  type: 'INCOME' | 'EXPENSE';
+  accounts: DashboardAccountAnalyticsItem[];
+  totalAmount: string;
+  transactionCount: number;
+}
+
 export interface DashboardMetric {
   value: number;
   currency: string;

@@ -230,4 +230,86 @@ export class DashboardRepository {
       transactionCount,
     };
   }
+
+  async getAccountAnalytics(
+    userId: string,
+    type: 'INCOME' | 'EXPENSE',
+    options: DashboardQueryOptions = {},
+  ) {
+    const where = {
+      userId,
+      deletedAt: null,
+      status: 'ACTIVE' as const,
+      currency: 'IDR',
+      type,
+      ...(options.startDate || options.endDate
+        ? {
+            transactionDate: {
+              ...(options.startDate
+                ? {
+                    gte: options.startDate,
+                  }
+                : {}),
+              ...(options.endDate
+                ? {
+                    lte: options.endDate,
+                  }
+                : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [groupedAccounts, aggregate, transactionCount] = await Promise.all([
+      this.prisma.transaction.groupBy({
+        by: ['accountId'],
+        where,
+        _sum: {
+          amount: true,
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+
+      this.prisma.transaction.aggregate({
+        where,
+        _sum: {
+          amount: true,
+        },
+      }),
+
+      this.prisma.transaction.count({
+        where,
+      }),
+    ]);
+
+    const accountIds = groupedAccounts
+      .map((item) => item.accountId)
+      .filter((accountId): accountId is string => accountId !== null);
+
+    const accounts =
+      accountIds.length > 0
+        ? await this.prisma.account.findMany({
+            where: {
+              id: {
+                in: accountIds,
+              },
+              userId,
+              deletedAt: null,
+            },
+            select: {
+              id: true,
+              name: true,
+            },
+          })
+        : [];
+
+    return {
+      groupedAccounts,
+      accounts,
+      totalAmount: aggregate._sum.amount,
+      transactionCount,
+    };
+  }
 }
