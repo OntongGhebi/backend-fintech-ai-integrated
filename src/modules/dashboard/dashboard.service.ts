@@ -1,12 +1,17 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+
+import { Prisma } from '../../../generated/prisma/client';
+
 import { DASHBOARD_DEFAULT_CURRENCY } from './dashboard.constants';
+
 import {
   DashboardArchitecture,
+  DashboardIncomeAnalytics,
   DashboardQueryOptions,
   DashboardSummary,
 } from './types/dashboard.types';
+
 import { DashboardRepository } from './repositories/dashboard.repository';
-import { Prisma } from '../../../generated/prisma/client';
 
 @Injectable()
 export class DashboardService {
@@ -35,8 +40,6 @@ export class DashboardService {
     return {
       startDate: options.startDate,
       endDate: options.endDate,
-      currency:
-        options.currency?.trim().toUpperCase() || DASHBOARD_DEFAULT_CURRENCY,
     };
   }
 
@@ -60,6 +63,7 @@ export class DashboardService {
       if (transaction.type === 'INCOME') {
         totalIncome = totalIncome.plus(amount);
       }
+
       if (transaction.type === 'EXPENSE') {
         totalExpense = totalExpense.plus(amount);
       }
@@ -73,6 +77,35 @@ export class DashboardService {
       totalExpense: totalExpense.toString(),
       netCashFlow: netCashFlow.toString(),
       transactionCount: result.transactionCount,
+    };
+  }
+
+  async getIncomeAnalytics(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ): Promise<DashboardIncomeAnalytics> {
+    const normalizedOptions = this.normalizeQuery(options);
+
+    const result = await this.dashboardRepository.getIncomeAnalytics(
+      userId,
+      normalizedOptions,
+    );
+
+    const totalIncomeValue = result.totalIncome ?? new Prisma.Decimal(0);
+    const totalIncome = new Prisma.Decimal(totalIncomeValue.toString());
+
+    const transactionCount = result.transactionCount;
+
+    const averageIncome =
+      transactionCount > 0
+        ? totalIncome.div(transactionCount)
+        : new Prisma.Decimal(0);
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      totalIncome: totalIncomeValue.toString(),
+      transactionCount,
+      averageIncome: averageIncome.toString(),
     };
   }
 }

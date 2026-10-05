@@ -6,7 +6,6 @@ export interface DashboardDateRange {
 export interface DashboardQueryOptions {
   startDate?: Date;
   endDate?: Date;
-  currency?: string;
 }
 
 export interface DashboardSummary {
@@ -15,6 +14,13 @@ export interface DashboardSummary {
   totalExpense: string;
   netCashFlow: string;
   transactionCount: number;
+}
+
+export interface DashboardIncomeAnalytics {
+  currency: string;
+  totalIncome: string;
+  transactionCount: number;
+  averageIncome: string;
 }
 
 export interface DashboardMetric {

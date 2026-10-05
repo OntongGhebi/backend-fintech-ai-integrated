@@ -7,6 +7,7 @@ describe('DashboardRepository', () => {
     transaction: {
       groupBy: jest.Mock;
       count: jest.Mock;
+      aggregate: jest.Mock;
     };
   };
 
@@ -17,6 +18,7 @@ describe('DashboardRepository', () => {
       transaction: {
         groupBy: jest.fn(),
         count: jest.fn(),
+        aggregate: jest.fn(),
       },
     };
 
@@ -160,6 +162,154 @@ describe('DashboardRepository', () => {
           },
         }),
       );
+    });
+  });
+
+  describe('getIncomeAnalytics', () => {
+    it('should aggregate only active IDR income transactions', async () => {
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: '7500000',
+        },
+      });
+
+      prisma.transaction.count.mockResolvedValue(6);
+
+      const result = await repository.getIncomeAnalytics(userId);
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'INCOME',
+        },
+        _sum: {
+          amount: true,
+        },
+      });
+
+      expect(prisma.transaction.count).toHaveBeenCalledWith({
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'INCOME',
+        },
+      });
+
+      expect(result).toEqual({
+        totalIncome: '7500000',
+        transactionCount: 6,
+      });
+    });
+
+    it('should apply the date range to income analytics', async () => {
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: '3000000',
+        },
+      });
+
+      prisma.transaction.count.mockResolvedValue(2);
+
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-30T23:59:59.999Z');
+
+      await repository.getIncomeAnalytics(userId, {
+        startDate,
+        endDate,
+      });
+
+      const expectedWhere = {
+        userId,
+        deletedAt: null,
+        status: 'ACTIVE',
+        currency: 'IDR',
+        type: 'INCOME',
+        transactionDate: {
+          gte: startDate,
+          lte: endDate,
+        },
+      };
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
+        where: expectedWhere,
+        _sum: {
+          amount: true,
+        },
+      });
+
+      expect(prisma.transaction.count).toHaveBeenCalledWith({
+        where: expectedWhere,
+      });
+    });
+
+    it('should apply only the start date', async () => {
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: '1000000',
+        },
+      });
+
+      prisma.transaction.count.mockResolvedValue(1);
+
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      await repository.getIncomeAnalytics(userId, {
+        startDate,
+      });
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'INCOME',
+          transactionDate: {
+            gte: startDate,
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+      });
+    });
+
+    it('should apply only the end date', async () => {
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: '1000000',
+        },
+      });
+
+      prisma.transaction.count.mockResolvedValue(1);
+
+      const endDate = new Date('2026-09-30T23:59:59.999Z');
+
+      await repository.getIncomeAnalytics(userId, {
+        endDate,
+      });
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'INCOME',
+          transactionDate: {
+            lte: endDate,
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+      });
     });
   });
 });

@@ -14,6 +14,7 @@ import { DashboardService } from './dashboard.service';
 
 import { GetDashboardSummaryQueryDto } from './dto/get-dashboard-summary-query.dto';
 import { DashboardSummaryResponseDto } from './dto/dashboard-summary-response.dto';
+import { DashboardIncomeAnalyticsResponseDto } from './dto/dashboard-income-analytics-response.dto';
 
 @Controller('dashboard')
 @ApiTags('Dashboard')
@@ -49,6 +50,24 @@ export class DashboardController {
     @Query() query: GetDashboardSummaryQueryDto,
   ): Promise<DashboardSummaryResponseDto> {
     return this.dashboardService.getFinancialSummary(userId, {
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+    });
+  }
+
+  @Get('income')
+  @ApiOperation({
+    summary: 'Get income analytics',
+  })
+  @ApiOkResponse({
+    type: DashboardIncomeAnalyticsResponseDto,
+    description: 'Income analytics retrieved successfully.',
+  })
+  async getIncomeAnalytics(
+    @CurrentUser('id') userId: string,
+    @Query() query: GetDashboardSummaryQueryDto,
+  ): Promise<DashboardIncomeAnalyticsResponseDto> {
+    return this.dashboardService.getIncomeAnalytics(userId, {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
     });

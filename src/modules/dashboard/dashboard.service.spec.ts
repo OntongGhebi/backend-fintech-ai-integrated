@@ -8,6 +8,7 @@ describe('DashboardService', () => {
 
   let dashboardRepository: {
     getFinancialSummary: jest.Mock;
+    getIncomeAnalytics: jest.Mock;
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -15,6 +16,7 @@ describe('DashboardService', () => {
   beforeEach(() => {
     dashboardRepository = {
       getFinancialSummary: jest.fn(),
+      getIncomeAnalytics: jest.fn(),
     };
 
     service = new DashboardService(
@@ -38,7 +40,6 @@ describe('DashboardService', () => {
       expect(service.normalizeQuery()).toEqual({
         startDate: undefined,
         endDate: undefined,
-        currency: 'IDR',
       });
     });
 
@@ -55,7 +56,6 @@ describe('DashboardService', () => {
       ).toEqual({
         startDate,
         endDate,
-        currency: 'IDR',
       });
     });
 
@@ -104,7 +104,6 @@ describe('DashboardService', () => {
         {
           startDate: undefined,
           endDate: undefined,
-          currency: 'IDR',
         },
       );
 
@@ -220,9 +219,85 @@ describe('DashboardService', () => {
         {
           startDate,
           endDate,
-          currency: 'IDR',
         },
       );
+    });
+  });
+
+  describe('getIncomeAnalytics', () => {
+    it('should calculate total income and average income', async () => {
+      dashboardRepository.getIncomeAnalytics.mockResolvedValue({
+        totalIncome: '7500000',
+        transactionCount: 6,
+      });
+
+      const result = await service.getIncomeAnalytics(userId);
+
+      expect(dashboardRepository.getIncomeAnalytics).toHaveBeenCalledWith(
+        userId,
+        {
+          startDate: undefined,
+          endDate: undefined,
+        },
+      );
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        totalIncome: '7500000',
+        transactionCount: 6,
+        averageIncome: '1250000',
+      });
+    });
+
+    it('should return zero average income when there are no income transactions', async () => {
+      dashboardRepository.getIncomeAnalytics.mockResolvedValue({
+        totalIncome: null,
+        transactionCount: 0,
+      });
+
+      const result = await service.getIncomeAnalytics(userId);
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        totalIncome: '0',
+        transactionCount: 0,
+        averageIncome: '0',
+      });
+    });
+
+    it('should preserve decimal precision when calculating average income', async () => {
+      dashboardRepository.getIncomeAnalytics.mockResolvedValue({
+        totalIncome: '1000000.50',
+        transactionCount: 4,
+      });
+
+      const result = await service.getIncomeAnalytics(userId);
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        totalIncome: '1000000.50',
+        transactionCount: 4,
+        averageIncome: '250000.125',
+      });
+    });
+
+    it('should reject an invalid date range', async () => {
+      const startDate = new Date('2026-09-30T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-01T00:00:00.000Z');
+
+      await expect(
+        service.getIncomeAnalytics(userId, {
+          startDate,
+          endDate,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'startDate must be earlier than or equal to endDate',
+        ),
+      );
+
+      expect(dashboardRepository.getIncomeAnalytics).not.toHaveBeenCalled();
     });
   });
 });
