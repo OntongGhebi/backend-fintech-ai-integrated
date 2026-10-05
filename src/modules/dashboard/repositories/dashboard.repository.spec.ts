@@ -9,6 +9,9 @@ describe('DashboardRepository', () => {
       count: jest.Mock;
       aggregate: jest.Mock;
     };
+    category: {
+      findMany: jest.Mock;
+    };
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -19,6 +22,9 @@ describe('DashboardRepository', () => {
         groupBy: jest.fn(),
         count: jest.fn(),
         aggregate: jest.fn(),
+      },
+      category: {
+        findMany: jest.fn(),
       },
     };
 
@@ -457,6 +463,170 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: true,
         },
+      });
+    });
+  });
+
+  describe('getCategoryAnalytics', () => {
+    it('should aggregate categories and resolve category names', async () => {
+      const categoryId = '11111111-1111-4111-8111-111111111111';
+
+      prisma.transaction.groupBy.mockResolvedValue([
+        {
+          categoryId,
+          _sum: {
+            amount: '2500000',
+          },
+          _count: {
+            _all: 8,
+          },
+        },
+      ]);
+
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: '2500000',
+        },
+      });
+
+      prisma.transaction.count.mockResolvedValue(8);
+
+      prisma.category.findMany.mockResolvedValue([
+        {
+          id: categoryId,
+          name: 'Food',
+        },
+      ]);
+
+      const result = await repository.getCategoryAnalytics(userId, 'EXPENSE');
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith({
+        by: ['categoryId'],
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'EXPENSE',
+          categoryId: {
+            not: null,
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+        _count: {
+          _all: true,
+        },
+      });
+
+      expect(prisma.category.findMany).toHaveBeenCalledWith({
+        where: {
+          id: {
+            in: [categoryId],
+          },
+          userId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      expect(result).toEqual({
+        groupedCategories: [
+          {
+            categoryId,
+            _sum: {
+              amount: '2500000',
+            },
+            _count: {
+              _all: 8,
+            },
+          },
+        ],
+        categories: [
+          {
+            id: categoryId,
+            name: 'Food',
+          },
+        ],
+        totalAmount: '2500000',
+        transactionCount: 8,
+      });
+    });
+
+    it('should apply date range', async () => {
+      prisma.transaction.groupBy.mockResolvedValue([]);
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: null,
+        },
+      });
+      prisma.transaction.count.mockResolvedValue(0);
+      prisma.category.findMany.mockResolvedValue([]);
+
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-30T23:59:59.999Z');
+
+      await repository.getCategoryAnalytics(userId, 'INCOME', {
+        startDate,
+        endDate,
+      });
+
+      const expectedWhere = {
+        userId,
+        deletedAt: null,
+        status: 'ACTIVE',
+        currency: 'IDR',
+        type: 'INCOME',
+        categoryId: {
+          not: null,
+        },
+        transactionDate: {
+          gte: startDate,
+          lte: endDate,
+        },
+      };
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expectedWhere,
+        }),
+      );
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
+        where: expectedWhere,
+        _sum: {
+          amount: true,
+        },
+      });
+
+      expect(prisma.transaction.count).toHaveBeenCalledWith({
+        where: expectedWhere,
+      });
+    });
+
+    it('should not query categories when there are no grouped categories', async () => {
+      prisma.transaction.groupBy.mockResolvedValue([]);
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: null,
+        },
+      });
+      prisma.transaction.count.mockResolvedValue(0);
+
+      const result = await repository.getCategoryAnalytics(userId, 'EXPENSE');
+
+      expect(prisma.category.findMany).not.toHaveBeenCalled();
+
+      expect(result).toEqual({
+        groupedCategories: [],
+        categories: [],
+        totalAmount: null,
+        transactionCount: 0,
       });
     });
   });

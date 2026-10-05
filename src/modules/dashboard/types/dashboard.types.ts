@@ -30,6 +30,22 @@ export interface DashboardExpenseAnalytics {
   averageExpense: string;
 }
 
+export interface DashboardCategoryAnalyticsItem {
+  categoryId: string;
+  categoryName: string;
+  totalAmount: string;
+  transactionCount: number;
+  percentage: string;
+}
+
+export interface DashboardCategoryAnalytics {
+  currency: string;
+  type: 'INCOME' | 'EXPENSE';
+  categories: DashboardCategoryAnalyticsItem[];
+  totalAmount: string;
+  transactionCount: number;
+}
+
 export interface DashboardMetric {
   value: number;
   currency: string;

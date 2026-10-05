@@ -6,6 +6,8 @@ import { DASHBOARD_DEFAULT_CURRENCY } from './dashboard.constants';
 
 import {
   DashboardArchitecture,
+  DashboardCategoryAnalytics,
+  DashboardCategoryAnalyticsItem,
   DashboardExpenseAnalytics,
   DashboardIncomeAnalytics,
   DashboardQueryOptions,
@@ -136,6 +138,72 @@ export class DashboardService {
       totalExpense: totalExpenseValue.toString(),
       transactionCount,
       averageExpense: averageExpense.toString(),
+    };
+  }
+
+  async getCategoryAnalytics(
+    userId: string,
+    type: 'INCOME' | 'EXPENSE' = 'EXPENSE',
+    options: DashboardQueryOptions = {},
+  ): Promise<DashboardCategoryAnalytics> {
+    if (type !== 'INCOME' && type !== 'EXPENSE') {
+      throw new BadRequestException(
+        'Category analytics only supports income and expense transactions',
+      );
+    }
+
+    const normalizedOptions = this.normalizeQuery(options);
+
+    const result = await this.dashboardRepository.getCategoryAnalytics(
+      userId,
+      type,
+      normalizedOptions,
+    );
+
+    const totalAmountValue = result.totalAmount ?? new Prisma.Decimal(0);
+    const totalAmount = new Prisma.Decimal(totalAmountValue.toString());
+
+    const categoryMap = new Map(
+      result.categories.map((category) => [category.id, category.name]),
+    );
+
+    const categories: DashboardCategoryAnalyticsItem[] =
+      result.groupedCategories
+        .filter((item) => item.categoryId !== null)
+        .map((item) => {
+          const categoryId = item.categoryId as string;
+
+          const amountValue = item._sum.amount ?? new Prisma.Decimal(0);
+          const amount = new Prisma.Decimal(amountValue.toString());
+
+          const transactionCount = item._count._all;
+
+          const percentage = totalAmount.greaterThan(0)
+            ? amount.div(totalAmount).times(100)
+            : new Prisma.Decimal(0);
+
+          return {
+            categoryId,
+            categoryName: categoryMap.get(categoryId) ?? 'Unknown',
+            totalAmount: amount.toString(),
+            transactionCount,
+            percentage: percentage.toString(),
+          };
+        })
+        .sort((a, b) => {
+          const amountA = new Prisma.Decimal(a.totalAmount);
+
+          const amountB = new Prisma.Decimal(b.totalAmount);
+
+          return amountB.comparedTo(amountA);
+        });
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      type,
+      categories,
+      totalAmount: totalAmountValue.toString(),
+      transactionCount: result.transactionCount,
     };
   }
 }

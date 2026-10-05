@@ -16,6 +16,8 @@ import { GetDashboardSummaryQueryDto } from './dto/get-dashboard-summary-query.d
 import { DashboardSummaryResponseDto } from './dto/dashboard-summary-response.dto';
 import { DashboardIncomeAnalyticsResponseDto } from './dto/dashboard-income-analytics-response.dto';
 import { DashboardExpenseAnalyticsResponseDto } from './dto/dashboard-expense-analytics-response.dto';
+import { GetDashboardCategoryAnalyticsQueryDto } from './dto/get-dashboard-category-analytics-query.dto';
+import { DashboardCategoryAnalyticsResponseDto } from './dto/dashboard-category-analytics-response.dto';
 
 @Controller('dashboard')
 @ApiTags('Dashboard')
@@ -87,6 +89,27 @@ export class DashboardController {
     @Query() query: GetDashboardSummaryQueryDto,
   ): Promise<DashboardExpenseAnalyticsResponseDto> {
     return this.dashboardService.getExpenseAnalytics(userId, {
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+    });
+  }
+
+  @Get('categories')
+  @ApiOperation({
+    summary: 'Get category analytics',
+  })
+  @ApiOkResponse({
+    type: DashboardCategoryAnalyticsResponseDto,
+    description: 'Category analytics retrieved successfully.',
+  })
+  async getCategoryAnalytics(
+    @CurrentUser('id') userId: string,
+    @Query()
+    query: GetDashboardCategoryAnalyticsQueryDto,
+  ): Promise<DashboardCategoryAnalyticsResponseDto> {
+    const type = String(query.type) === 'INCOME' ? 'INCOME' : 'EXPENSE';
+
+    return this.dashboardService.getCategoryAnalytics(userId, type, {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
     });

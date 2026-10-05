@@ -145,4 +145,89 @@ export class DashboardRepository {
       transactionCount,
     };
   }
+
+  async getCategoryAnalytics(
+    userId: string,
+    type: 'INCOME' | 'EXPENSE',
+    options: DashboardQueryOptions = {},
+  ) {
+    const where = {
+      userId,
+      deletedAt: null,
+      status: 'ACTIVE' as const,
+      currency: 'IDR',
+      type,
+      categoryId: {
+        not: null,
+      },
+      ...(options.startDate || options.endDate
+        ? {
+            transactionDate: {
+              ...(options.startDate
+                ? {
+                    gte: options.startDate,
+                  }
+                : {}),
+              ...(options.endDate
+                ? {
+                    lte: options.endDate,
+                  }
+                : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [groupedCategories, aggregate, transactionCount] = await Promise.all([
+      this.prisma.transaction.groupBy({
+        by: ['categoryId'],
+        where,
+        _sum: {
+          amount: true,
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+
+      this.prisma.transaction.aggregate({
+        where,
+        _sum: {
+          amount: true,
+        },
+      }),
+
+      this.prisma.transaction.count({
+        where,
+      }),
+    ]);
+
+    const categoryIds = groupedCategories
+      .map((item) => item.categoryId)
+      .filter((categoryId): categoryId is string => categoryId !== null);
+
+    const categories =
+      categoryIds.length > 0
+        ? await this.prisma.category.findMany({
+            where: {
+              id: {
+                in: categoryIds,
+              },
+              userId,
+              deletedAt: null,
+            },
+            select: {
+              id: true,
+              name: true,
+            },
+          })
+        : [];
+
+    return {
+      groupedCategories,
+      categories,
+      totalAmount: aggregate._sum.amount,
+      transactionCount,
+    };
+  }
 }

@@ -10,6 +10,7 @@ describe('DashboardService', () => {
     getFinancialSummary: jest.Mock;
     getIncomeAnalytics: jest.Mock;
     getExpenseAnalytics: jest.Mock;
+    getCategoryAnalytics: jest.Mock;
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -19,6 +20,7 @@ describe('DashboardService', () => {
       getFinancialSummary: jest.fn(),
       getIncomeAnalytics: jest.fn(),
       getExpenseAnalytics: jest.fn(),
+      getCategoryAnalytics: jest.fn(),
     };
 
     service = new DashboardService(
@@ -400,6 +402,226 @@ describe('DashboardService', () => {
       );
 
       expect(dashboardRepository.getExpenseAnalytics).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCategoryAnalytics', () => {
+    it('should calculate category breakdown', async () => {
+      dashboardRepository.getCategoryAnalytics.mockResolvedValue({
+        groupedCategories: [
+          {
+            categoryId: '11111111-1111-4111-8111-111111111111',
+            _sum: {
+              amount: '2500000',
+            },
+            _count: {
+              _all: 8,
+            },
+          },
+          {
+            categoryId: '22222222-2222-4222-8222-222222222222',
+            _sum: {
+              amount: '1500000',
+            },
+            _count: {
+              _all: 5,
+            },
+          },
+        ],
+        categories: [
+          {
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'Food',
+          },
+          {
+            id: '22222222-2222-4222-8222-222222222222',
+            name: 'Transport',
+          },
+        ],
+        totalAmount: '4000000',
+        transactionCount: 13,
+      });
+
+      const result = await service.getCategoryAnalytics(userId, 'EXPENSE');
+
+      expect(dashboardRepository.getCategoryAnalytics).toHaveBeenCalledWith(
+        userId,
+        'EXPENSE',
+        {
+          startDate: undefined,
+          endDate: undefined,
+        },
+      );
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        type: 'EXPENSE',
+        categories: [
+          {
+            categoryId: '11111111-1111-4111-8111-111111111111',
+            categoryName: 'Food',
+            totalAmount: '2500000',
+            transactionCount: 8,
+            percentage: '62.5',
+          },
+          {
+            categoryId: '22222222-2222-4222-8222-222222222222',
+            categoryName: 'Transport',
+            totalAmount: '1500000',
+            transactionCount: 5,
+            percentage: '37.5',
+          },
+        ],
+        totalAmount: '4000000',
+        transactionCount: 13,
+      });
+    });
+
+    it('should default to expense analytics', async () => {
+      dashboardRepository.getCategoryAnalytics.mockResolvedValue({
+        groupedCategories: [],
+        categories: [],
+        totalAmount: null,
+        transactionCount: 0,
+      });
+
+      const result = await service.getCategoryAnalytics(userId);
+
+      expect(dashboardRepository.getCategoryAnalytics).toHaveBeenCalledWith(
+        userId,
+        'EXPENSE',
+        {
+          startDate: undefined,
+          endDate: undefined,
+        },
+      );
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        type: 'EXPENSE',
+        categories: [],
+        totalAmount: '0',
+        transactionCount: 0,
+      });
+    });
+
+    it('should support income category analytics', async () => {
+      dashboardRepository.getCategoryAnalytics.mockResolvedValue({
+        groupedCategories: [
+          {
+            categoryId: '11111111-1111-4111-8111-111111111111',
+            _sum: {
+              amount: '5000000',
+            },
+            _count: {
+              _all: 2,
+            },
+          },
+        ],
+        categories: [
+          {
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'Salary',
+          },
+        ],
+        totalAmount: '5000000',
+        transactionCount: 2,
+      });
+
+      const result = await service.getCategoryAnalytics(userId, 'INCOME');
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        type: 'INCOME',
+        categories: [
+          {
+            categoryId: '11111111-1111-4111-8111-111111111111',
+            categoryName: 'Salary',
+            totalAmount: '5000000',
+            transactionCount: 2,
+            percentage: '100',
+          },
+        ],
+        totalAmount: '5000000',
+        transactionCount: 2,
+      });
+    });
+
+    it('should sort categories by total amount descending', async () => {
+      dashboardRepository.getCategoryAnalytics.mockResolvedValue({
+        groupedCategories: [
+          {
+            categoryId: '11111111-1111-4111-8111-111111111111',
+            _sum: {
+              amount: '500000',
+            },
+            _count: {
+              _all: 1,
+            },
+          },
+          {
+            categoryId: '22222222-2222-4222-8222-222222222222',
+            _sum: {
+              amount: '2000000',
+            },
+            _count: {
+              _all: 3,
+            },
+          },
+        ],
+        categories: [
+          {
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'Small',
+          },
+          {
+            id: '22222222-2222-4222-8222-222222222222',
+            name: 'Large',
+          },
+        ],
+        totalAmount: '2500000',
+        transactionCount: 4,
+      });
+
+      const result = await service.getCategoryAnalytics(userId, 'EXPENSE');
+
+      expect(
+        result.categories.map((category) => category.categoryName),
+      ).toEqual(['Large', 'Small']);
+    });
+
+    it('should reject an invalid transaction type', async () => {
+      await expect(
+        service.getCategoryAnalytics(
+          userId,
+          'TRANSFER' as 'INCOME' | 'EXPENSE',
+        ),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Category analytics only supports income and expense transactions',
+        ),
+      );
+
+      expect(dashboardRepository.getCategoryAnalytics).not.toHaveBeenCalled();
+    });
+
+    it('should reject an invalid date range', async () => {
+      const startDate = new Date('2026-09-30T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-01T00:00:00.000Z');
+
+      await expect(
+        service.getCategoryAnalytics(userId, 'EXPENSE', {
+          startDate,
+          endDate,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'startDate must be earlier than or equal to endDate',
+        ),
+      );
+
+      expect(dashboardRepository.getCategoryAnalytics).not.toHaveBeenCalled();
     });
   });
 });
