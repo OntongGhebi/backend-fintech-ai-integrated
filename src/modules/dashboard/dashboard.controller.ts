@@ -22,6 +22,8 @@ import { GetDashboardAccountAnalyticsQueryDto } from './dto/get-dashboard-accoun
 import { DashboardAccountAnalyticsResponseDto } from './dto/dashboard-account-analytcs-response.dto';
 import { DashboardBudgetPerformanceResponseDto } from './dto/dashboard-budget-performance-response.dto';
 import { GetDashboardBudgetPerformanceQueryDto } from './dto/get-dashboard-budget-performance-query.dto';
+import { GetDashboardRecurringPerformanceQueryDto } from './dto/get-dashboard-recurring-performance-query.dto';
+import { DashboardRecurringPerformanceResponseDto } from './dto/dashboard-recurring-performance-response.dto';
 
 @Controller('dashboard')
 @ApiTags('Dashboard')
@@ -155,6 +157,26 @@ export class DashboardController {
   ): Promise<DashboardBudgetPerformanceResponseDto> {
     return this.dashboardService.getBudgetPerformance(userId, {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+    });
+  }
+
+  @Get('recurring/performance')
+  @ApiOperation({
+    summary: 'Get recurring transaction performance',
+  })
+  @ApiOkResponse({
+    type: DashboardRecurringPerformanceResponseDto,
+    description: 'Recurring transaction performance retrieved successfully.',
+  })
+  async getRecurringPerformance(
+    @CurrentUser('id') userId: string,
+    @Query()
+    query: GetDashboardRecurringPerformanceQueryDto,
+  ): Promise<DashboardRecurringPerformanceResponseDto> {
+    return this.dashboardService.getRecurringPerformance(userId, {
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+
       endDate: query.endDate ? new Date(query.endDate) : undefined,
     });
   }

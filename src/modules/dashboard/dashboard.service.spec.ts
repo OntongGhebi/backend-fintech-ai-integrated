@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 
 import { DashboardRepository } from './repositories/dashboard.repository';
 import { DashboardService } from './dashboard.service';
+import { Prisma } from '../../../generated/prisma/client';
 
 describe('DashboardService', () => {
   let service: DashboardService;
@@ -13,6 +14,7 @@ describe('DashboardService', () => {
     getCategoryAnalytics: jest.Mock;
     getAccountAnalytics: jest.Mock;
     getBudgetPerformance: jest.Mock;
+    getRecurringPerformance: jest.Mock;
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -25,6 +27,7 @@ describe('DashboardService', () => {
       getCategoryAnalytics: jest.fn(),
       getAccountAnalytics: jest.fn(),
       getBudgetPerformance: jest.fn(),
+      getRecurringPerformance: jest.fn(),
     };
 
     service = new DashboardService(
@@ -1070,6 +1073,167 @@ describe('DashboardService', () => {
       );
 
       expect(dashboardRepository.getBudgetPerformance).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getRecurringPerformance', () => {
+    it('should calculate expected and executed occurrences', async () => {
+      dashboardRepository.getRecurringPerformance = jest
+        .fn()
+        .mockResolvedValue({
+          recurringTransactions: [
+            {
+              id: 'recurring-1',
+              description: 'Netflix',
+              type: 'EXPENSE',
+              amount: new Prisma.Decimal(150000),
+              frequency: 'MONTHLY',
+              startDate: new Date('2026-01-01T00:00:00.000Z'),
+              endDate: new Date('2026-06-01T00:00:00.000Z'),
+            },
+          ],
+          transactions: [
+            {
+              id: 'transaction-1',
+              recurringTransactionId: 'recurring-1',
+              amount: new Prisma.Decimal(150000),
+              transactionDate: new Date('2026-01-01T00:00:00.000Z'),
+            },
+            {
+              id: 'transaction-2',
+              recurringTransactionId: 'recurring-1',
+              amount: new Prisma.Decimal(150000),
+              transactionDate: new Date('2026-02-01T00:00:00.000Z'),
+            },
+            {
+              id: 'transaction-3',
+              recurringTransactionId: 'recurring-1',
+              amount: new Prisma.Decimal(150000),
+              transactionDate: new Date('2026-03-01T00:00:00.000Z'),
+            },
+            {
+              id: 'transaction-4',
+              recurringTransactionId: 'recurring-1',
+              amount: new Prisma.Decimal(150000),
+              transactionDate: new Date('2026-04-01T00:00:00.000Z'),
+            },
+            {
+              id: 'transaction-5',
+              recurringTransactionId: 'recurring-1',
+              amount: new Prisma.Decimal(150000),
+              transactionDate: new Date('2026-05-01T00:00:00.000Z'),
+            },
+          ],
+        });
+
+      const result = await service.getRecurringPerformance('user-1');
+
+      expect(result.recurringTransactions[0]).toEqual(
+        expect.objectContaining({
+          recurringTransactionId: 'recurring-1',
+          expectedOccurrences: 6,
+          executedOccurrences: 5,
+          missedOccurrences: 1,
+          expectedAmount: '900000',
+          executedAmount: '750000',
+          status: 'NEAR_COMPLETE',
+        }),
+      );
+    });
+
+    it('should mark 100 percent completion as ON_TRACK', async () => {
+      dashboardRepository.getRecurringPerformance = jest
+        .fn()
+        .mockResolvedValue({
+          recurringTransactions: [
+            {
+              id: 'recurring-1',
+              description: 'Salary',
+              type: 'INCOME',
+              amount: new Prisma.Decimal(5000000),
+              frequency: 'MONTHLY',
+              startDate: new Date('2026-01-01T00:00:00.000Z'),
+              endDate: new Date('2026-03-01T00:00:00.000Z'),
+            },
+          ],
+          transactions: [
+            {
+              id: 'transaction-1',
+              recurringTransactionId: 'recurring-1',
+              amount: new Prisma.Decimal(5000000),
+              transactionDate: new Date('2026-01-01T00:00:00.000Z'),
+            },
+            {
+              id: 'transaction-2',
+              recurringTransactionId: 'recurring-1',
+              amount: new Prisma.Decimal(5000000),
+              transactionDate: new Date('2026-02-01T00:00:00.000Z'),
+            },
+            {
+              id: 'transaction-3',
+              recurringTransactionId: 'recurring-1',
+              amount: new Prisma.Decimal(5000000),
+              transactionDate: new Date('2026-03-01T00:00:00.000Z'),
+            },
+          ],
+        });
+
+      const result = await service.getRecurringPerformance('user-1');
+
+      expect(result.recurringTransactions[0].completionPercentage).toBe('100');
+
+      expect(result.recurringTransactions[0].status).toBe('ON_TRACK');
+    });
+
+    it('should mark completion below 80 percent as UNDERPERFORMING', async () => {
+      dashboardRepository.getRecurringPerformance = jest
+        .fn()
+        .mockResolvedValue({
+          recurringTransactions: [
+            {
+              id: 'recurring-1',
+              description: 'Gym',
+              type: 'EXPENSE',
+              amount: new Prisma.Decimal(100000),
+              frequency: 'MONTHLY',
+              startDate: new Date('2026-01-01T00:00:00.000Z'),
+              endDate: new Date('2026-05-01T00:00:00.000Z'),
+            },
+          ],
+          transactions: [
+            {
+              id: 'transaction-1',
+              recurringTransactionId: 'recurring-1',
+              amount: new Prisma.Decimal(100000),
+              transactionDate: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          ],
+        });
+
+      const result = await service.getRecurringPerformance('user-1');
+
+      expect(result.recurringTransactions[0].status).toBe('UNDERPERFORMING');
+    });
+
+    it('should return empty analytics when there are no recurring transactions', async () => {
+      dashboardRepository.getRecurringPerformance = jest
+        .fn()
+        .mockResolvedValue({
+          recurringTransactions: [],
+          transactions: [],
+        });
+
+      const result = await service.getRecurringPerformance('user-1');
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        recurringTransactions: [],
+        totalExpectedAmount: '0',
+        totalExecutedAmount: '0',
+        totalExpectedOccurrences: 0,
+        totalExecutedOccurrences: 0,
+        totalMissedOccurrences: 0,
+      });
     });
   });
 });

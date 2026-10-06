@@ -5,6 +5,7 @@ import { Prisma } from '../../../generated/prisma/client';
 import {
   DASHBOARD_BUDGET_NEAR_LIMIT_PERCENTAGE,
   DASHBOARD_DEFAULT_CURRENCY,
+  DASHBOARD_RECURRING_NEAR_COMPLETE_PERCENTAGE,
 } from './dashboard.constants';
 
 import {
@@ -19,6 +20,9 @@ import {
   DashboardExpenseAnalytics,
   DashboardIncomeAnalytics,
   DashboardQueryOptions,
+  DashboardRecurringPerformance,
+  DashboardRecurringPerformanceItem,
+  DashboardRecurringPerformanceStatus,
   DashboardSummary,
 } from './types/dashboard.types';
 
@@ -379,5 +383,229 @@ export class DashboardService {
       totalActualAmount: totalActualAmount.toString(),
       totalRemainingAmount: totalRemainingAmount.toString(),
     };
+  }
+
+  async getRecurringPerformance(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ): Promise<DashboardRecurringPerformance> {
+    const normalizedOptions = this.normalizeQuery(options);
+
+    const result = await this.dashboardRepository.getRecurringPerformance(
+      userId,
+      normalizedOptions,
+    );
+
+    let totalExpectedAmount = new Prisma.Decimal(0);
+
+    let totalExecutedAmount = new Prisma.Decimal(0);
+
+    let totalExpectedOccurrences = 0;
+    let totalExecutedOccurrences = 0;
+    let totalMissedOccurrences = 0;
+
+    const transactionsByRecurringId = new Map<
+      string,
+      Array<{
+        amount: Prisma.Decimal;
+        transactionDate: Date;
+      }>
+    >();
+
+    for (const transaction of result.transactions) {
+      if (!transaction.recurringTransactionId) {
+        continue;
+      }
+
+      const current =
+        transactionsByRecurringId.get(transaction.recurringTransactionId) ?? [];
+
+      current.push({
+        amount: transaction.amount,
+        transactionDate: transaction.transactionDate,
+      });
+
+      transactionsByRecurringId.set(
+        transaction.recurringTransactionId,
+        current,
+      );
+    }
+
+    const recurringTransactions = result.recurringTransactions.map(
+      (recurringTransaction): DashboardRecurringPerformanceItem => {
+        const periodStart = this.getRecurringPerformanceStartDate(
+          recurringTransaction.startDate,
+          normalizedOptions.startDate,
+        );
+
+        const periodEnd = this.getRecurringPerformanceEndDate(
+          recurringTransaction.endDate,
+          normalizedOptions.endDate,
+        );
+
+        const expectedOccurrences = this.calculateExpectedOccurrences(
+          recurringTransaction.frequency,
+          periodStart,
+          periodEnd,
+        );
+
+        const actualTransactions =
+          transactionsByRecurringId.get(recurringTransaction.id) ?? [];
+
+        const executedOccurrences = actualTransactions.filter(
+          (transaction) =>
+            transaction.transactionDate >= periodStart &&
+            transaction.transactionDate <= periodEnd,
+        ).length;
+
+        const missedOccurrences = Math.max(
+          expectedOccurrences - executedOccurrences,
+          0,
+        );
+
+        const amount = new Prisma.Decimal(recurringTransaction.amount);
+
+        const expectedAmount = amount.times(expectedOccurrences);
+
+        const executedAmount = actualTransactions
+          .filter(
+            (transaction) =>
+              transaction.transactionDate >= periodStart &&
+              transaction.transactionDate <= periodEnd,
+          )
+          .reduce(
+            (total, transaction) => total.plus(transaction.amount),
+            new Prisma.Decimal(0),
+          );
+
+        const completionPercentage = expectedAmount.greaterThan(0)
+          ? executedAmount.div(expectedAmount).times(100)
+          : new Prisma.Decimal(0);
+
+        const status =
+          this.resolveRecurringPerformanceStatus(completionPercentage);
+
+        totalExpectedAmount = totalExpectedAmount.plus(expectedAmount);
+
+        totalExecutedAmount = totalExecutedAmount.plus(executedAmount);
+
+        totalExpectedOccurrences += expectedOccurrences;
+
+        totalExecutedOccurrences += executedOccurrences;
+
+        totalMissedOccurrences += missedOccurrences;
+
+        return {
+          recurringTransactionId: recurringTransaction.id,
+          description: recurringTransaction.description,
+          type: recurringTransaction.type,
+          frequency: recurringTransaction.frequency,
+          amount: amount.toString(),
+          expectedOccurrences,
+          executedOccurrences,
+          missedOccurrences,
+          expectedAmount: expectedAmount.toString(),
+          executedAmount: executedAmount.toString(),
+          completionPercentage: completionPercentage.toString(),
+          status,
+        };
+      },
+    );
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      recurringTransactions,
+      totalExpectedAmount: totalExpectedAmount.toString(),
+      totalExecutedAmount: totalExecutedAmount.toString(),
+      totalExpectedOccurrences,
+      totalExecutedOccurrences,
+      totalMissedOccurrences,
+    };
+  }
+
+  private getRecurringPerformanceStartDate(
+    recurringStartDate: Date,
+    requestedStartDate?: Date,
+  ): Date {
+    if (!requestedStartDate) {
+      return new Date(recurringStartDate);
+    }
+
+    return new Date(
+      Math.max(recurringStartDate.getTime(), requestedStartDate.getTime()),
+    );
+  }
+
+  private getRecurringPerformanceEndDate(
+    recurringEndDate: Date | null,
+    requestedEndDate?: Date,
+  ): Date {
+    const defaultEndDate = requestedEndDate ?? new Date();
+
+    if (!recurringEndDate) {
+      return new Date(defaultEndDate);
+    }
+
+    return new Date(
+      Math.min(recurringEndDate.getTime(), defaultEndDate.getTime()),
+    );
+  }
+
+  private calculateExpectedOccurrences(
+    frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY',
+    startDate: Date,
+    endDate: Date,
+  ): number {
+    if (endDate.getTime() < startDate.getTime()) {
+      return 0;
+    }
+
+    let count = 0;
+    let current = new Date(startDate);
+
+    while (current.getTime() <= endDate.getTime()) {
+      count += 1;
+
+      const next = new Date(current);
+
+      switch (frequency) {
+        case 'DAILY':
+          next.setUTCDate(next.getUTCDate() + 1);
+          break;
+        case 'WEEKLY':
+          next.setUTCDate(next.getUTCDate() + 7);
+          break;
+        case 'MONTHLY':
+          next.setUTCMonth(next.getUTCMonth() + 1);
+          break;
+        case 'YEARLY':
+          next.setUTCFullYear(next.getUTCFullYear() + 1);
+          break;
+      }
+
+      if (next.getTime() === current.getTime()) {
+        break;
+      }
+
+      current = next;
+    }
+
+    return count;
+  }
+
+  private resolveRecurringPerformanceStatus(
+    completionPercentage: Prisma.Decimal,
+  ): DashboardRecurringPerformanceStatus {
+    if (completionPercentage.greaterThanOrEqualTo(100)) {
+      return 'ON_TRACK';
+    }
+    if (
+      completionPercentage.greaterThanOrEqualTo(
+        DASHBOARD_RECURRING_NEAR_COMPLETE_PERCENTAGE,
+      )
+    ) {
+      return 'NEAR_COMPLETE';
+    }
+    return 'UNDERPERFORMING';
   }
 }

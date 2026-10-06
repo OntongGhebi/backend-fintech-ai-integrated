@@ -86,6 +86,40 @@ export interface DashboardBudgetPerformance {
   totalRemainingAmount: string;
 }
 
+export type DashboardRecurringPerformanceStatus =
+  'ON_TRACK' | 'NEAR_COMPLETE' | 'UNDERPERFORMING';
+
+export interface DashboardRecurringPerformanceItem {
+  recurringTransactionId: string;
+  description: string | null;
+  type: 'INCOME' | 'EXPENSE' | 'TRANSFER';
+  frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+  amount: string;
+
+  expectedOccurrences: number;
+  executedOccurrences: number;
+  missedOccurrences: number;
+
+  expectedAmount: string;
+  executedAmount: string;
+
+  completionPercentage: string;
+  status: DashboardRecurringPerformanceStatus;
+}
+
+export interface DashboardRecurringPerformance {
+  currency: string;
+
+  recurringTransactions: DashboardRecurringPerformanceItem[];
+
+  totalExpectedAmount: string;
+  totalExecutedAmount: string;
+
+  totalExpectedOccurrences: number;
+  totalExecutedOccurrences: number;
+  totalMissedOccurrences: number;
+}
+
 export interface DashboardMetric {
   value: number;
   currency: string;

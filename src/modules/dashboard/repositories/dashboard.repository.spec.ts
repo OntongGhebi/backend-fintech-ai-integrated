@@ -1,5 +1,6 @@
 import { expect } from '@jest/globals';
 import { DashboardRepository } from './dashboard.repository';
+import { Prisma } from '../../../../generated/prisma/client';
 
 describe('DashboardRepository', () => {
   let repository: DashboardRepository;
@@ -9,6 +10,7 @@ describe('DashboardRepository', () => {
       groupBy: jest.Mock;
       count: jest.Mock;
       aggregate: jest.Mock;
+      findMany: jest.Mock;
     };
     category: {
       findMany: jest.Mock;
@@ -17,6 +19,9 @@ describe('DashboardRepository', () => {
       findMany: jest.Mock;
     };
     budget: {
+      findMany: jest.Mock;
+    };
+    recurringTransaction: {
       findMany: jest.Mock;
     };
   };
@@ -29,6 +34,7 @@ describe('DashboardRepository', () => {
         groupBy: jest.fn(),
         count: jest.fn(),
         aggregate: jest.fn(),
+        findMany: jest.fn(),
       },
       category: {
         findMany: jest.fn(),
@@ -37,6 +43,9 @@ describe('DashboardRepository', () => {
         findMany: jest.fn(),
       },
       budget: {
+        findMany: jest.fn(),
+      },
+      recurringTransaction: {
         findMany: jest.fn(),
       },
     };
@@ -944,6 +953,71 @@ describe('DashboardRepository', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('getRecurringPerformance', () => {
+    it('should load active recurring transactions for the user', async () => {
+      prisma.recurringTransaction.findMany.mockResolvedValue([
+        {
+          id: 'recurring-1',
+          userId: 'user-1',
+          isActive: true,
+          amount: new Prisma.Decimal(100000),
+          type: 'EXPENSE',
+          frequency: 'MONTHLY',
+          startDate: new Date('2026-01-01T00:00:00.000Z'),
+          endDate: null,
+          description: 'Netflix',
+        },
+      ] as never);
+
+      prisma.transaction.findMany.mockResolvedValue([
+        {
+          id: 'transaction-1',
+          recurringTransactionId: 'recurring-1',
+          amount: new Prisma.Decimal(100000),
+          transactionDate: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ] as never);
+
+      const result = await repository.getRecurringPerformance('user-1');
+
+      expect(prisma.recurringTransaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: 'user-1',
+            isActive: true,
+          }),
+        }),
+      );
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: 'user-1',
+            currency: 'IDR',
+            status: 'ACTIVE',
+          }),
+        }),
+      );
+
+      expect(result.recurringTransactions).toHaveLength(1);
+
+      expect(result.transactions).toHaveLength(1);
+    });
+
+    it('should return empty transaction data when there are no recurring transactions', async () => {
+      prisma.recurringTransaction.findMany.mockResolvedValue([]);
+
+      const result = await repository.getRecurringPerformance('user-1');
+
+      expect(result).toEqual({
+        recurringTransactions: [],
+        transactions: [],
+      });
+
+      expect(prisma.transaction.findMany).not.toHaveBeenCalled();
     });
   });
 });

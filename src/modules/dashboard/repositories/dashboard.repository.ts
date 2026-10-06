@@ -417,4 +417,108 @@ export class DashboardRepository {
       transactions,
     };
   }
+
+  async getRecurringPerformance(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ) {
+    const recurringWhere = {
+      userId,
+      isActive: true,
+      ...(options.startDate || options.endDate
+        ? {
+            AND: [
+              ...(options.endDate
+                ? [
+                    {
+                      startDate: {
+                        lte: options.endDate,
+                      },
+                    },
+                  ]
+                : []),
+              ...(options.startDate
+                ? [
+                    {
+                      OR: [
+                        {
+                          endDate: null,
+                        },
+                        {
+                          endDate: {
+                            gte: options.startDate,
+                          },
+                        },
+                      ],
+                    },
+                  ]
+                : []),
+            ],
+          }
+        : {}),
+    };
+
+    const recurringTransactions =
+      await this.prisma.recurringTransaction.findMany({
+        where: recurringWhere,
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+    if (recurringTransactions.length === 0) {
+      return {
+        recurringTransactions: [],
+        transactions: [],
+      };
+    }
+
+    const recurringTransactionIds = recurringTransactions.map(
+      (item) => item.id,
+    );
+
+    const transactionWhere = {
+      userId,
+      recurringTransactionId: {
+        in: recurringTransactionIds,
+      },
+      deletedAt: null,
+      status: 'ACTIVE' as const,
+      currency: 'IDR',
+      ...(options.startDate || options.endDate
+        ? {
+            transactionDate: {
+              ...(options.startDate
+                ? {
+                    gte: options.startDate,
+                  }
+                : {}),
+              ...(options.endDate
+                ? {
+                    lte: options.endDate,
+                  }
+                : {}),
+            },
+          }
+        : {}),
+    };
+
+    const transactions = await this.prisma.transaction.findMany({
+      where: transactionWhere,
+      select: {
+        id: true,
+        recurringTransactionId: true,
+        amount: true,
+        transactionDate: true,
+      },
+      orderBy: {
+        transactionDate: 'asc',
+      },
+    });
+
+    return {
+      recurringTransactions,
+      transactions,
+    };
+  }
 }
