@@ -24,6 +24,8 @@ import { DashboardBudgetPerformanceResponseDto } from './dto/dashboard-budget-pe
 import { GetDashboardBudgetPerformanceQueryDto } from './dto/get-dashboard-budget-performance-query.dto';
 import { GetDashboardRecurringPerformanceQueryDto } from './dto/get-dashboard-recurring-performance-query.dto';
 import { DashboardRecurringPerformanceResponseDto } from './dto/dashboard-recurring-performance-response.dto';
+import { DashboardCashFlowResponseDto } from './dto/dashboard-cash-flow-response.dto';
+import { GetDashboardCashFlowQueryDto } from './dto/get-dashboard-cash-flow-query.dto';
 
 @Controller('dashboard')
 @ApiTags('Dashboard')
@@ -178,6 +180,28 @@ export class DashboardController {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
 
       endDate: query.endDate ? new Date(query.endDate) : undefined,
+    });
+  }
+
+  @Get('cash-flow')
+  @ApiOperation({
+    summary: 'Get cash flow analytics',
+  })
+  @ApiOkResponse({
+    type: DashboardCashFlowResponseDto,
+    description: 'Cash flow analytics retrieved successfully.',
+  })
+  async getCashFlow(
+    @CurrentUser('id') userId: string,
+    @Query()
+    query: GetDashboardCashFlowQueryDto,
+  ): Promise<DashboardCashFlowResponseDto> {
+    return this.dashboardService.getCashFlow(userId, {
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+
+      period: query.period,
     });
   }
 }

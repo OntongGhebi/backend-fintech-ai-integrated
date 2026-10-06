@@ -1020,4 +1020,52 @@ describe('DashboardRepository', () => {
       expect(prisma.transaction.findMany).not.toHaveBeenCalled();
     });
   });
+
+  describe('getCashFlow', () => {
+    it('should return only active IDR income and expense transactions', async () => {
+      prisma.transaction.findMany.mockResolvedValue([
+        {
+          id: 'transaction-1',
+          type: 'INCOME',
+          amount: new Prisma.Decimal(5000000),
+          transactionDate: new Date('2026-09-01T00:00:00.000Z'),
+        },
+      ] as never);
+
+      const result = await repository.getCashFlow('user-1', {
+        startDate: new Date('2026-09-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+        period: 'MONTH',
+      });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: 'user-1',
+            deletedAt: null,
+            status: 'ACTIVE',
+            currency: 'IDR',
+            type: {
+              in: ['INCOME', 'EXPENSE'],
+            },
+          }),
+          orderBy: {
+            transactionDate: 'asc',
+          },
+        }),
+      );
+
+      expect(result).toHaveLength(1);
+    });
+
+    it('should return an empty array when there are no transactions', async () => {
+      prisma.transaction.findMany.mockResolvedValue([]);
+
+      const result = await repository.getCashFlow('user-1', {
+        period: 'MONTH',
+      });
+
+      expect(result).toEqual([]);
+    });
+  });
 });

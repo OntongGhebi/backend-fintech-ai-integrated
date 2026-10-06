@@ -120,6 +120,28 @@ export interface DashboardRecurringPerformance {
   totalMissedOccurrences: number;
 }
 
+export type DashboardCashFlowPeriod = 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
+
+export interface DashboardCashFlowItem {
+  period: string;
+  income: string;
+  expense: string;
+  netCashFlow: string;
+  transactionCount: number;
+}
+
+export interface DashboardCashFlow {
+  currency: string;
+  startDate: string;
+  endDate: string;
+  period: DashboardCashFlowPeriod;
+  cashFlows: DashboardCashFlowItem[];
+  totalIncome: string;
+  totalExpense: string;
+  totalNetCashFlow: string;
+  totalTransactionCount: number;
+}
+
 export interface DashboardMetric {
   value: number;
   currency: string;

@@ -4,6 +4,8 @@ import { Prisma } from '../../../generated/prisma/client';
 
 import {
   DASHBOARD_BUDGET_NEAR_LIMIT_PERCENTAGE,
+  DASHBOARD_CASH_FLOW_DEFAULT_PERIOD,
+  DASHBOARD_CASH_FLOW_MAX_PERIODS,
   DASHBOARD_DEFAULT_CURRENCY,
   DASHBOARD_RECURRING_NEAR_COMPLETE_PERCENTAGE,
 } from './dashboard.constants';
@@ -15,6 +17,9 @@ import {
   DashboardBudgetPerformance,
   DashboardBudgetPerformanceItem,
   DashboardBudgetPerformanceStatus,
+  DashboardCashFlow,
+  DashboardCashFlowItem,
+  DashboardCashFlowPeriod,
   DashboardCategoryAnalytics,
   DashboardCategoryAnalyticsItem,
   DashboardExpenseAnalytics,
@@ -523,6 +528,85 @@ export class DashboardService {
     };
   }
 
+  async getCashFlow(
+    userId: string,
+    options: DashboardQueryOptions & {
+      period?: DashboardCashFlowPeriod;
+    } = {},
+  ): Promise<DashboardCashFlow> {
+    const normalizedOptions = this.normalizeQuery(options);
+
+    const startDate =
+      normalizedOptions.startDate ?? this.getDefaultCashFlowStartDate();
+
+    const endDate = normalizedOptions.endDate ?? new Date();
+
+    const period = options.period ?? DASHBOARD_CASH_FLOW_DEFAULT_PERIOD;
+
+    const transactions = await this.dashboardRepository.getCashFlow(userId, {
+      ...normalizedOptions,
+      startDate,
+      endDate,
+      period,
+    });
+
+    const cashFlowTransactions = transactions.filter(
+      (
+        transaction,
+      ): transaction is {
+        id: string;
+        type: 'INCOME' | 'EXPENSE';
+        amount: Prisma.Decimal;
+        transactionDate: Date;
+      } => transaction.type === 'INCOME' || transaction.type === 'EXPENSE',
+    );
+
+    const buckets = this.buildCashFlowBuckets(
+      cashFlowTransactions,
+      startDate,
+      endDate,
+      period,
+    );
+
+    let totalIncome = new Prisma.Decimal(0);
+
+    let totalExpense = new Prisma.Decimal(0);
+
+    let totalTransactionCount = 0;
+
+    const cashFlows: DashboardCashFlowItem[] = Array.from(buckets.values()).map(
+      (bucket) => {
+        totalIncome = totalIncome.plus(bucket.income);
+
+        totalExpense = totalExpense.plus(bucket.expense);
+
+        totalTransactionCount += bucket.transactionCount;
+
+        return {
+          period: bucket.period,
+          income: bucket.income.toString(),
+          expense: bucket.expense.toString(),
+          netCashFlow: bucket.income.minus(bucket.expense).toString(),
+          transactionCount: bucket.transactionCount,
+        };
+      },
+    );
+
+    const totalNetCashFlow = totalIncome.minus(totalExpense);
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      period,
+      cashFlows,
+      totalIncome: totalIncome.toString(),
+      totalExpense: totalExpense.toString(),
+      totalNetCashFlow: totalNetCashFlow.toString(),
+      totalTransactionCount,
+    };
+  }
+
   private getRecurringPerformanceStartDate(
     recurringStartDate: Date,
     requestedStartDate?: Date,
@@ -607,5 +691,180 @@ export class DashboardService {
       return 'NEAR_COMPLETE';
     }
     return 'UNDERPERFORMING';
+  }
+
+  private getDefaultCashFlowStartDate(): Date {
+    const date = new Date();
+
+    date.setUTCDate(1);
+    date.setUTCHours(0, 0, 0, 0);
+
+    return date;
+  }
+
+  private buildCashFlowBuckets(
+    transactions: Array<{
+      id: string;
+      type: 'INCOME' | 'EXPENSE';
+      amount: Prisma.Decimal;
+      transactionDate: Date;
+    }>,
+    startDate: Date,
+    endDate: Date,
+    period: DashboardCashFlowPeriod,
+  ): Map<
+    string,
+    {
+      period: string;
+      income: Prisma.Decimal;
+      expense: Prisma.Decimal;
+      transactionCount: number;
+    }
+  > {
+    const buckets = new Map<
+      string,
+      {
+        period: string;
+        income: Prisma.Decimal;
+        expense: Prisma.Decimal;
+        transactionCount: number;
+      }
+    >();
+
+    let cursor = this.getCashFlowBucketStart(startDate, period);
+
+    let iteration = 0;
+
+    while (
+      cursor.getTime() <= endDate.getTime() &&
+      iteration < DASHBOARD_CASH_FLOW_MAX_PERIODS
+    ) {
+      const key = this.getCashFlowBucketKey(cursor, period);
+
+      buckets.set(key, {
+        period: key,
+        income: new Prisma.Decimal(0),
+        expense: new Prisma.Decimal(0),
+        transactionCount: 0,
+      });
+
+      cursor = this.getNextCashFlowBucket(cursor, period);
+
+      iteration += 1;
+    }
+
+    for (const transaction of transactions) {
+      const bucketStart = this.getCashFlowBucketStart(
+        transaction.transactionDate,
+        period,
+      );
+
+      const key = this.getCashFlowBucketKey(bucketStart, period);
+
+      const bucket = buckets.get(key);
+
+      if (!bucket) {
+        continue;
+      }
+
+      if (transaction.type === 'INCOME') {
+        bucket.income = bucket.income.plus(transaction.amount);
+      } else {
+        bucket.expense = bucket.expense.plus(transaction.amount);
+      }
+
+      bucket.transactionCount += 1;
+    }
+
+    return buckets;
+  }
+
+  private getCashFlowBucketStart(
+    date: Date,
+    period: DashboardCashFlowPeriod,
+  ): Date {
+    const result = new Date(date);
+
+    switch (period) {
+      case 'DAY':
+        result.setUTCHours(0, 0, 0, 0);
+        break;
+
+      case 'WEEK': {
+        result.setUTCHours(0, 0, 0, 0);
+
+        const day = result.getUTCDay();
+
+        const difference = day === 0 ? 6 : day - 1;
+
+        result.setUTCDate(result.getUTCDate() - difference);
+
+        break;
+      }
+
+      case 'MONTH':
+        result.setUTCDate(1);
+        result.setUTCHours(0, 0, 0, 0);
+        break;
+
+      case 'YEAR':
+        result.setUTCMonth(0, 1);
+        result.setUTCHours(0, 0, 0, 0);
+        break;
+    }
+
+    return result;
+  }
+
+  private getCashFlowBucketKey(
+    date: Date,
+    period: DashboardCashFlowPeriod,
+  ): string {
+    const year = date.getUTCFullYear();
+
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+
+    const day = String(date.getUTCDate()).padStart(2, '0');
+
+    switch (period) {
+      case 'DAY':
+        return `${year}-${month}-${day}`;
+
+      case 'WEEK':
+        return date.toISOString().slice(0, 10);
+
+      case 'MONTH':
+        return `${year}-${month}`;
+
+      case 'YEAR':
+        return String(year);
+    }
+  }
+
+  private getNextCashFlowBucket(
+    date: Date,
+    period: DashboardCashFlowPeriod,
+  ): Date {
+    const result = new Date(date);
+
+    switch (period) {
+      case 'DAY':
+        result.setUTCDate(result.getUTCDate() + 1);
+        break;
+
+      case 'WEEK':
+        result.setUTCDate(result.getUTCDate() + 7);
+        break;
+
+      case 'MONTH':
+        result.setUTCMonth(result.getUTCMonth() + 1);
+        break;
+
+      case 'YEAR':
+        result.setUTCFullYear(result.getUTCFullYear() + 1);
+        break;
+    }
+
+    return result;
   }
 }

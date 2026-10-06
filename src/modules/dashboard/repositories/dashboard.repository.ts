@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma/prisma.service';
-import { DashboardQueryOptions } from '../types/dashboard.types';
+import type {
+  DashboardCashFlowPeriod,
+  DashboardQueryOptions,
+} from '../types/dashboard.types';
 
 @Injectable()
 export class DashboardRepository {
@@ -520,5 +523,51 @@ export class DashboardRepository {
       recurringTransactions,
       transactions,
     };
+  }
+
+  async getCashFlow(
+    userId: string,
+    options: DashboardQueryOptions & {
+      period?: DashboardCashFlowPeriod;
+    } = {},
+  ) {
+    const where = {
+      userId,
+      deletedAt: null,
+      status: 'ACTIVE' as const,
+      currency: 'IDR',
+      type: {
+        in: ['INCOME' as const, 'EXPENSE' as const],
+      },
+      ...(options.startDate || options.endDate
+        ? {
+            transactionDate: {
+              ...(options.startDate
+                ? {
+                    gte: options.startDate,
+                  }
+                : {}),
+              ...(options.endDate
+                ? {
+                    lte: options.endDate,
+                  }
+                : {}),
+            },
+          }
+        : {}),
+    };
+
+    return this.prisma.transaction.findMany({
+      where,
+      select: {
+        id: true,
+        type: true,
+        amount: true,
+        transactionDate: true,
+      },
+      orderBy: {
+        transactionDate: 'asc',
+      },
+    });
   }
 }

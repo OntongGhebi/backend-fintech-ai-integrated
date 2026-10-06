@@ -15,6 +15,7 @@ describe('DashboardService', () => {
     getAccountAnalytics: jest.Mock;
     getBudgetPerformance: jest.Mock;
     getRecurringPerformance: jest.Mock;
+    getCashFlow: jest.Mock;
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -28,6 +29,7 @@ describe('DashboardService', () => {
       getAccountAnalytics: jest.fn(),
       getBudgetPerformance: jest.fn(),
       getRecurringPerformance: jest.fn(),
+      getCashFlow: jest.fn(),
     };
 
     service = new DashboardService(
@@ -1234,6 +1236,160 @@ describe('DashboardService', () => {
         totalExecutedOccurrences: 0,
         totalMissedOccurrences: 0,
       });
+    });
+  });
+
+  describe('getCashFlow', () => {
+    it('should calculate monthly cash flow correctly', async () => {
+      dashboardRepository.getCashFlow = jest.fn().mockResolvedValue([
+        {
+          id: 'transaction-1',
+          type: 'INCOME',
+          amount: new Prisma.Decimal(5000000),
+          transactionDate: new Date('2026-09-05T00:00:00.000Z'),
+        },
+        {
+          id: 'transaction-2',
+          type: 'EXPENSE',
+          amount: new Prisma.Decimal(1000000),
+          transactionDate: new Date('2026-09-10T00:00:00.000Z'),
+        },
+        {
+          id: 'transaction-3',
+          type: 'EXPENSE',
+          amount: new Prisma.Decimal(750000),
+          transactionDate: new Date('2026-09-20T00:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.getCashFlow('user-1', {
+        startDate: new Date('2026-09-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+        period: 'MONTH',
+      });
+
+      expect(result.currency).toBe('IDR');
+
+      expect(result.cashFlows).toEqual([
+        {
+          period: '2026-09',
+          income: '5000000',
+          expense: '1750000',
+          netCashFlow: '3250000',
+          transactionCount: 3,
+        },
+      ]);
+
+      expect(result.totalIncome).toBe('5000000');
+
+      expect(result.totalExpense).toBe('1750000');
+
+      expect(result.totalNetCashFlow).toBe('3250000');
+
+      expect(result.totalTransactionCount).toBe(3);
+    });
+
+    it('should separate cash flow into multiple months', async () => {
+      dashboardRepository.getCashFlow = jest.fn().mockResolvedValue([
+        {
+          id: 'transaction-1',
+          type: 'INCOME',
+          amount: new Prisma.Decimal(5000000),
+          transactionDate: new Date('2026-08-10T00:00:00.000Z'),
+        },
+        {
+          id: 'transaction-2',
+          type: 'EXPENSE',
+          amount: new Prisma.Decimal(1000000),
+          transactionDate: new Date('2026-09-10T00:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.getCashFlow('user-1', {
+        startDate: new Date('2026-08-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+        period: 'MONTH',
+      });
+
+      expect(result.cashFlows).toEqual([
+        {
+          period: '2026-08',
+          income: '5000000',
+          expense: '0',
+          netCashFlow: '5000000',
+          transactionCount: 1,
+        },
+        {
+          period: '2026-09',
+          income: '0',
+          expense: '1000000',
+          netCashFlow: '-1000000',
+          transactionCount: 1,
+        },
+      ]);
+    });
+
+    it('should support daily aggregation', async () => {
+      dashboardRepository.getCashFlow = jest.fn().mockResolvedValue([
+        {
+          id: 'transaction-1',
+          type: 'INCOME',
+          amount: new Prisma.Decimal(100000),
+          transactionDate: new Date('2026-09-01T10:00:00.000Z'),
+        },
+        {
+          id: 'transaction-2',
+          type: 'EXPENSE',
+          amount: new Prisma.Decimal(25000),
+          transactionDate: new Date('2026-09-01T12:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.getCashFlow('user-1', {
+        startDate: new Date('2026-09-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-01T23:59:59.999Z'),
+        period: 'DAY',
+      });
+
+      expect(result.cashFlows).toEqual([
+        {
+          period: '2026-09-01',
+          income: '100000',
+          expense: '25000',
+          netCashFlow: '75000',
+          transactionCount: 2,
+        },
+      ]);
+    });
+
+    it('should reject an invalid date range', async () => {
+      await expect(
+        service.getCashFlow('user-1', {
+          startDate: new Date('2026-09-30T00:00:00.000Z'),
+          endDate: new Date('2026-09-01T00:00:00.000Z'),
+          period: 'MONTH',
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(dashboardRepository.getCashFlow).not.toHaveBeenCalled();
+    });
+
+    it('should return zero totals when there are no transactions', async () => {
+      dashboardRepository.getCashFlow = jest.fn().mockResolvedValue([]);
+
+      const result = await service.getCashFlow('user-1', {
+        startDate: new Date('2026-09-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+        period: 'MONTH',
+      });
+
+      expect(result.totalIncome).toBe('0');
+
+      expect(result.totalExpense).toBe('0');
+
+      expect(result.totalNetCashFlow).toBe('0');
+
+      expect(result.totalTransactionCount).toBe(0);
     });
   });
 });
