@@ -33,6 +33,7 @@ import { telegramConfig } from './config/telegram.config';
 import { telegramModule } from './modules/telegram/telegram.module';
 import { AIModule } from './modules/ai/ai.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     telegramModule,
     AIModule,
     DashboardModule,
+    ReportsModule,
   ],
   providers: [
     {
