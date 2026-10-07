@@ -1,3 +1,5 @@
+import { Prisma } from '../../../../generated/prisma/client';
+
 export interface DashboardDateRange {
   startDate: Date;
   endDate: Date;
@@ -162,6 +164,31 @@ export interface DashboardMonthlyFinancialSummary {
   totalTransactionCount: number;
   averageMonthlyIncome: string;
   averageMonthlyExpense: string;
+}
+
+export interface DashboardAggregation {
+  currency: string;
+  summary: DashboardSummary;
+  income: DashboardIncomeAnalytics;
+  expense: DashboardExpenseAnalytics;
+  categoryAnalytics: DashboardCategoryAnalytics;
+  accountAnalytics: DashboardAccountAnalytics;
+  budgetPerformance: DashboardBudgetPerformance;
+  recurringPerformance: DashboardRecurringPerformance;
+  monthlyFinancialSummary: DashboardMonthlyFinancialSummary;
+  cashFlow: DashboardCashFlow;
+}
+
+export interface DashboardIncomeExpenseAnalyticsBase {
+  type: 'INCOME' | 'EXPENSE';
+
+  _sum: {
+    amount: Prisma.Decimal | string | null;
+  };
+
+  _count: {
+    _all: number;
+  };
 }
 
 export interface DashboardMetric {

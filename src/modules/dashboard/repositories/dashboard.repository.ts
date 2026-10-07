@@ -4,6 +4,7 @@ import type {
   DashboardCashFlowPeriod,
   DashboardQueryOptions,
 } from '../types/dashboard.types';
+import { Prisma } from '../../../../generated/prisma/client';
 
 @Injectable()
 export class DashboardRepository {
@@ -13,45 +14,25 @@ export class DashboardRepository {
     userId: string,
     options: DashboardQueryOptions = {},
   ) {
-    const where = {
-      userId,
-      deletedAt: null,
-      status: 'ACTIVE' as const,
-      currency: 'IDR',
-      ...(options.startDate || options.endDate
-        ? {
-            transactionDate: {
-              ...(options.startDate
-                ? {
-                    gte: options.startDate,
-                  }
-                : {}),
-              ...(options.endDate
-                ? {
-                    lte: options.endDate,
-                  }
-                : {}),
-            },
-          }
-        : {}),
-    };
+    const where = this.buildTransactionWhere(userId, options);
 
-    const [groupedTransactions, transactionCount] = await Promise.all([
-      this.prisma.transaction.groupBy({
-        by: ['type'],
-        where,
-        _sum: {
-          amount: true,
-        },
-      }),
-      this.prisma.transaction.count({
-        where,
-      }),
-    ]);
+    const groupedTransactions = await this.prisma.transaction.groupBy({
+      by: ['type'],
+      where,
+      _sum: {
+        amount: true,
+      },
+      _count: {
+        _all: true,
+      },
+    });
 
     return {
       groupedTransactions,
-      transactionCount,
+      transactionCount: groupedTransactions.reduce(
+        (total, transaction) => total + transaction._count._all,
+        0,
+      ),
     };
   }
 
@@ -60,45 +41,23 @@ export class DashboardRepository {
     options: DashboardQueryOptions = {},
   ) {
     const where = {
-      userId,
-      deletedAt: null,
-      status: 'ACTIVE' as const,
-      currency: 'IDR',
+      ...this.buildTransactionWhere(userId, options),
       type: 'INCOME' as const,
-      ...(options.startDate || options.endDate
-        ? {
-            transactionDate: {
-              ...(options.startDate
-                ? {
-                    gte: options.startDate,
-                  }
-                : {}),
-              ...(options.endDate
-                ? {
-                    lte: options.endDate,
-                  }
-                : {}),
-            },
-          }
-        : {}),
     };
 
-    const [aggregate, transactionCount] = await Promise.all([
-      this.prisma.transaction.aggregate({
-        where,
-        _sum: {
-          amount: true,
-        },
-      }),
-
-      this.prisma.transaction.count({
-        where,
-      }),
-    ]);
+    const aggregate = await this.prisma.transaction.aggregate({
+      where,
+      _sum: {
+        amount: true,
+      },
+      _count: {
+        _all: true,
+      },
+    });
 
     return {
       totalIncome: aggregate._sum.amount,
-      transactionCount,
+      transactionCount: aggregate._count._all,
     };
   }
 
@@ -107,45 +66,23 @@ export class DashboardRepository {
     options: DashboardQueryOptions = {},
   ) {
     const where = {
-      userId,
-      deletedAt: null,
-      status: 'ACTIVE' as const,
-      currency: 'IDR',
+      ...this.buildTransactionWhere(userId, options),
       type: 'EXPENSE' as const,
-      ...(options.startDate || options.endDate
-        ? {
-            transactionDate: {
-              ...(options.startDate
-                ? {
-                    gte: options.startDate,
-                  }
-                : {}),
-              ...(options.endDate
-                ? {
-                    lte: options.endDate,
-                  }
-                : {}),
-            },
-          }
-        : {}),
     };
 
-    const [aggregate, transactionCount] = await Promise.all([
-      this.prisma.transaction.aggregate({
-        where,
-        _sum: {
-          amount: true,
-        },
-      }),
-
-      this.prisma.transaction.count({
-        where,
-      }),
-    ]);
+    const aggregate = await this.prisma.transaction.aggregate({
+      where,
+      _sum: {
+        amount: true,
+      },
+      _count: {
+        _all: true,
+      },
+    });
 
     return {
       totalExpense: aggregate._sum.amount,
-      transactionCount,
+      transactionCount: aggregate._count._all,
     };
   }
 
@@ -155,55 +92,23 @@ export class DashboardRepository {
     options: DashboardQueryOptions = {},
   ) {
     const where = {
-      userId,
-      deletedAt: null,
-      status: 'ACTIVE' as const,
-      currency: 'IDR',
+      ...this.buildTransactionWhere(userId, options),
       type,
       categoryId: {
         not: null,
       },
-      ...(options.startDate || options.endDate
-        ? {
-            transactionDate: {
-              ...(options.startDate
-                ? {
-                    gte: options.startDate,
-                  }
-                : {}),
-              ...(options.endDate
-                ? {
-                    lte: options.endDate,
-                  }
-                : {}),
-            },
-          }
-        : {}),
     };
 
-    const [groupedCategories, aggregate, transactionCount] = await Promise.all([
-      this.prisma.transaction.groupBy({
-        by: ['categoryId'],
-        where,
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
-      }),
-
-      this.prisma.transaction.aggregate({
-        where,
-        _sum: {
-          amount: true,
-        },
-      }),
-
-      this.prisma.transaction.count({
-        where,
-      }),
-    ]);
+    const groupedCategories = await this.prisma.transaction.groupBy({
+      by: ['categoryId'],
+      where,
+      _sum: {
+        amount: true,
+      },
+      _count: {
+        _all: true,
+      },
+    });
 
     const categoryIds = groupedCategories
       .map((item) => item.categoryId)
@@ -226,11 +131,19 @@ export class DashboardRepository {
           })
         : [];
 
+    const totalAmount = groupedCategories.reduce(
+      (total, item) => total.plus(item._sum.amount ?? new Prisma.Decimal(0)),
+      new Prisma.Decimal(0),
+    );
+
     return {
       groupedCategories,
       categories,
-      totalAmount: aggregate._sum.amount,
-      transactionCount,
+      totalAmount: groupedCategories.length > 0 ? totalAmount.toString() : null,
+      transactionCount: groupedCategories.reduce(
+        (total, item) => total + item._count._all,
+        0,
+      ),
     };
   }
 
@@ -240,52 +153,20 @@ export class DashboardRepository {
     options: DashboardQueryOptions = {},
   ) {
     const where = {
-      userId,
-      deletedAt: null,
-      status: 'ACTIVE' as const,
-      currency: 'IDR',
+      ...this.buildTransactionWhere(userId, options),
       type,
-      ...(options.startDate || options.endDate
-        ? {
-            transactionDate: {
-              ...(options.startDate
-                ? {
-                    gte: options.startDate,
-                  }
-                : {}),
-              ...(options.endDate
-                ? {
-                    lte: options.endDate,
-                  }
-                : {}),
-            },
-          }
-        : {}),
     };
 
-    const [groupedAccounts, aggregate, transactionCount] = await Promise.all([
-      this.prisma.transaction.groupBy({
-        by: ['accountId'],
-        where,
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
-      }),
-
-      this.prisma.transaction.aggregate({
-        where,
-        _sum: {
-          amount: true,
-        },
-      }),
-
-      this.prisma.transaction.count({
-        where,
-      }),
-    ]);
+    const groupedAccounts = await this.prisma.transaction.groupBy({
+      by: ['accountId'],
+      where,
+      _sum: {
+        amount: true,
+      },
+      _count: {
+        _all: true,
+      },
+    });
 
     const accountIds = groupedAccounts
       .map((item) => item.accountId)
@@ -308,12 +189,43 @@ export class DashboardRepository {
           })
         : [];
 
+    const totalAmount = groupedAccounts.reduce(
+      (total, item) => total.plus(item._sum.amount ?? new Prisma.Decimal(0)),
+      new Prisma.Decimal(0),
+    );
+
     return {
       groupedAccounts,
       accounts,
-      totalAmount: aggregate._sum.amount,
-      transactionCount,
+      totalAmount: groupedAccounts.length > 0 ? totalAmount.toString() : null,
+      transactionCount: groupedAccounts.reduce(
+        (total, item) => total + item._count._all,
+        0,
+      ),
     };
+  }
+
+  async getIncomeExpenseAnalyticsBase(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ) {
+    const where = {
+      ...this.buildTransactionWhere(userId, options),
+      type: {
+        in: ['INCOME' as const, 'EXPENSE' as const],
+      },
+    };
+
+    return this.prisma.transaction.groupBy({
+      by: ['type'],
+      where,
+      _sum: {
+        amount: true,
+      },
+      _count: {
+        _all: true,
+      },
+    });
   }
 
   async getBudgetPerformance(
@@ -613,5 +525,33 @@ export class DashboardRepository {
         transactionDate: 'asc',
       },
     });
+  }
+
+  private buildTransactionWhere(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ) {
+    return {
+      userId,
+      deletedAt: null,
+      status: 'ACTIVE' as const,
+      currency: 'IDR',
+      ...(options.startDate || options.endDate
+        ? {
+            transactionDate: {
+              ...(options.startDate
+                ? {
+                    gte: options.startDate,
+                  }
+                : {}),
+              ...(options.endDate
+                ? {
+                    lte: options.endDate,
+                  }
+                : {}),
+            },
+          }
+        : {}),
+    };
   }
 }

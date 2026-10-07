@@ -28,6 +28,7 @@ import { DashboardCashFlowResponseDto } from './dto/dashboard-cash-flow-response
 import { GetDashboardCashFlowQueryDto } from './dto/get-dashboard-cash-flow-query.dto';
 import { DashboardMonthlyFinancialSummaryResponseDto } from './dto/dashboard-monthly-financial-summary-response.dto';
 import { GetDashboardMonthlyFinancialSummaryQueryDto } from './dto/get-dashboard-monthly-financial-summary-query.dto';
+import { DashboardAggregationResponseDto } from './dto/dashboard-aggregation-response.dto';
 
 @Controller('dashboard')
 @ApiTags('Dashboard')
@@ -223,6 +224,24 @@ export class DashboardController {
     return this.dashboardService.getMonthlyFinancialSummary(userId, {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
 
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+    });
+  }
+
+  @Get('overview')
+  @ApiOperation({
+    summary: 'Get aggregated dashboard overview',
+  })
+  @ApiOkResponse({
+    type: DashboardAggregationResponseDto,
+    description: 'Aggregated dashboard overview retrieved successfully.',
+  })
+  async getDashboardAggregation(
+    @CurrentUser('id') userId: string,
+    @Query() query: GetDashboardSummaryQueryDto,
+  ): Promise<DashboardAggregationResponseDto> {
+    return this.dashboardService.getDashboardAggregation(userId, {
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
     });
   }

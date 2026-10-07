@@ -61,11 +61,17 @@ describe('DashboardRepository', () => {
           _sum: {
             amount: '5000000',
           },
+          _count: {
+            _all: 5,
+          },
         },
         {
           type: 'EXPENSE',
           _sum: {
             amount: '1750000',
+          },
+          _count: {
+            _all: 3,
           },
         },
       ];
@@ -87,16 +93,12 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: true,
         },
-      });
-
-      expect(prisma.transaction.count).toHaveBeenCalledWith({
-        where: {
-          userId,
-          deletedAt: null,
-          status: 'ACTIVE',
-          currency: 'IDR',
+        _count: {
+          _all: true,
         },
       });
+
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
 
       expect(result).toEqual({
         groupedTransactions,
@@ -135,9 +137,7 @@ describe('DashboardRepository', () => {
         }),
       );
 
-      expect(prisma.transaction.count).toHaveBeenCalledWith({
-        where: expectedWhere,
-      });
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should apply only the start date', async () => {
@@ -199,9 +199,10 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: '7500000',
         },
+        _count: {
+          _all: 6,
+        },
       });
-
-      prisma.transaction.count.mockResolvedValue(6);
 
       const result = await repository.getIncomeAnalytics(userId);
 
@@ -216,15 +217,8 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: true,
         },
-      });
-
-      expect(prisma.transaction.count).toHaveBeenCalledWith({
-        where: {
-          userId,
-          deletedAt: null,
-          status: 'ACTIVE',
-          currency: 'IDR',
-          type: 'INCOME',
+        _count: {
+          _all: true,
         },
       });
 
@@ -232,6 +226,8 @@ describe('DashboardRepository', () => {
         totalIncome: '7500000',
         transactionCount: 6,
       });
+
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should apply the date range to income analytics', async () => {
@@ -239,9 +235,10 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: '3000000',
         },
+        _count: {
+          _all: 2,
+        },
       });
-
-      prisma.transaction.count.mockResolvedValue(2);
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
 
@@ -269,11 +266,12 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: true,
         },
+        _count: {
+          _all: true,
+        },
       });
 
-      expect(prisma.transaction.count).toHaveBeenCalledWith({
-        where: expectedWhere,
-      });
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should apply only the start date', async () => {
@@ -281,9 +279,10 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: '1000000',
         },
+        _count: {
+          _all: 1,
+        },
       });
-
-      prisma.transaction.count.mockResolvedValue(1);
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
 
@@ -305,7 +304,11 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: true,
         },
+        _count: {
+          _all: true,
+        },
       });
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should apply only the end date', async () => {
@@ -313,9 +316,10 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: '1000000',
         },
+        _count: {
+          _all: 1,
+        },
       });
-
-      prisma.transaction.count.mockResolvedValue(1);
 
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
@@ -337,7 +341,11 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: true,
         },
+        _count: {
+          _all: true,
+        },
       });
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
   });
 
@@ -346,6 +354,9 @@ describe('DashboardRepository', () => {
       prisma.transaction.aggregate.mockResolvedValue({
         _sum: {
           amount: '3750000',
+        },
+        _count: {
+          _all: 10,
         },
       });
 
@@ -364,17 +375,12 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: true,
         },
-      });
-
-      expect(prisma.transaction.count).toHaveBeenCalledWith({
-        where: {
-          userId,
-          deletedAt: null,
-          status: 'ACTIVE',
-          currency: 'IDR',
-          type: 'EXPENSE',
+        _count: {
+          _all: true,
         },
       });
+
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
 
       expect(result).toEqual({
         totalExpense: '3750000',
@@ -387,9 +393,10 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: '3000000',
         },
+        _count: {
+          _all: 3,
+        },
       });
-
-      prisma.transaction.count.mockResolvedValue(3);
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
 
@@ -417,11 +424,12 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: true,
         },
+        _count: {
+          _all: true,
+        },
       });
 
-      expect(prisma.transaction.count).toHaveBeenCalledWith({
-        where: expectedWhere,
-      });
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should apply only the start date', async () => {
@@ -429,9 +437,10 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: '1000000',
         },
+        _count: {
+          _all: 1,
+        },
       });
-
-      prisma.transaction.count.mockResolvedValue(1);
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
 
@@ -453,7 +462,11 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: true,
         },
+        _count: {
+          _all: true,
+        },
       });
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should apply only the end date', async () => {
@@ -461,9 +474,10 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: '1000000',
         },
+        _count: {
+          _all: 1,
+        },
       });
-
-      prisma.transaction.count.mockResolvedValue(1);
 
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
@@ -485,7 +499,11 @@ describe('DashboardRepository', () => {
         _sum: {
           amount: true,
         },
+        _count: {
+          _all: true,
+        },
       });
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
   });
 
@@ -556,6 +574,10 @@ describe('DashboardRepository', () => {
         },
       });
 
+      expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
+
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
+
       expect(result).toEqual({
         groupedCategories: [
           {
@@ -581,12 +603,6 @@ describe('DashboardRepository', () => {
 
     it('should apply date range', async () => {
       prisma.transaction.groupBy.mockResolvedValue([]);
-      prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: null,
-        },
-      });
-      prisma.transaction.count.mockResolvedValue(0);
       prisma.category.findMany.mockResolvedValue([]);
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
@@ -616,19 +632,14 @@ describe('DashboardRepository', () => {
       expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expectedWhere,
+          _count: {
+            _all: true,
+          },
         }),
       );
 
-      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
-        where: expectedWhere,
-        _sum: {
-          amount: true,
-        },
-      });
-
-      expect(prisma.transaction.count).toHaveBeenCalledWith({
-        where: expectedWhere,
-      });
+      expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should not query categories when there are no grouped categories', async () => {
@@ -717,6 +728,10 @@ describe('DashboardRepository', () => {
         },
       });
 
+      expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
+
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
+
       expect(result).toEqual({
         groupedAccounts: [
           {
@@ -742,13 +757,6 @@ describe('DashboardRepository', () => {
 
     it('should apply date range', async () => {
       prisma.transaction.groupBy.mockResolvedValue([]);
-      prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: null,
-        },
-      });
-      prisma.transaction.count.mockResolvedValue(0);
-
       prisma.account.findMany.mockResolvedValue([]);
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
@@ -775,19 +783,14 @@ describe('DashboardRepository', () => {
       expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expectedWhere,
+          _count: {
+            _all: true,
+          },
         }),
       );
 
-      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
-        where: expectedWhere,
-        _sum: {
-          amount: true,
-        },
-      });
-
-      expect(prisma.transaction.count).toHaveBeenCalledWith({
-        where: expectedWhere,
-      });
+      expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should not query accounts when there are no grouped accounts', async () => {
@@ -809,6 +812,71 @@ describe('DashboardRepository', () => {
         totalAmount: null,
         transactionCount: 0,
       });
+    });
+  });
+
+  describe('getIncomeExpenseAnalyticsBase', () => {
+    it('should aggregate income and expense in one grouped query', async () => {
+      const groupedTransactions = [
+        {
+          type: 'INCOME',
+          _sum: {
+            amount: '5000000',
+          },
+          _count: {
+            _all: 5,
+          },
+        },
+        {
+          type: 'EXPENSE',
+          _sum: {
+            amount: '2000000',
+          },
+          _count: {
+            _all: 3,
+          },
+        },
+      ];
+
+      prisma.transaction.groupBy.mockResolvedValue(groupedTransactions);
+
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-30T23:59:59.999Z');
+
+      const result = await repository.getIncomeExpenseAnalyticsBase(userId, {
+        startDate,
+        endDate,
+      });
+
+      expect(result).toEqual(groupedTransactions);
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith({
+        by: ['type'],
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: {
+            in: ['INCOME', 'EXPENSE'],
+          },
+          transactionDate: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+        _count: {
+          _all: true,
+        },
+      });
+
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
+
+      expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
     });
   });
 
@@ -1066,6 +1134,97 @@ describe('DashboardRepository', () => {
       });
 
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('getMonthlyFinancialSummary', () => {
+    it('should find only active IDR income and expense transactions', async () => {
+      const transactions = [
+        {
+          id: 'transaction-1',
+          type: 'INCOME',
+          amount: new Prisma.Decimal('5000000'),
+          transactionDate: new Date('2026-09-01T00:00:00.000Z'),
+        },
+      ];
+
+      prisma.transaction.findMany.mockResolvedValue(transactions as never);
+
+      const result = await repository.getMonthlyFinancialSummary('user-id', {
+        startDate: new Date('2026-09-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+      });
+
+      expect(result).toEqual(transactions);
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'user-id',
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: {
+            in: ['INCOME', 'EXPENSE'],
+          },
+          transactionDate: {
+            gte: new Date('2026-09-01T00:00:00.000Z'),
+            lte: new Date('2026-09-30T23:59:59.999Z'),
+          },
+        },
+        select: {
+          id: true,
+          type: true,
+          amount: true,
+          transactionDate: true,
+        },
+        orderBy: {
+          transactionDate: 'asc',
+        },
+      });
+    });
+
+    it('should support an empty result', async () => {
+      prisma.transaction.findMany.mockResolvedValue([]);
+
+      const result = await repository.getMonthlyFinancialSummary('user-id', {});
+
+      expect(result).toEqual([]);
+    });
+
+    it('should apply only the provided start date', async () => {
+      prisma.transaction.findMany.mockResolvedValue([]);
+
+      await repository.getMonthlyFinancialSummary('user-id', {
+        startDate: new Date('2026-01-01T00:00:00.000Z'),
+      });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            transactionDate: {
+              gte: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          }),
+        }),
+      );
+    });
+
+    it('should apply only the provided end date', async () => {
+      prisma.transaction.findMany.mockResolvedValue([]);
+
+      await repository.getMonthlyFinancialSummary('user-id', {
+        endDate: new Date('2026-12-31T23:59:59.999Z'),
+      });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            transactionDate: {
+              lte: new Date('2026-12-31T23:59:59.999Z'),
+            },
+          }),
+        }),
+      );
     });
   });
 });

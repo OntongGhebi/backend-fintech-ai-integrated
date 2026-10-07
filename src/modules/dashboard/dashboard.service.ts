@@ -15,6 +15,7 @@ import {
 import {
   DashboardAccountAnalytics,
   DashboardAccountAnalyticsItem,
+  DashboardAggregation,
   DashboardArchitecture,
   DashboardBudgetPerformance,
   DashboardBudgetPerformanceItem,
@@ -690,6 +691,68 @@ export class DashboardService {
     };
   }
 
+  async getDashboardAggregation(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ): Promise<DashboardAggregation> {
+    const normalizedOptions = this.normalizeQuery(options);
+
+    const aggregationOptions: DashboardQueryOptions = {
+      startDate:
+        normalizedOptions.startDate ?? this.getDefaultMonthlySummaryStartDate(),
+      endDate: normalizedOptions.endDate ?? new Date(),
+    };
+
+    const [
+      incomeExpenseBase,
+      categoryAnalytics,
+      accountAnalytics,
+      budgetPerformance,
+      recurringPerformance,
+      monthlyFinancialSummary,
+    ] = await Promise.all([
+      this.dashboardRepository.getIncomeExpenseAnalyticsBase(
+        userId,
+        aggregationOptions,
+      ),
+
+      this.getCategoryAnalytics(userId, 'EXPENSE', aggregationOptions),
+
+      this.getAccountAnalytics(userId, 'EXPENSE', aggregationOptions),
+
+      this.getBudgetPerformance(userId, aggregationOptions),
+
+      this.getRecurringPerformance(userId, aggregationOptions),
+
+      this.getMonthlyFinancialSummary(userId, aggregationOptions),
+    ]);
+
+    const summary = this.buildDashboardSummaryFromBase(incomeExpenseBase);
+
+    const income =
+      this.buildDashboardIncomeAnalyticsFromBase(incomeExpenseBase);
+
+    const expense =
+      this.buildDashboardExpenseAnalyticsFromBase(incomeExpenseBase);
+
+    const cashFlow = this.buildMonthlyCashFlowFromFinancialSummary(
+      monthlyFinancialSummary,
+    );
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      summary,
+      income,
+      expense,
+      categoryAnalytics,
+      accountAnalytics,
+      budgetPerformance,
+      recurringPerformance,
+      monthlyFinancialSummary,
+      cashFlow,
+    };
+  }
+
   private getRecurringPerformanceStartDate(
     recurringStartDate: Date,
     requestedStartDate?: Date,
@@ -1056,5 +1119,143 @@ export class DashboardService {
     const month = String(date.getUTCMonth() + 1).padStart(2, '0');
 
     return `${year}-${month}`;
+  }
+
+  private buildDashboardSummaryFromBase(
+    groupedTransactions: Array<{
+      type: 'INCOME' | 'EXPENSE' | 'TRANSFER';
+      _sum: {
+        amount: Prisma.Decimal | string | null;
+      };
+      _count: {
+        _all: number;
+      };
+    }>,
+  ): DashboardSummary {
+    let totalIncome = new Prisma.Decimal(0);
+
+    let totalExpense = new Prisma.Decimal(0);
+
+    let transactionCount = 0;
+
+    for (const transaction of groupedTransactions) {
+      if (transaction.type === 'TRANSFER') {
+        continue;
+      }
+
+      const amount = new Prisma.Decimal(
+        (transaction._sum.amount ?? 0).toString(),
+      );
+
+      transactionCount += transaction._count._all;
+
+      if (transaction.type === 'INCOME') {
+        totalIncome = totalIncome.plus(amount);
+      } else {
+        totalExpense = totalExpense.plus(amount);
+      }
+    }
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      totalIncome: totalIncome.toString(),
+      totalExpense: totalExpense.toString(),
+      netCashFlow: totalIncome.minus(totalExpense).toString(),
+      transactionCount,
+    };
+  }
+
+  private buildDashboardIncomeAnalyticsFromBase(
+    groupedTransactions: Array<{
+      type: 'INCOME' | 'EXPENSE' | 'TRANSFER';
+      _sum: {
+        amount: Prisma.Decimal | string | null;
+      };
+      _count: {
+        _all: number;
+      };
+    }>,
+  ): DashboardIncomeAnalytics {
+    const income = groupedTransactions.find(
+      (transaction) => transaction.type === 'INCOME',
+    );
+
+    const totalIncome = new Prisma.Decimal(
+      (income?._sum.amount ?? 0).toString(),
+    );
+
+    const transactionCount = income?._count._all ?? 0;
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      totalIncome: totalIncome.toString(),
+      transactionCount,
+      averageIncome:
+        transactionCount > 0
+          ? totalIncome.div(transactionCount).toString()
+          : '0',
+    };
+  }
+
+  private buildDashboardExpenseAnalyticsFromBase(
+    groupedTransactions: Array<{
+      type: 'INCOME' | 'EXPENSE' | 'TRANSFER';
+      _sum: {
+        amount: Prisma.Decimal | string | null;
+      };
+      _count: {
+        _all: number;
+      };
+    }>,
+  ): DashboardExpenseAnalytics {
+    const expense = groupedTransactions.find(
+      (transaction) => transaction.type === 'EXPENSE',
+    );
+
+    const totalExpense = new Prisma.Decimal(
+      (expense?._sum.amount ?? 0).toString(),
+    );
+
+    const transactionCount = expense?._count._all ?? 0;
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      totalExpense: totalExpense.toString(),
+      transactionCount,
+      averageExpense:
+        transactionCount > 0
+          ? totalExpense.div(transactionCount).toString()
+          : '0',
+    };
+  }
+
+  private buildMonthlyCashFlowFromFinancialSummary(
+    monthlySummary: DashboardMonthlyFinancialSummary,
+  ): DashboardCashFlow {
+    return {
+      currency: monthlySummary.currency,
+
+      startDate: monthlySummary.startDate,
+
+      endDate: monthlySummary.endDate,
+
+      period: 'MONTH',
+
+      cashFlows: monthlySummary.months.map((month) => ({
+        period: month.month,
+        income: month.income,
+        expense: month.expense,
+        netCashFlow: month.netCashFlow,
+        transactionCount: month.transactionCount,
+      })),
+
+      totalIncome: monthlySummary.totalIncome,
+
+      totalExpense: monthlySummary.totalExpense,
+
+      totalNetCashFlow: monthlySummary.totalNetCashFlow,
+
+      totalTransactionCount: monthlySummary.totalTransactionCount,
+    };
   }
 }

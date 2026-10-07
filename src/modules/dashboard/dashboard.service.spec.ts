@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { jest } from '@jest/globals';
 
 import { DashboardRepository } from './repositories/dashboard.repository';
 import { DashboardService } from './dashboard.service';
@@ -16,6 +17,8 @@ describe('DashboardService', () => {
     getBudgetPerformance: jest.Mock;
     getRecurringPerformance: jest.Mock;
     getCashFlow: jest.Mock;
+    getMonthlyFinancialSummary: jest.Mock;
+    getIncomeExpenseAnalyticsBase: jest.Mock;
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -30,6 +33,8 @@ describe('DashboardService', () => {
       getBudgetPerformance: jest.fn(),
       getRecurringPerformance: jest.fn(),
       getCashFlow: jest.fn(),
+      getMonthlyFinancialSummary: jest.fn(),
+      getIncomeExpenseAnalyticsBase: jest.fn(),
     };
 
     service = new DashboardService(
@@ -313,6 +318,7 @@ describe('DashboardService', () => {
       expect(dashboardRepository.getIncomeAnalytics).not.toHaveBeenCalled();
     });
   });
+
   describe('getExpenseAnalytics', () => {
     it('should calculate total expense and average expense', async () => {
       dashboardRepository.getExpenseAnalytics.mockResolvedValue({
@@ -1390,6 +1396,443 @@ describe('DashboardService', () => {
       expect(result.totalNetCashFlow).toBe('0');
 
       expect(result.totalTransactionCount).toBe(0);
+    });
+  });
+
+  describe('getMonthlyFinancialSummary', () => {
+    it('should aggregate income and expense by month', async () => {
+      dashboardRepository.getMonthlyFinancialSummary.mockResolvedValue([
+        {
+          id: 'transaction-1',
+          type: 'INCOME',
+          amount: new Prisma.Decimal('5000000'),
+          transactionDate: new Date('2026-08-10T10:00:00.000Z'),
+        },
+        {
+          id: 'transaction-2',
+          type: 'EXPENSE',
+          amount: new Prisma.Decimal('1500000'),
+          transactionDate: new Date('2026-08-15T10:00:00.000Z'),
+        },
+        {
+          id: 'transaction-3',
+          type: 'INCOME',
+          amount: new Prisma.Decimal('4000000'),
+          transactionDate: new Date('2026-09-05T10:00:00.000Z'),
+        },
+        {
+          id: 'transaction-4',
+          type: 'EXPENSE',
+          amount: new Prisma.Decimal('1000000'),
+          transactionDate: new Date('2026-09-10T10:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.getMonthlyFinancialSummary('user-id', {
+        startDate: new Date('2026-08-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+      });
+
+      expect(result.currency).toBe('IDR');
+      expect(result.months).toHaveLength(2);
+
+      expect(result.months[0]).toEqual({
+        month: '2026-08',
+        income: '5000000',
+        expense: '1500000',
+        netCashFlow: '3500000',
+        transactionCount: 2,
+        savingsRate: '70',
+      });
+
+      expect(result.months[1]).toEqual({
+        month: '2026-09',
+        income: '4000000',
+        expense: '1000000',
+        netCashFlow: '3000000',
+        transactionCount: 2,
+        savingsRate: '75',
+      });
+
+      expect(result.totalIncome).toBe('9000000');
+      expect(result.totalExpense).toBe('2500000');
+      expect(result.totalNetCashFlow).toBe('6500000');
+      expect(result.totalTransactionCount).toBe(4);
+      expect(result.averageMonthlyIncome).toBe('4500000');
+      expect(result.averageMonthlyExpense).toBe('1250000');
+    });
+
+    it('should include months without transactions', async () => {
+      dashboardRepository.getMonthlyFinancialSummary.mockResolvedValue([
+        {
+          id: 'transaction-1',
+          type: 'INCOME',
+          amount: new Prisma.Decimal('5000000'),
+          transactionDate: new Date('2026-08-10T10:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.getMonthlyFinancialSummary('user-id', {
+        startDate: new Date('2026-07-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+      });
+
+      expect(result.months).toHaveLength(3);
+
+      expect(result.months[0]).toEqual({
+        month: '2026-07',
+        income: '0',
+        expense: '0',
+        netCashFlow: '0',
+        transactionCount: 0,
+        savingsRate: '0',
+      });
+
+      expect(result.months[1]).toEqual({
+        month: '2026-08',
+        income: '5000000',
+        expense: '0',
+        netCashFlow: '5000000',
+        transactionCount: 1,
+        savingsRate: '100',
+      });
+
+      expect(result.months[2]).toEqual({
+        month: '2026-09',
+        income: '0',
+        expense: '0',
+        netCashFlow: '0',
+        transactionCount: 0,
+        savingsRate: '0',
+      });
+    });
+
+    it('should return zero savings rate when monthly income is zero', async () => {
+      dashboardRepository.getMonthlyFinancialSummary.mockResolvedValue([
+        {
+          id: 'transaction-1',
+          type: 'EXPENSE',
+          amount: new Prisma.Decimal('1000000'),
+          transactionDate: new Date('2026-09-10T10:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.getMonthlyFinancialSummary('user-id', {
+        startDate: new Date('2026-09-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+      });
+
+      expect(result.months[0]).toEqual({
+        month: '2026-09',
+        income: '0',
+        expense: '1000000',
+        netCashFlow: '-1000000',
+        transactionCount: 1,
+        savingsRate: '0',
+      });
+    });
+
+    it('should reject an invalid date range', async () => {
+      await expect(
+        service.getMonthlyFinancialSummary('user-id', {
+          startDate: new Date('2026-10-01T00:00:00.000Z'),
+          endDate: new Date('2026-09-01T00:00:00.000Z'),
+        }),
+      ).rejects.toThrow('startDate must be earlier than or equal to endDate');
+
+      expect(
+        dashboardRepository.getMonthlyFinancialSummary,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('should return zero totals when there are no transactions', async () => {
+      dashboardRepository.getMonthlyFinancialSummary.mockResolvedValue([]);
+
+      const result = await service.getMonthlyFinancialSummary('user-id', {
+        startDate: new Date('2026-08-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+      });
+
+      expect(result.totalIncome).toBe('0');
+      expect(result.totalExpense).toBe('0');
+      expect(result.totalNetCashFlow).toBe('0');
+      expect(result.totalTransactionCount).toBe(0);
+      expect(result.averageMonthlyIncome).toBe('0');
+      expect(result.averageMonthlyExpense).toBe('0');
+
+      expect(result.months).toEqual([
+        {
+          month: '2026-08',
+          income: '0',
+          expense: '0',
+          netCashFlow: '0',
+          transactionCount: 0,
+          savingsRate: '0',
+        },
+        {
+          month: '2026-09',
+          income: '0',
+          expense: '0',
+          netCashFlow: '0',
+          transactionCount: 0,
+          savingsRate: '0',
+        },
+      ]);
+    });
+  });
+
+  describe('getDashboardAggregation', () => {
+    it('should aggregate dashboard data using the shared income/expense query', async () => {
+      const incomeExpenseBase = [
+        {
+          type: 'INCOME' as const,
+          _sum: {
+            amount: new Prisma.Decimal('5000000'),
+          },
+          _count: {
+            _all: 3,
+          },
+        },
+        {
+          type: 'EXPENSE' as const,
+          _sum: {
+            amount: new Prisma.Decimal('2000000'),
+          },
+          _count: {
+            _all: 7,
+          },
+        },
+      ];
+
+      dashboardRepository.getIncomeExpenseAnalyticsBase.mockResolvedValue(
+        incomeExpenseBase as never,
+      );
+
+      const categoryAnalytics = {
+        currency: 'IDR',
+        type: 'EXPENSE' as const,
+        categories: [],
+        totalAmount: '2000000',
+        transactionCount: 7,
+      };
+
+      const accountAnalytics = {
+        currency: 'IDR',
+        type: 'EXPENSE' as const,
+        accounts: [],
+        totalAmount: '2000000',
+        transactionCount: 7,
+      };
+
+      const budgetPerformance = {
+        currency: 'IDR',
+        budgets: [],
+        totalBudgetAmount: '0',
+        totalActualAmount: '0',
+        totalRemainingAmount: '0',
+      };
+
+      const recurringPerformance = {
+        currency: 'IDR',
+        recurringTransactions: [],
+        totalExpectedAmount: '0',
+        totalExecutedAmount: '0',
+        totalExpectedOccurrences: 0,
+        totalExecutedOccurrences: 0,
+        totalMissedOccurrences: 0,
+      };
+
+      const monthlyFinancialSummary = {
+        currency: 'IDR',
+        startDate: '2026-08-01T00:00:00.000Z',
+        endDate: '2026-09-30T23:59:59.999Z',
+        months: [
+          {
+            month: '2026-08',
+            income: '3000000',
+            expense: '1000000',
+            netCashFlow: '2000000',
+            transactionCount: 5,
+            savingsRate: '66.6666666666666667',
+          },
+          {
+            month: '2026-09',
+            income: '2000000',
+            expense: '1000000',
+            netCashFlow: '1000000',
+            transactionCount: 5,
+            savingsRate: '50',
+          },
+        ],
+        totalIncome: '5000000',
+        totalExpense: '2000000',
+        totalNetCashFlow: '3000000',
+        totalTransactionCount: 10,
+        averageMonthlyIncome: '2500000',
+        averageMonthlyExpense: '1000000',
+      };
+
+      jest
+        .spyOn(service, 'getCategoryAnalytics')
+        .mockResolvedValue(categoryAnalytics);
+
+      jest
+        .spyOn(service, 'getAccountAnalytics')
+        .mockResolvedValue(accountAnalytics);
+
+      jest
+        .spyOn(service, 'getBudgetPerformance')
+        .mockResolvedValue(budgetPerformance);
+
+      jest
+        .spyOn(service, 'getRecurringPerformance')
+        .mockResolvedValue(recurringPerformance);
+
+      jest
+        .spyOn(service, 'getMonthlyFinancialSummary')
+        .mockResolvedValue(monthlyFinancialSummary);
+
+      const result = await service.getDashboardAggregation('user-id', {
+        startDate: new Date('2026-08-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+      });
+
+      expect(result.summary).toEqual({
+        currency: 'IDR',
+        totalIncome: '5000000',
+        totalExpense: '2000000',
+        netCashFlow: '3000000',
+        transactionCount: 10,
+      });
+
+      expect(result.income).toEqual({
+        currency: 'IDR',
+        totalIncome: '5000000',
+        transactionCount: 3,
+        averageIncome: '1666666.6666666666667',
+      });
+
+      expect(result.expense).toEqual({
+        currency: 'IDR',
+        totalExpense: '2000000',
+        transactionCount: 7,
+        averageExpense: '285714.28571428571429',
+      });
+
+      expect(result.categoryAnalytics).toBe(categoryAnalytics);
+
+      expect(result.accountAnalytics).toBe(accountAnalytics);
+
+      expect(result.budgetPerformance).toBe(budgetPerformance);
+
+      expect(result.recurringPerformance).toBe(recurringPerformance);
+
+      expect(result.monthlyFinancialSummary).toBe(monthlyFinancialSummary);
+
+      expect(result.cashFlow).toEqual({
+        currency: 'IDR',
+        startDate: monthlyFinancialSummary.startDate,
+        endDate: monthlyFinancialSummary.endDate,
+        period: 'MONTH',
+        cashFlows: [
+          {
+            period: '2026-08',
+            income: '3000000',
+            expense: '1000000',
+            netCashFlow: '2000000',
+            transactionCount: 5,
+          },
+          {
+            period: '2026-09',
+            income: '2000000',
+            expense: '1000000',
+            netCashFlow: '1000000',
+            transactionCount: 5,
+          },
+        ],
+        totalIncome: '5000000',
+        totalExpense: '2000000',
+        totalNetCashFlow: '3000000',
+        totalTransactionCount: 10,
+      });
+
+      expect(
+        dashboardRepository.getIncomeExpenseAnalyticsBase,
+      ).toHaveBeenCalledWith('user-id', {
+        startDate: new Date('2026-08-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+      });
+
+      expect(dashboardRepository.getFinancialSummary).not.toHaveBeenCalled();
+
+      expect(dashboardRepository.getIncomeAnalytics).not.toHaveBeenCalled();
+
+      expect(dashboardRepository.getExpenseAnalytics).not.toHaveBeenCalled();
+
+      expect(dashboardRepository.getCashFlow).not.toHaveBeenCalled();
+    });
+
+    it('should use the default date range', async () => {
+      dashboardRepository.getIncomeExpenseAnalyticsBase.mockResolvedValue([]);
+
+      jest
+        .spyOn(service, 'getCategoryAnalytics')
+        .mockResolvedValue({} as never);
+
+      jest.spyOn(service, 'getAccountAnalytics').mockResolvedValue({} as never);
+
+      jest
+        .spyOn(service, 'getBudgetPerformance')
+        .mockResolvedValue({} as never);
+
+      jest
+        .spyOn(service, 'getRecurringPerformance')
+        .mockResolvedValue({} as never);
+
+      jest.spyOn(service, 'getMonthlyFinancialSummary').mockResolvedValue({
+        currency: 'IDR',
+        startDate: '2026-01-01T00:00:00.000Z',
+        endDate: '2026-12-31T23:59:59.999Z',
+        months: [],
+        totalIncome: '0',
+        totalExpense: '0',
+        totalNetCashFlow: '0',
+        totalTransactionCount: 0,
+        averageMonthlyIncome: '0',
+        averageMonthlyExpense: '0',
+      });
+
+      await service.getDashboardAggregation('user-id');
+
+      expect(
+        dashboardRepository.getIncomeExpenseAnalyticsBase,
+      ).toHaveBeenCalledTimes(1);
+
+      expect(dashboardRepository.getCashFlow).not.toHaveBeenCalled();
+
+      const call =
+        dashboardRepository.getIncomeExpenseAnalyticsBase.mock.calls[0];
+
+      expect(call[0]).toBe('user-id');
+      expect(call[1].startDate).toBeInstanceOf(Date);
+      expect(call[1].endDate).toBeInstanceOf(Date);
+    });
+
+    it('should reject an invalid date range before querying repositories', async () => {
+      await expect(
+        service.getDashboardAggregation('user-id', {
+          startDate: new Date('2026-10-01T00:00:00.000Z'),
+          endDate: new Date('2026-09-01T00:00:00.000Z'),
+        }),
+      ).rejects.toThrow('startDate must be earlier than or equal to endDate');
+
+      expect(
+        dashboardRepository.getIncomeExpenseAnalyticsBase,
+      ).not.toHaveBeenCalled();
+
+      expect(
+        dashboardRepository.getMonthlyFinancialSummary,
+      ).not.toHaveBeenCalled();
     });
   });
 });
