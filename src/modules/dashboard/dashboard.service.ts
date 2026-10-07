@@ -7,6 +7,8 @@ import {
   DASHBOARD_CASH_FLOW_DEFAULT_PERIOD,
   DASHBOARD_CASH_FLOW_MAX_PERIODS,
   DASHBOARD_DEFAULT_CURRENCY,
+  DASHBOARD_MONTHLY_SUMMARY_DEFAULT_MONTHS,
+  DASHBOARD_MONTHLY_SUMMARY_MAX_MONTHS,
   DASHBOARD_RECURRING_NEAR_COMPLETE_PERCENTAGE,
 } from './dashboard.constants';
 
@@ -24,6 +26,8 @@ import {
   DashboardCategoryAnalyticsItem,
   DashboardExpenseAnalytics,
   DashboardIncomeAnalytics,
+  DashboardMonthlyFinancialSummary,
+  DashboardMonthlyFinancialSummaryItem,
   DashboardQueryOptions,
   DashboardRecurringPerformance,
   DashboardRecurringPerformanceItem,
@@ -607,6 +611,85 @@ export class DashboardService {
     };
   }
 
+  async getMonthlyFinancialSummary(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ): Promise<DashboardMonthlyFinancialSummary> {
+    const normalizedOptions = this.normalizeQuery(options);
+
+    const { startDate, endDate } =
+      this.resolveMonthlySummaryDateRange(normalizedOptions);
+
+    const transactions =
+      await this.dashboardRepository.getMonthlyFinancialSummary(userId, {
+        startDate,
+        endDate,
+      });
+
+    const buckets = this.buildMonthlyFinancialSummaryBuckets(
+      transactions.filter(
+        (
+          transaction,
+        ): transaction is {
+          id: string;
+          type: 'INCOME' | 'EXPENSE';
+          amount: Prisma.Decimal;
+          transactionDate: Date;
+        } => transaction.type === 'INCOME' || transaction.type === 'EXPENSE',
+      ),
+      startDate,
+      endDate,
+    );
+
+    let totalIncome = new Prisma.Decimal(0);
+    let totalExpense = new Prisma.Decimal(0);
+    let totalTransactionCount = 0;
+
+    const months: DashboardMonthlyFinancialSummaryItem[] = Array.from(
+      buckets.values(),
+    ).map((bucket) => {
+      totalIncome = totalIncome.plus(bucket.income);
+      totalExpense = totalExpense.plus(bucket.expense);
+      totalTransactionCount += bucket.transactionCount;
+
+      const netCashFlow = bucket.income.minus(bucket.expense);
+
+      const savingsRate = bucket.income.greaterThan(0)
+        ? netCashFlow.div(bucket.income).times(100)
+        : new Prisma.Decimal(0);
+
+      return {
+        month: bucket.month,
+        income: bucket.income.toString(),
+        expense: bucket.expense.toString(),
+        netCashFlow: netCashFlow.toString(),
+        transactionCount: bucket.transactionCount,
+        savingsRate: savingsRate.toString(),
+      };
+    });
+
+    const monthCount = months.length;
+
+    const averageMonthlyIncome =
+      monthCount > 0 ? totalIncome.div(monthCount) : new Prisma.Decimal(0);
+
+    const averageMonthlyExpense =
+      monthCount > 0 ? totalExpense.div(monthCount) : new Prisma.Decimal(0);
+
+    return {
+      currency: DASHBOARD_DEFAULT_CURRENCY,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      months,
+      totalIncome: totalIncome.toString(),
+      totalExpense: totalExpense.toString(),
+      totalNetCashFlow: totalIncome.minus(totalExpense).toString(),
+      totalTransactionCount,
+      averageMonthlyIncome: averageMonthlyIncome.toString(),
+      averageMonthlyExpense: averageMonthlyExpense.toString(),
+    };
+  }
+
   private getRecurringPerformanceStartDate(
     recurringStartDate: Date,
     requestedStartDate?: Date,
@@ -866,5 +949,112 @@ export class DashboardService {
     }
 
     return result;
+  }
+
+  private resolveMonthlySummaryDateRange(options: DashboardQueryOptions): {
+    startDate: Date;
+    endDate: Date;
+  } {
+    const now = new Date();
+
+    if (options.startDate || options.endDate) {
+      return {
+        startDate:
+          options.startDate ?? this.getDefaultMonthlySummaryStartDate(),
+        endDate: options.endDate ?? now,
+      };
+    }
+
+    return {
+      startDate: this.getDefaultMonthlySummaryStartDate(),
+      endDate: now,
+    };
+  }
+
+  private getDefaultMonthlySummaryStartDate(): Date {
+    const date = new Date();
+
+    date.setUTCMonth(
+      date.getUTCMonth() - (DASHBOARD_MONTHLY_SUMMARY_DEFAULT_MONTHS - 1),
+    );
+
+    date.setUTCDate(1);
+    date.setUTCHours(0, 0, 0, 0);
+
+    return date;
+  }
+
+  private buildMonthlyFinancialSummaryBuckets(
+    transactions: Array<{
+      id: string;
+      type: 'INCOME' | 'EXPENSE';
+      amount: Prisma.Decimal;
+      transactionDate: Date;
+    }>,
+    startDate: Date,
+    endDate: Date,
+  ) {
+    const buckets = new Map<
+      string,
+      {
+        month: string;
+        income: Prisma.Decimal;
+        expense: Prisma.Decimal;
+        transactionCount: number;
+      }
+    >();
+
+    const cursor = new Date(startDate);
+
+    cursor.setUTCDate(1);
+    cursor.setUTCHours(0, 0, 0, 0);
+
+    let iteration = 0;
+
+    while (
+      cursor.getTime() <= endDate.getTime() &&
+      iteration < DASHBOARD_MONTHLY_SUMMARY_MAX_MONTHS
+    ) {
+      const month = this.getMonthlySummaryMonthKey(cursor);
+
+      buckets.set(month, {
+        month,
+        income: new Prisma.Decimal(0),
+        expense: new Prisma.Decimal(0),
+        transactionCount: 0,
+      });
+
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+
+      iteration += 1;
+    }
+
+    for (const transaction of transactions) {
+      const month = this.getMonthlySummaryMonthKey(transaction.transactionDate);
+
+      const bucket = buckets.get(month);
+
+      if (!bucket) {
+        continue;
+      }
+
+      if (transaction.type === 'INCOME') {
+        bucket.income = bucket.income.plus(transaction.amount);
+      } else {
+        bucket.expense = bucket.expense.plus(transaction.amount);
+      }
+
+      bucket.transactionCount += 1;
+    }
+
+    return buckets;
+  }
+
+  private getMonthlySummaryMonthKey(date: Date): string {
+    const year = date.getUTCFullYear();
+
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+
+    return `${year}-${month}`;
   }
 }

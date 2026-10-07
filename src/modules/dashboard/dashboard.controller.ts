@@ -26,6 +26,8 @@ import { GetDashboardRecurringPerformanceQueryDto } from './dto/get-dashboard-re
 import { DashboardRecurringPerformanceResponseDto } from './dto/dashboard-recurring-performance-response.dto';
 import { DashboardCashFlowResponseDto } from './dto/dashboard-cash-flow-response.dto';
 import { GetDashboardCashFlowQueryDto } from './dto/get-dashboard-cash-flow-query.dto';
+import { DashboardMonthlyFinancialSummaryResponseDto } from './dto/dashboard-monthly-financial-summary-response.dto';
+import { GetDashboardMonthlyFinancialSummaryQueryDto } from './dto/get-dashboard-monthly-financial-summary-query.dto';
 
 @Controller('dashboard')
 @ApiTags('Dashboard')
@@ -202,6 +204,26 @@ export class DashboardController {
       endDate: query.endDate ? new Date(query.endDate) : undefined,
 
       period: query.period,
+    });
+  }
+
+  @Get('monthly-summary')
+  @ApiOperation({
+    summary: 'Get monthly financial summary',
+  })
+  @ApiOkResponse({
+    type: DashboardMonthlyFinancialSummaryResponseDto,
+    description: 'Monthly financial summary retrieved successfully.',
+  })
+  async getMonthlyFinancialSummary(
+    @CurrentUser('id') userId: string,
+    @Query()
+    query: GetDashboardMonthlyFinancialSummaryQueryDto,
+  ): Promise<DashboardMonthlyFinancialSummaryResponseDto> {
+    return this.dashboardService.getMonthlyFinancialSummary(userId, {
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
     });
   }
 }

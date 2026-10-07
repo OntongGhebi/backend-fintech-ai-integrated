@@ -142,6 +142,28 @@ export interface DashboardCashFlow {
   totalTransactionCount: number;
 }
 
+export interface DashboardMonthlyFinancialSummaryItem {
+  month: string;
+  income: string;
+  expense: string;
+  netCashFlow: string;
+  transactionCount: number;
+  savingsRate: string;
+}
+
+export interface DashboardMonthlyFinancialSummary {
+  currency: string;
+  startDate: string;
+  endDate: string;
+  months: DashboardMonthlyFinancialSummaryItem[];
+  totalIncome: string;
+  totalExpense: string;
+  totalNetCashFlow: string;
+  totalTransactionCount: number;
+  averageMonthlyIncome: string;
+  averageMonthlyExpense: string;
+}
+
 export interface DashboardMetric {
   value: number;
   currency: string;

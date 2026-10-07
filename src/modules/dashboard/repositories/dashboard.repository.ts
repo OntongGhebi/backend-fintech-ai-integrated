@@ -570,4 +570,48 @@ export class DashboardRepository {
       },
     });
   }
+
+  async getMonthlyFinancialSummary(
+    userId: string,
+    options: DashboardQueryOptions = {},
+  ) {
+    const where = {
+      userId,
+      deletedAt: null,
+      status: 'ACTIVE' as const,
+      currency: 'IDR',
+      type: {
+        in: ['INCOME' as const, 'EXPENSE' as const],
+      },
+      ...(options.startDate || options.endDate
+        ? {
+            transactionDate: {
+              ...(options.startDate
+                ? {
+                    gte: options.startDate,
+                  }
+                : {}),
+              ...(options.endDate
+                ? {
+                    lte: options.endDate,
+                  }
+                : {}),
+            },
+          }
+        : {}),
+    };
+
+    return this.prisma.transaction.findMany({
+      where,
+      select: {
+        id: true,
+        type: true,
+        amount: true,
+        transactionDate: true,
+      },
+      orderBy: {
+        transactionDate: 'asc',
+      },
+    });
+  }
 }
