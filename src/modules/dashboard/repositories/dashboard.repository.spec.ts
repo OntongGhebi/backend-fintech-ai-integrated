@@ -878,6 +878,43 @@ describe('DashboardRepository', () => {
 
       expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
     });
+
+    it('should apply report filters to transaction aggregation', async () => {
+      prisma.transaction.groupBy.mockResolvedValue([]);
+
+      const options = {
+        startDate: new Date('2026-01-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+        type: 'EXPENSE' as const,
+        accountId: '11111111-1111-4111-8111-111111111111',
+        categoryId: '22222222-2222-4222-8222-222222222222',
+      };
+
+      await repository.getIncomeExpenseAnalyticsBase('user-1', options);
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith({
+        by: ['type'],
+        where: {
+          userId: 'user-1',
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'EXPENSE',
+          accountId: '11111111-1111-4111-8111-111111111111',
+          categoryId: '22222222-2222-4222-8222-222222222222',
+          transactionDate: {
+            gte: new Date('2026-01-01T00:00:00.000Z'),
+            lte: new Date('2026-09-30T23:59:59.999Z'),
+          },
+        },
+        _sum: {
+          amount: true,
+        },
+        _count: {
+          _all: true,
+        },
+      });
+    });
   });
 
   describe('getBudgetPerformance', () => {

@@ -65,6 +65,9 @@ export class DashboardService {
     return {
       startDate: options.startDate,
       endDate: options.endDate,
+      type: options.type,
+      accountId: options.accountId,
+      categoryId: options.categoryId,
     };
   }
 
@@ -701,6 +704,9 @@ export class DashboardService {
       startDate:
         normalizedOptions.startDate ?? this.getDefaultMonthlySummaryStartDate(),
       endDate: normalizedOptions.endDate ?? new Date(),
+      type: normalizedOptions.type,
+      accountId: normalizedOptions.accountId,
+      categoryId: normalizedOptions.categoryId,
     };
 
     const [
@@ -716,9 +722,17 @@ export class DashboardService {
         aggregationOptions,
       ),
 
-      this.getCategoryAnalytics(userId, 'EXPENSE', aggregationOptions),
+      this.getCategoryAnalytics(
+        userId,
+        aggregationOptions.type ?? 'EXPENSE',
+        aggregationOptions,
+      ),
 
-      this.getAccountAnalytics(userId, 'EXPENSE', aggregationOptions),
+      this.getAccountAnalytics(
+        userId,
+        aggregationOptions.type ?? 'EXPENSE',
+        aggregationOptions,
+      ),
 
       this.getBudgetPerformance(userId, aggregationOptions),
 

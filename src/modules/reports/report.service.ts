@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { ReportRepository } from './repositories/report.repository';
+
 import {
   REPORT_DEFAULT_CURRENCY,
   REPORT_DEFAULT_TYPE,
 } from './report.constants';
-import { FinancialReport, ReportQueryOptions } from './types/report.types';
+
 import { FinancialReportDto } from './dto/financial-report.dto';
+import { ReportQueryDto } from './dto/report-query.dto';
+import { ReportRepository } from './repositories/report.repository';
+import type { FinancialReport, ReportQueryOptions } from './types/report.types';
 
 @Injectable()
 export class ReportService {
@@ -26,6 +29,7 @@ export class ReportService {
       startDate: reportData.monthlyFinancialSummary.startDate,
       endDate: reportData.monthlyFinancialSummary.endDate,
       generatedAt: new Date(),
+
       summary: reportData.summary,
       income: reportData.income,
       expense: reportData.expense,
@@ -45,5 +49,15 @@ export class ReportService {
     const report = await this.getFinancialReport(userId, options);
 
     return new FinancialReportDto(report);
+  }
+
+  buildQueryOptions(query: ReportQueryDto): ReportQueryOptions {
+    return {
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+      type: query.type,
+      accountId: query.accountId,
+      categoryId: query.categoryId,
+    };
   }
 }

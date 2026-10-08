@@ -77,6 +77,28 @@ describe('DashboardService', () => {
       });
     });
 
+    it('should preserve transaction filters', () => {
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      const endDate = new Date('2026-09-30T23:59:59.999Z');
+
+      const result = service.normalizeQuery({
+        startDate,
+        endDate,
+        type: 'EXPENSE',
+        accountId: '11111111-1111-4111-8111-111111111111',
+        categoryId: '22222222-2222-4222-8222-222222222222',
+      });
+
+      expect(result).toEqual({
+        startDate,
+        endDate,
+        type: 'EXPENSE',
+        accountId: '11111111-1111-4111-8111-111111111111',
+        categoryId: '22222222-2222-4222-8222-222222222222',
+      });
+    });
+
     it('should reject an invalid date range', () => {
       const startDate = new Date('2026-09-30T00:00:00.000Z');
 
@@ -1833,6 +1855,59 @@ describe('DashboardService', () => {
       expect(
         dashboardRepository.getMonthlyFinancialSummary,
       ).not.toHaveBeenCalled();
+    });
+
+    it('should filter dashboard aggregation by transaction type', async () => {
+      dashboardRepository.getIncomeExpenseAnalyticsBase.mockResolvedValue([
+        {
+          type: 'EXPENSE',
+          _sum: {
+            amount: '2000000',
+          },
+          _count: {
+            _all: 5,
+          },
+        },
+      ]);
+
+      jest
+        .spyOn(service, 'getCategoryAnalytics')
+        .mockResolvedValue({} as never);
+
+      jest.spyOn(service, 'getAccountAnalytics').mockResolvedValue({} as never);
+
+      jest
+        .spyOn(service, 'getBudgetPerformance')
+        .mockResolvedValue({} as never);
+
+      jest
+        .spyOn(service, 'getRecurringPerformance')
+        .mockResolvedValue({} as never);
+
+      jest.spyOn(service, 'getMonthlyFinancialSummary').mockResolvedValue({
+        currency: 'IDR',
+        startDate: '2026-01-01T00:00:00.000Z',
+        endDate: '2026-12-31T23:59:59.999Z',
+        months: [],
+        totalIncome: '0',
+        totalExpense: '0',
+        totalNetCashFlow: '0',
+        totalTransactionCount: 0,
+        averageMonthlyIncome: '0',
+        averageMonthlyExpense: '0',
+      });
+
+      const result = await service.getDashboardAggregation('user-1', {
+        type: 'EXPENSE',
+      });
+
+      expect(result.summary).toEqual({
+        currency: 'IDR',
+        totalIncome: '0',
+        totalExpense: '2000000',
+        netCashFlow: '-2000000',
+        transactionCount: 5,
+      });
     });
   });
 });

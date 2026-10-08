@@ -211,7 +211,7 @@ export class DashboardRepository {
   ) {
     const where = {
       ...this.buildTransactionWhere(userId, options),
-      type: {
+      type: options.type ?? {
         in: ['INCOME' as const, 'EXPENSE' as const],
       },
     };
@@ -536,6 +536,23 @@ export class DashboardRepository {
       deletedAt: null,
       status: 'ACTIVE' as const,
       currency: 'IDR',
+      ...(options.type
+        ? {
+            type: options.type,
+          }
+        : {}),
+
+      ...(options.accountId
+        ? {
+            accountId: options.accountId,
+          }
+        : {}),
+
+      ...(options.categoryId
+        ? {
+            categoryId: options.categoryId,
+          }
+        : {}),
       ...(options.startDate || options.endDate
         ? {
             transactionDate: {

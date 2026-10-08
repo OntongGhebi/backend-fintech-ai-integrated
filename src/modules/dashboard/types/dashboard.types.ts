@@ -8,6 +8,9 @@ export interface DashboardDateRange {
 export interface DashboardQueryOptions {
   startDate?: Date;
   endDate?: Date;
+  type?: 'INCOME' | 'EXPENSE';
+  accountId?: string;
+  categoryId?: string;
 }
 
 export interface DashboardSummary {

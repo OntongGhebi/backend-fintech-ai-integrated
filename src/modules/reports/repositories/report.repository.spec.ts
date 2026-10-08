@@ -153,5 +153,28 @@ describe('ReportRepository', () => {
         repository.getFinancialReportData('user-1', {}),
       ).rejects.toThrow(error);
     });
+
+    it('should forward all report filters to dashboard aggregation', async () => {
+      const aggregation = createDashboardAggregationMock();
+
+      dashboardService.getDashboardAggregation.mockResolvedValue(aggregation);
+
+      const options = {
+        startDate: new Date('2026-01-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+        type: 'EXPENSE' as const,
+        accountId: '11111111-1111-4111-8111-111111111111',
+        categoryId: '22222222-2222-4222-8222-222222222222',
+      };
+
+      const result = await repository.getFinancialReportData('user-1', options);
+
+      expect(dashboardService.getDashboardAggregation).toHaveBeenCalledWith(
+        'user-1',
+        options,
+      );
+
+      expect(result).toEqual(aggregation);
+    });
   });
 });

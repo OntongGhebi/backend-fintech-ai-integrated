@@ -2,6 +2,7 @@ import { ReportService } from './report.service';
 import { ReportRepository } from './repositories/report.repository';
 import type { DashboardAggregation } from '../dashboard/types/dashboard.types';
 import { FinancialReportDto } from './dto/financial-report.dto';
+import { ReportQueryDto } from './dto/report-query.dto';
 
 const createDashboardAggregationMock = (): DashboardAggregation => ({
   currency: 'IDR',
@@ -244,6 +245,38 @@ describe('ReportService', () => {
       );
 
       expect(result).toBeInstanceOf(FinancialReportDto);
+    });
+  });
+
+  describe('buildQueryOptions', () => {
+    it('should convert report query dto into report query options', () => {
+      const query: ReportQueryDto = {
+        startDate: '2026-01-01T00:00:00.000Z',
+        endDate: '2026-09-30T23:59:59.999Z',
+        type: 'EXPENSE',
+        accountId: '11111111-1111-4111-8111-111111111111',
+        categoryId: '22222222-2222-4222-8222-222222222222',
+      };
+
+      const result = service.buildQueryOptions(query);
+
+      expect(result).toEqual({
+        startDate: new Date('2026-01-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+        type: 'EXPENSE',
+        accountId: '11111111-1111-4111-8111-111111111111',
+        categoryId: '22222222-2222-4222-8222-222222222222',
+      });
+    });
+
+    it('should preserve an empty report query', () => {
+      expect(service.buildQueryOptions({})).toEqual({
+        startDate: undefined,
+        endDate: undefined,
+        type: undefined,
+        accountId: undefined,
+        categoryId: undefined,
+      });
     });
   });
 });
