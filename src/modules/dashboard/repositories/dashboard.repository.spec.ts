@@ -347,6 +347,70 @@ describe('DashboardRepository', () => {
       });
       expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
+
+    it('should scope analytics queries by userId', async () => {
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: '1000000',
+        },
+        _count: {
+          _all: 1,
+        },
+      });
+
+      await repository.getExpenseAnalytics('user-123');
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: 'user-123',
+          }),
+        }),
+      );
+    });
+
+    it('should exclude deleted and inactive transactions from analytics', async () => {
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: '1000000',
+        },
+        _count: {
+          _all: 1,
+        },
+      });
+
+      await repository.getExpenseAnalytics('user-1');
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            deletedAt: null,
+            status: 'ACTIVE',
+          }),
+        }),
+      );
+    });
+
+    it('should only include IDR transactions', async () => {
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: {
+          amount: '1000000',
+        },
+        _count: {
+          _all: 1,
+        },
+      });
+
+      await repository.getIncomeAnalytics('user-1');
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            currency: 'IDR',
+          }),
+        }),
+      );
+    });
   });
 
   describe('getExpenseAnalytics', () => {
@@ -914,6 +978,22 @@ describe('DashboardRepository', () => {
           _all: true,
         },
       });
+    });
+
+    it('should exclude transfer transactions from financial analytics', async () => {
+      prisma.transaction.groupBy.mockResolvedValue([]);
+
+      await repository.getIncomeExpenseAnalyticsBase('user-1');
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            type: {
+              in: ['INCOME', 'EXPENSE'],
+            },
+          }),
+        }),
+      );
     });
   });
 

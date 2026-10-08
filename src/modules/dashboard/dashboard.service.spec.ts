@@ -160,7 +160,7 @@ describe('DashboardService', () => {
       dashboardRepository.getFinancialSummary.mockResolvedValue({
         groupedTransactions: [],
         transactionCount: 0,
-      });
+      } as never);
 
       const result = await service.getFinancialSummary(userId);
 
@@ -1419,6 +1419,31 @@ describe('DashboardService', () => {
 
       expect(result.totalTransactionCount).toBe(0);
     });
+
+    it('should handle empty cash flow data', async () => {
+      dashboardRepository.getCashFlow.mockResolvedValue([]);
+
+      const result = await service.getCashFlow('user-1', {
+        startDate: new Date('2026-09-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+      });
+
+      expect(dashboardRepository.getCashFlow).toHaveBeenCalledWith('user-1', {
+        startDate: new Date('2026-09-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+        period: 'MONTH',
+      });
+      expect(result.cashFlows).toEqual([
+        {
+          period: '2026-09',
+          income: '0',
+          expense: '0',
+          netCashFlow: '0',
+          transactionCount: 0,
+        },
+      ]);
+      expect(result.totalTransactionCount).toBe(0);
+    });
   });
 
   describe('getMonthlyFinancialSummary', () => {
@@ -1600,6 +1625,20 @@ describe('DashboardService', () => {
           savingsRate: '0',
         },
       ]);
+    });
+
+    it('should return empty monthly summary when there are no transactions', async () => {
+      dashboardRepository.getMonthlyFinancialSummary.mockResolvedValue([]);
+
+      const result = await service.getMonthlyFinancialSummary('user-1', {
+        startDate: new Date('2026-01-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+      });
+
+      expect(result.totalTransactionCount).toBe(0);
+      expect(result.totalIncome).toBe('0');
+      expect(result.totalExpense).toBe('0');
+      expect(result.months).toHaveLength(9);
     });
   });
 
@@ -1909,5 +1948,106 @@ describe('DashboardService', () => {
         transactionCount: 5,
       });
     });
+
+    it('should propagate all analytics filters', async () => {
+      dashboardRepository.getIncomeExpenseAnalyticsBase.mockResolvedValue([]);
+
+      dashboardRepository.getCategoryAnalytics.mockResolvedValue({
+        groupedCategories: [],
+        categories: [],
+        totalAmount: null,
+        transactionCount: 0,
+      });
+
+      dashboardRepository.getAccountAnalytics.mockResolvedValue({
+        groupedAccounts: [],
+        accounts: [],
+        totalAmount: null,
+        transactionCount: 0,
+      });
+
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [],
+        transactions: [],
+      });
+
+      dashboardRepository.getRecurringPerformance.mockResolvedValue({
+        recurringTransactions: [],
+        transactions: [],
+      });
+
+      dashboardRepository.getMonthlyFinancialSummary.mockResolvedValue([]);
+
+      const options = {
+        startDate: new Date('2026-01-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+        type: 'EXPENSE' as const,
+        accountId: 'account-1',
+        categoryId: 'category-1',
+      };
+
+      await service.getDashboardAggregation('user-1', options);
+
+      expect(
+        dashboardRepository.getIncomeExpenseAnalyticsBase,
+      ).toHaveBeenCalledWith('user-1', options);
+
+      expect(dashboardRepository.getCategoryAnalytics).toHaveBeenCalledWith(
+        'user-1',
+        'EXPENSE',
+        options,
+      );
+
+      expect(dashboardRepository.getAccountAnalytics).toHaveBeenCalledWith(
+        'user-1',
+        'EXPENSE',
+        options,
+      );
+    });
+
+    it('should handle an empty dashboard dataset', async () => {
+      dashboardRepository.getIncomeExpenseAnalyticsBase.mockResolvedValue([]);
+
+      dashboardRepository.getCategoryAnalytics.mockResolvedValue({
+        groupedCategories: [],
+        categories: [],
+        totalAmount: null,
+        transactionCount: 0,
+      });
+
+      dashboardRepository.getAccountAnalytics.mockResolvedValue({
+        groupedAccounts: [],
+        accounts: [],
+        totalAmount: null,
+        transactionCount: 0,
+      });
+
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [],
+        transactions: [],
+      });
+
+      dashboardRepository.getRecurringPerformance.mockResolvedValue({
+        recurringTransactions: [],
+        transactions: [],
+      });
+
+      dashboardRepository.getMonthlyFinancialSummary.mockResolvedValue([]);
+
+      const result = await service.getDashboardAggregation('user-1');
+
+      expect(result).toBeDefined();
+
+      expect(result.summary).toBeDefined();
+
+      expect(result.income).toBeDefined();
+
+      expect(result.expense).toBeDefined();
+
+      expect(result.categoryAnalytics).toBeDefined();
+
+      expect(result.accountAnalytics).toBeDefined();
+    });
+
   });
 });
