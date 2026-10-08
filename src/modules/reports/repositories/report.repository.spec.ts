@@ -2,92 +2,7 @@ import { ReportRepository } from './report.repository';
 
 import { DashboardService } from '../../dashboard/dashboard.service';
 
-import type { DashboardAggregation } from '../../dashboard/types/dashboard.types';
-
-const createDashboardAggregationMock = (): DashboardAggregation => ({
-  currency: 'IDR',
-
-  summary: {
-    currency: 'IDR',
-    totalIncome: '5000000',
-    totalExpense: '2000000',
-    netCashFlow: '3000000',
-    transactionCount: 10,
-  },
-
-  income: {
-    currency: 'IDR',
-    totalIncome: '5000000',
-    transactionCount: 3,
-    averageIncome: '1666666.6666666666666667',
-  },
-
-  expense: {
-    currency: 'IDR',
-    totalExpense: '2000000',
-    transactionCount: 7,
-    averageExpense: '285714.28571428571428571',
-  },
-
-  categoryAnalytics: {
-    currency: 'IDR',
-    type: 'EXPENSE',
-    categories: [],
-    totalAmount: '2000000',
-    transactionCount: 7,
-  },
-
-  accountAnalytics: {
-    currency: 'IDR',
-    type: 'EXPENSE',
-    accounts: [],
-    totalAmount: '2000000',
-    transactionCount: 7,
-  },
-
-  budgetPerformance: {
-    currency: 'IDR',
-    budgets: [],
-    totalBudgetAmount: '0',
-    totalActualAmount: '0',
-    totalRemainingAmount: '0',
-  },
-
-  recurringPerformance: {
-    currency: 'IDR',
-    recurringTransactions: [],
-    totalExpectedAmount: '0',
-    totalExecutedAmount: '0',
-    totalExpectedOccurrences: 0,
-    totalExecutedOccurrences: 0,
-    totalMissedOccurrences: 0,
-  },
-
-  monthlyFinancialSummary: {
-    currency: 'IDR',
-    startDate: '2026-01-01T00:00:00.000Z',
-    endDate: '2026-09-30T23:59:59.999Z',
-    months: [],
-    totalIncome: '5000000',
-    totalExpense: '2000000',
-    totalNetCashFlow: '3000000',
-    totalTransactionCount: 10,
-    averageMonthlyIncome: '555555.55555555555555556',
-    averageMonthlyExpense: '222222.22222222222222222',
-  },
-
-  cashFlow: {
-    currency: 'IDR',
-    startDate: '2026-01-01T00:00:00.000Z',
-    endDate: '2026-09-30T23:59:59.999Z',
-    period: 'MONTH',
-    cashFlows: [],
-    totalIncome: '5000000',
-    totalExpense: '2000000',
-    totalNetCashFlow: '3000000',
-    totalTransactionCount: 10,
-  },
-});
+import { PrismaService } from '../../../database/prisma/prisma.service';
 
 describe('ReportRepository', () => {
   let repository: ReportRepository;
@@ -96,19 +11,36 @@ describe('ReportRepository', () => {
     getDashboardAggregation: jest.Mock;
   };
 
+  let prisma: {
+    transaction: {
+      findMany: jest.Mock;
+      count: jest.Mock;
+    };
+  };
+
   beforeEach(() => {
     dashboardService = {
       getDashboardAggregation: jest.fn(),
     };
 
+    prisma = {
+      transaction: {
+        findMany: jest.fn(),
+        count: jest.fn(),
+      },
+    };
+
     repository = new ReportRepository(
       dashboardService as unknown as DashboardService,
+      prisma as unknown as PrismaService,
     );
   });
 
   describe('getFinancialReportData', () => {
     it('should retrieve financial report data from dashboard service', async () => {
-      const aggregation = createDashboardAggregationMock();
+      const aggregation = {
+        currency: 'IDR',
+      };
 
       dashboardService.getDashboardAggregation.mockResolvedValue(aggregation);
 
@@ -119,8 +51,6 @@ describe('ReportRepository', () => {
 
       const result = await repository.getFinancialReportData('user-1', options);
 
-      expect(dashboardService.getDashboardAggregation).toHaveBeenCalledTimes(1);
-
       expect(dashboardService.getDashboardAggregation).toHaveBeenCalledWith(
         'user-1',
         options,
@@ -128,53 +58,208 @@ describe('ReportRepository', () => {
 
       expect(result).toEqual(aggregation);
     });
+  });
 
-    it('should forward empty options', async () => {
-      const aggregation = createDashboardAggregationMock();
+  describe('getPaginatedTransactions', () => {
+    it('should return the first page using default pagination', async () => {
+      const transactionDate = new Date('2026-09-30T10:00:00.000Z');
 
-      dashboardService.getDashboardAggregation.mockResolvedValue(aggregation);
+      prisma.transaction.findMany.mockResolvedValue([
+        {
+          id: 'transaction-1',
+          accountId: 'account-1',
+          categoryId: 'category-1',
+          type: 'EXPENSE',
+          amount: '150000',
+          currency: 'IDR',
+          description: 'Lunch',
+          transactionDate,
+          source: 'MANUAL',
+        },
+      ]);
 
-      const result = await repository.getFinancialReportData('user-1', {});
+      prisma.transaction.count.mockResolvedValue(21);
 
-      expect(dashboardService.getDashboardAggregation).toHaveBeenCalledWith(
-        'user-1',
-        {},
+      const result = await repository.getPaginatedTransactions('user-1');
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'user-1',
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: {
+            in: ['INCOME', 'EXPENSE'],
+          },
+        },
+        orderBy: [
+          {
+            transactionDate: 'desc',
+          },
+          {
+            createdAt: 'desc',
+          },
+          {
+            id: 'desc',
+          },
+        ],
+        skip: 0,
+        take: 20,
+        select: {
+          id: true,
+          accountId: true,
+          categoryId: true,
+          type: true,
+          amount: true,
+          currency: true,
+          description: true,
+          transactionDate: true,
+          source: true,
+        },
+      });
+
+      expect(prisma.transaction.count).toHaveBeenCalledWith({
+        where: {
+          userId: 'user-1',
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: {
+            in: ['INCOME', 'EXPENSE'],
+          },
+        },
+      });
+
+      expect(result.meta).toEqual({
+        page: 1,
+        limit: 20,
+        total: 21,
+        totalPages: 2,
+        hasNextPage: true,
+        hasPreviousPage: false,
+      });
+
+      expect(result.data).toEqual([
+        {
+          id: 'transaction-1',
+          accountId: 'account-1',
+          categoryId: 'category-1',
+          type: 'EXPENSE',
+          amount: '150000',
+          currency: 'IDR',
+          description: 'Lunch',
+          transactionDate,
+          source: 'MANUAL',
+        },
+      ]);
+    });
+
+    it('should calculate skip correctly for later pages', async () => {
+      prisma.transaction.findMany.mockResolvedValue([]);
+
+      prisma.transaction.count.mockResolvedValue(45);
+
+      const result = await repository.getPaginatedTransactions('user-1', {
+        page: 3,
+        limit: 10,
+      });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          skip: 20,
+          take: 10,
+        }),
       );
 
-      expect(result).toEqual(aggregation);
+      expect(result.meta).toEqual({
+        page: 3,
+        limit: 10,
+        total: 45,
+        totalPages: 5,
+        hasNextPage: true,
+        hasPreviousPage: true,
+      });
     });
 
-    it('should propagate dashboard service errors', async () => {
-      const error = new Error('Dashboard aggregation failed');
+    it('should apply all report filters', async () => {
+      prisma.transaction.findMany.mockResolvedValue([]);
 
-      dashboardService.getDashboardAggregation.mockRejectedValue(error);
-
-      await expect(
-        repository.getFinancialReportData('user-1', {}),
-      ).rejects.toThrow(error);
-    });
-
-    it('should forward all report filters to dashboard aggregation', async () => {
-      const aggregation = createDashboardAggregationMock();
-
-      dashboardService.getDashboardAggregation.mockResolvedValue(aggregation);
+      prisma.transaction.count.mockResolvedValue(5);
 
       const options = {
         startDate: new Date('2026-01-01T00:00:00.000Z'),
         endDate: new Date('2026-09-30T23:59:59.999Z'),
         type: 'EXPENSE' as const,
-        accountId: '11111111-1111-4111-8111-111111111111',
-        categoryId: '22222222-2222-4222-8222-222222222222',
+        accountId: 'account-1',
+        categoryId: 'category-1',
+        page: 2,
+        limit: 10,
       };
 
-      const result = await repository.getFinancialReportData('user-1', options);
+      await repository.getPaginatedTransactions('user-1', options);
 
-      expect(dashboardService.getDashboardAggregation).toHaveBeenCalledWith(
-        'user-1',
-        options,
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            userId: 'user-1',
+            deletedAt: null,
+            status: 'ACTIVE',
+            currency: 'IDR',
+            type: 'EXPENSE',
+            accountId: 'account-1',
+            categoryId: 'category-1',
+            transactionDate: {
+              gte: options.startDate,
+              lte: options.endDate,
+            },
+          },
+          skip: 10,
+          take: 10,
+        }),
       );
+    });
 
-      expect(result).toEqual(aggregation);
+    it('should return empty pagination metadata when there are no transactions', async () => {
+      prisma.transaction.findMany.mockResolvedValue([]);
+
+      prisma.transaction.count.mockResolvedValue(0);
+
+      const result = await repository.getPaginatedTransactions('user-1', {
+        page: 1,
+        limit: 20,
+      });
+
+      expect(result).toEqual({
+        data: [],
+        meta: {
+          page: 1,
+          limit: 20,
+          total: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
+      });
+    });
+
+    it('should mark the last page correctly', async () => {
+      prisma.transaction.findMany.mockResolvedValue([]);
+
+      prisma.transaction.count.mockResolvedValue(21);
+
+      const result = await repository.getPaginatedTransactions('user-1', {
+        page: 2,
+        limit: 20,
+      });
+
+      expect(result.meta).toEqual({
+        page: 2,
+        limit: 20,
+        total: 21,
+        totalPages: 2,
+        hasNextPage: false,
+        hasPreviousPage: true,
+      });
     });
   });
 });

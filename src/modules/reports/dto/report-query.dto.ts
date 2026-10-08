@@ -1,6 +1,22 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
-import { IsDateString, IsIn, IsOptional, IsUUID } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsUUID,
+  Max,
+  Min,
+} from 'class-validator';
+
+import { Type } from 'class-transformer';
+
+import {
+  REPORT_DEFAULT_LIMIT,
+  REPORT_DEFAULT_PAGE,
+  REPORT_MAX_LIMIT,
+} from '../report.constants';
 
 export class ReportQueryDto {
   @ApiPropertyOptional({
@@ -21,7 +37,7 @@ export class ReportQueryDto {
 
   @ApiPropertyOptional({
     description:
-      'Filter transactions by transaction type. TRANSFER is not supported for financial income/expense reporting.',
+      'Filter transactions by transaction type. TRANSFER is not supported for financial reporting.',
     example: 'EXPENSE',
     enum: ['INCOME', 'EXPENSE'],
   })
@@ -44,4 +60,28 @@ export class ReportQueryDto {
   @IsOptional()
   @IsUUID()
   categoryId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Page number.',
+    example: REPORT_DEFAULT_PAGE,
+    default: REPORT_DEFAULT_PAGE,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = REPORT_DEFAULT_PAGE;
+
+  @ApiPropertyOptional({
+    description: 'Number of transactions per page.',
+    example: REPORT_DEFAULT_LIMIT,
+    default: REPORT_DEFAULT_LIMIT,
+    maximum: REPORT_MAX_LIMIT,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(REPORT_MAX_LIMIT)
+  limit?: number = REPORT_DEFAULT_LIMIT;
 }

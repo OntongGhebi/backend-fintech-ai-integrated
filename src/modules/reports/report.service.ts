@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 
 import {
   REPORT_DEFAULT_CURRENCY,
+  REPORT_DEFAULT_LIMIT,
+  REPORT_DEFAULT_PAGE,
   REPORT_DEFAULT_TYPE,
 } from './report.constants';
 
@@ -18,10 +20,10 @@ export class ReportService {
     userId: string,
     options: ReportQueryOptions = {},
   ): Promise<FinancialReport> {
-    const reportData = await this.reportRepository.getFinancialReportData(
-      userId,
-      options,
-    );
+    const [reportData, transactions] = await Promise.all([
+      this.reportRepository.getFinancialReportData(userId, options),
+      this.reportRepository.getPaginatedTransactions(userId, options),
+    ]);
 
     return {
       reportType: REPORT_DEFAULT_TYPE,
@@ -39,6 +41,7 @@ export class ReportService {
       recurringPerformance: reportData.recurringPerformance,
       monthlyFinancialSummary: reportData.monthlyFinancialSummary,
       cashFlow: reportData.cashFlow,
+      transactions,
     };
   }
 
@@ -58,6 +61,8 @@ export class ReportService {
       type: query.type,
       accountId: query.accountId,
       categoryId: query.categoryId,
+      page: query.page ?? REPORT_DEFAULT_PAGE,
+      limit: query.limit ?? REPORT_DEFAULT_LIMIT,
     };
   }
 }

@@ -83,6 +83,12 @@ export class FinancialReportDto {
   })
   cashFlow!: FinancialReport['cashFlow'];
 
+  @ApiProperty({
+    type: Object,
+    description: 'Paginated transaction details.',
+  })
+  transactions!: FinancialReport['transactions'];
+
   constructor(report: FinancialReport) {
     this.reportType = report.reportType;
     this.currency = report.currency;
@@ -99,5 +105,6 @@ export class FinancialReportDto {
     this.recurringPerformance = report.recurringPerformance;
     this.monthlyFinancialSummary = report.monthlyFinancialSummary;
     this.cashFlow = report.cashFlow;
+    this.transactions = report.transactions;
   }
 }

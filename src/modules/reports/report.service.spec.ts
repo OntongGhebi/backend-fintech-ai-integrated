@@ -94,11 +94,13 @@ describe('ReportService', () => {
 
   let reportRepository: {
     getFinancialReportData: jest.Mock;
+    getPaginatedTransactions: jest.Mock;
   };
 
   beforeEach(() => {
     reportRepository = {
       getFinancialReportData: jest.fn(),
+      getPaginatedTransactions: jest.fn(),
     };
 
     service = new ReportService(
@@ -117,9 +119,29 @@ describe('ReportService', () => {
         endDate: new Date('2026-09-30T23:59:59.999Z'),
       });
 
+      reportRepository.getPaginatedTransactions.mockResolvedValue({
+        data: [],
+        meta: {
+          page: 1,
+          limit: 20,
+          total: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
+      });
+
       expect(reportRepository.getFinancialReportData).toHaveBeenCalledTimes(1);
 
       expect(reportRepository.getFinancialReportData).toHaveBeenCalledWith(
+        'user-1',
+        {
+          startDate: new Date('2026-01-01T00:00:00.000Z'),
+          endDate: new Date('2026-09-30T23:59:59.999Z'),
+        },
+      );
+
+      expect(reportRepository.getPaginatedTransactions).toHaveBeenCalledWith(
         'user-1',
         {
           startDate: new Date('2026-01-01T00:00:00.000Z'),
@@ -246,6 +268,30 @@ describe('ReportService', () => {
 
       expect(result).toBeInstanceOf(FinancialReportDto);
     });
+
+    it('should include paginated transactions in FinancialReportDto', async () => {
+      const reportData = createDashboardAggregationMock();
+
+      const transactions = {
+        data: [],
+        meta: {
+          page: 1,
+          limit: 20,
+          total: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPreviousPage: false,
+        },
+      };
+
+      reportRepository.getFinancialReportData.mockResolvedValue(reportData);
+
+      reportRepository.getPaginatedTransactions.mockResolvedValue(transactions);
+
+      const result = await service.getFinancialReportDto('user-1');
+
+      expect(result.transactions).toEqual(transactions);
+    });
   });
 
   describe('buildQueryOptions', () => {
@@ -266,6 +312,8 @@ describe('ReportService', () => {
         type: 'EXPENSE',
         accountId: '11111111-1111-4111-8111-111111111111',
         categoryId: '22222222-2222-4222-8222-222222222222',
+        page: 1,
+        limit: 20,
       });
     });
 
@@ -276,7 +324,50 @@ describe('ReportService', () => {
         type: undefined,
         accountId: undefined,
         categoryId: undefined,
+        page: 1,
+        limit: 20,
       });
+    });
+  });
+
+  describe('pagination', () => {
+    it('should include paginated transactions in the financial report', async () => {
+      const reportData = createDashboardAggregationMock();
+
+      const transactions = {
+        data: [
+          {
+            id: 'transaction-1',
+            accountId: 'account-1',
+            categoryId: 'category-1',
+            type: 'EXPENSE' as const,
+            amount: '150000',
+            currency: 'IDR',
+            description: 'Lunch',
+            transactionDate: new Date('2026-09-30T10:00:00.000Z'),
+            source: 'MANUAL',
+          },
+        ],
+        meta: {
+          page: 2,
+          limit: 10,
+          total: 21,
+          totalPages: 3,
+          hasNextPage: true,
+          hasPreviousPage: true,
+        },
+      };
+
+      reportRepository.getFinancialReportData.mockResolvedValue(reportData);
+
+      reportRepository.getPaginatedTransactions.mockResolvedValue(transactions);
+
+      const result = await service.getFinancialReport('user-1', {
+        page: 2,
+        limit: 10,
+      });
+
+      expect(result.transactions).toEqual(transactions);
     });
   });
 });
