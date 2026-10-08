@@ -1,6 +1,7 @@
 import { ReportService } from './report.service';
 import { ReportRepository } from './repositories/report.repository';
 import type { DashboardAggregation } from '../dashboard/types/dashboard.types';
+import { FinancialReportDto } from './dto/financial-report.dto';
 
 const createDashboardAggregationMock = (): DashboardAggregation => ({
   currency: 'IDR',
@@ -181,6 +182,68 @@ describe('ReportService', () => {
       reportRepository.getFinancialReportData.mockRejectedValue(error);
 
       await expect(service.getFinancialReport('user-1')).rejects.toThrow(error);
+    });
+  });
+
+  describe('getFinancialReportDto', () => {
+    it('should return a FinancialReportDto', async () => {
+      const reportData = createDashboardAggregationMock();
+
+      reportRepository.getFinancialReportData.mockResolvedValue(reportData);
+
+      const result = await service.getFinancialReportDto('user-1', {
+        startDate: new Date('2026-01-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+      });
+
+      expect(result).toBeInstanceOf(FinancialReportDto);
+
+      expect(result.reportType).toBe('FINANCIAL');
+
+      expect(result.currency).toBe('IDR');
+
+      expect(result.startDate).toBe('2026-01-01T00:00:00.000Z');
+
+      expect(result.endDate).toBe('2026-09-30T23:59:59.999Z');
+
+      expect(result.generatedAt).toBeInstanceOf(Date);
+
+      expect(result.summary).toEqual(reportData.summary);
+
+      expect(result.income).toEqual(reportData.income);
+
+      expect(result.expense).toEqual(reportData.expense);
+
+      expect(result.categoryAnalytics).toEqual(reportData.categoryAnalytics);
+
+      expect(result.accountAnalytics).toEqual(reportData.accountAnalytics);
+
+      expect(result.budgetPerformance).toEqual(reportData.budgetPerformance);
+
+      expect(result.recurringPerformance).toEqual(
+        reportData.recurringPerformance,
+      );
+
+      expect(result.monthlyFinancialSummary).toEqual(
+        reportData.monthlyFinancialSummary,
+      );
+
+      expect(result.cashFlow).toEqual(reportData.cashFlow);
+    });
+
+    it('should forward empty options when creating a DTO', async () => {
+      const reportData = createDashboardAggregationMock();
+
+      reportRepository.getFinancialReportData.mockResolvedValue(reportData);
+
+      const result = await service.getFinancialReportDto('user-1');
+
+      expect(reportRepository.getFinancialReportData).toHaveBeenCalledWith(
+        'user-1',
+        {},
+      );
+
+      expect(result).toBeInstanceOf(FinancialReportDto);
     });
   });
 });

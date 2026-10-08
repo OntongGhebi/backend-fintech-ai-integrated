@@ -5,6 +5,7 @@ import {
   REPORT_DEFAULT_TYPE,
 } from './report.constants';
 import { FinancialReport, ReportQueryOptions } from './types/report.types';
+import { FinancialReportDto } from './dto/financial-report.dto';
 
 @Injectable()
 export class ReportService {
@@ -35,5 +36,14 @@ export class ReportService {
       monthlyFinancialSummary: reportData.monthlyFinancialSummary,
       cashFlow: reportData.cashFlow,
     };
+  }
+
+  async getFinancialReportDto(
+    userId: string,
+    options: ReportQueryOptions = {},
+  ): Promise<FinancialReportDto> {
+    const report = await this.getFinancialReport(userId, options);
+
+    return new FinancialReportDto(report);
   }
 }
