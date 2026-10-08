@@ -11,6 +11,7 @@ import { FinancialReportDto } from './dto/financial-report.dto';
 import { ReportQueryDto } from './dto/report-query.dto';
 import { ReportRepository } from './repositories/report.repository';
 import type { FinancialReport, ReportQueryOptions } from './types/report.types';
+import { buildFinancialReportCsv } from './report.export';
 
 @Injectable()
 export class ReportService {
@@ -52,6 +53,18 @@ export class ReportService {
     const report = await this.getFinancialReport(userId, options);
 
     return new FinancialReportDto(report);
+  }
+
+  async exportFinancialReportCsv(
+    userId: string,
+    options: ReportQueryOptions = {},
+  ): Promise<string> {
+    const transactions = await this.reportRepository.getExportTransactions(
+      userId,
+      options,
+    );
+
+    return buildFinancialReportCsv(transactions);
   }
 
   buildQueryOptions(query: ReportQueryDto): ReportQueryOptions {

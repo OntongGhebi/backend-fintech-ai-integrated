@@ -262,4 +262,110 @@ describe('ReportRepository', () => {
       });
     });
   });
+
+  describe('getExportTransactions', () => {
+    it('should retrieve all filtered transactions without pagination', async () => {
+      const transactionDate = new Date('2026-09-30T10:00:00.000Z');
+
+      prisma.transaction.findMany.mockResolvedValue([
+        {
+          id: 'transaction-1',
+          accountId: 'account-1',
+          categoryId: 'category-1',
+          type: 'EXPENSE',
+          amount: '150000',
+          currency: 'IDR',
+          description: 'Lunch',
+          transactionDate,
+          source: 'MANUAL',
+        },
+        {
+          id: 'transaction-2',
+          accountId: 'account-1',
+          categoryId: 'category-2',
+          type: 'INCOME',
+          amount: '5000000',
+          currency: 'IDR',
+          description: 'Salary',
+          transactionDate,
+          source: 'MANUAL',
+        },
+      ]);
+
+      const result = await repository.getExportTransactions('user-1', {
+        startDate: new Date('2026-01-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T23:59:59.999Z'),
+        accountId: 'account-1',
+      });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'user-1',
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: {
+            in: ['INCOME', 'EXPENSE'],
+          },
+          accountId: 'account-1',
+          transactionDate: {
+            gte: new Date('2026-01-01T00:00:00.000Z'),
+            lte: new Date('2026-09-30T23:59:59.999Z'),
+          },
+        },
+        orderBy: [
+          {
+            transactionDate: 'desc',
+          },
+          {
+            createdAt: 'desc',
+          },
+          {
+            id: 'desc',
+          },
+        ],
+        select: {
+          id: true,
+          accountId: true,
+          categoryId: true,
+          type: true,
+          amount: true,
+          currency: true,
+          description: true,
+          transactionDate: true,
+          source: true,
+        },
+      });
+
+      expect(result).toHaveLength(2);
+
+      expect(result[0]).toEqual({
+        id: 'transaction-1',
+        accountId: 'account-1',
+        categoryId: 'category-1',
+        type: 'EXPENSE',
+        amount: '150000',
+        currency: 'IDR',
+        description: 'Lunch',
+        transactionDate,
+        source: 'MANUAL',
+      });
+    });
+
+    it('should ignore pagination options during export', async () => {
+      prisma.transaction.findMany.mockResolvedValue([]);
+
+      await repository.getExportTransactions('user-1', {
+        page: 99,
+        limit: 1,
+      });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          skip: expect.anything(),
+          take: expect.anything(),
+        }),
+      );
+    });
+  });
 });

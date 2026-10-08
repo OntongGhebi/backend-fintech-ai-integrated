@@ -95,12 +95,14 @@ describe('ReportService', () => {
   let reportRepository: {
     getFinancialReportData: jest.Mock;
     getPaginatedTransactions: jest.Mock;
+    getExportTransactions: jest.Mock;
   };
 
   beforeEach(() => {
     reportRepository = {
       getFinancialReportData: jest.fn(),
       getPaginatedTransactions: jest.fn(),
+      getExportTransactions: jest.fn(),
     };
 
     service = new ReportService(
@@ -368,6 +370,43 @@ describe('ReportService', () => {
       });
 
       expect(result.transactions).toEqual(transactions);
+    });
+  });
+
+  describe('exportFinancialReportCsv', () => {
+    it('should export all matching transactions as CSV', async () => {
+      const options = {
+        page: 3,
+        limit: 10,
+        type: 'EXPENSE' as const,
+      };
+
+      reportRepository.getExportTransactions.mockResolvedValue([
+        {
+          id: 'transaction-1',
+          accountId: 'account-1',
+          categoryId: 'category-1',
+          type: 'EXPENSE',
+          amount: '150000',
+          currency: 'IDR',
+          description: 'Lunch',
+          transactionDate: new Date('2026-10-08T10:00:00.000Z'),
+          source: 'MANUAL',
+        },
+      ]);
+
+      const result = await service.exportFinancialReportCsv('user-1', options);
+
+      expect(reportRepository.getExportTransactions).toHaveBeenCalledWith(
+        'user-1',
+        options,
+      );
+
+      expect(result).toContain('Transaction ID,Transaction Date,Type');
+
+      expect(result).toContain(
+        'transaction-1,2026-10-08T10:00:00.000Z,EXPENSE',
+      );
     });
   });
 });
