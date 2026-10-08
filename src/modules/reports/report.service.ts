@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DashboardService } from '../dashboard/dashboard.service';
+import { ReportRepository } from './repositories/report.repository';
 import {
   REPORT_DEFAULT_CURRENCY,
   REPORT_DEFAULT_TYPE,
@@ -8,13 +8,13 @@ import { FinancialReport, ReportQueryOptions } from './types/report.types';
 
 @Injectable()
 export class ReportService {
-  constructor(private readonly dashboardService: DashboardService) {}
+  constructor(private readonly reportRepository: ReportRepository) {}
 
   async getFinancialReport(
     userId: string,
     options: ReportQueryOptions = {},
   ): Promise<FinancialReport> {
-    const dashboard = await this.dashboardService.getDashboardAggregation(
+    const reportData = await this.reportRepository.getFinancialReportData(
       userId,
       options,
     );
@@ -22,18 +22,18 @@ export class ReportService {
     return {
       reportType: REPORT_DEFAULT_TYPE,
       currency: REPORT_DEFAULT_CURRENCY,
-      startDate: dashboard.monthlyFinancialSummary.startDate,
-      endDate: dashboard.monthlyFinancialSummary.endDate,
+      startDate: reportData.monthlyFinancialSummary.startDate,
+      endDate: reportData.monthlyFinancialSummary.endDate,
       generatedAt: new Date(),
-      summary: dashboard.summary,
-      income: dashboard.income,
-      expense: dashboard.expense,
-      categoryAnalytics: dashboard.categoryAnalytics,
-      accountAnalytics: dashboard.accountAnalytics,
-      budgetPerformance: dashboard.budgetPerformance,
-      recurringPerformance: dashboard.recurringPerformance,
-      monthlyFinancialSummary: dashboard.monthlyFinancialSummary,
-      cashFlow: dashboard.cashFlow,
+      summary: reportData.summary,
+      income: reportData.income,
+      expense: reportData.expense,
+      categoryAnalytics: reportData.categoryAnalytics,
+      accountAnalytics: reportData.accountAnalytics,
+      budgetPerformance: reportData.budgetPerformance,
+      recurringPerformance: reportData.recurringPerformance,
+      monthlyFinancialSummary: reportData.monthlyFinancialSummary,
+      cashFlow: reportData.cashFlow,
     };
   }
 }
