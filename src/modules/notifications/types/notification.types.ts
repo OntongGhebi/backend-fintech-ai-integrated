@@ -1,7 +1,7 @@
 import { NotificationChannel } from 'src/database/enums/notification-channel.enum';
 import { NotificationStatus } from 'src/database/enums/notification-status.enum';
 
-export interface GetNotificationOptions {
+export interface GetNotificationsOptions {
   status?: NotificationStatus;
   channel?: NotificationChannel;
   page: number;
