@@ -55,7 +55,7 @@ export class NotificationsService {
     };
   }
 
-  async findOneByuserId(
+  async findOneByUserId(
     notificationId: string,
     userId: string,
   ): Promise<Notification> {
