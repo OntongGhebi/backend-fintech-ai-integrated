@@ -1,4 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsDateString,
   IsNumber,
@@ -38,6 +39,7 @@ export class UpdateTransactionDto {
     minimum: 0.0001,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber(
     {
       maxDecimalPlaces: 4,

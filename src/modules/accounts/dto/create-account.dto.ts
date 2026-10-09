@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsEnum,
   IsNotEmpty,
@@ -40,6 +41,7 @@ export class CreateAccountDto {
     default: 0,
   })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber(
     {
       maxDecimalPlaces: 4,

@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform, Type } from 'class-transformer';
 import {
   IsDateString,
   IsEnum,
@@ -33,6 +34,7 @@ export class CreateTransactionDto {
       'ID of the category associated with the transaction. Optional for transfers.',
   })
   @IsOptional()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   @IsUUID()
   categoryId?: string;
 
@@ -50,6 +52,7 @@ export class CreateTransactionDto {
       'Transaction amount. Must be greater than 0 and contain at most 4 decimal places.',
     minimum: 0.0001,
   })
+  @Type(() => Number)
   @IsNumber(
     {
       maxDecimalPlaces: 4,

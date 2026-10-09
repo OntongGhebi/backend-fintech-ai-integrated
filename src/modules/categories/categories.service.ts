@@ -23,12 +23,21 @@ export class CategoriesService {
       throw new ConflictException('A category with this name already exists');
     }
 
+    const safeDto = {
+      ...dto,
+      name,
+      icon: dto.icon?.trim() || null,
+      color: dto.color?.trim() || null,
+      isSystem: false,
+      isActive: true,
+    };
+
     return this.categoriesRepository.create({
       userId,
       name,
       type: dto.type,
-      icon: dto.icon?.trim() || null,
-      color: dto.color?.trim() || null,
+      icon: safeDto.icon,
+      color: safeDto.color,
       isSystem: false,
       isActive: true,
     });

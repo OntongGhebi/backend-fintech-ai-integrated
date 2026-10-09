@@ -38,11 +38,7 @@ export class CategoriesController {
     @CurrentUser('id') userId: string,
     @Body() dto: CreateCategoryDto,
   ) {
-    const category = await this.categoriesService.create(userId, dto);
-
-    return {
-      data: category,
-    };
+    return { data: await this.categoriesService.create(userId, dto) };
   }
 
   @Get()
@@ -72,11 +68,7 @@ export class CategoriesController {
     @CurrentUser('id') userId: string,
     @Query() query: GetCategoriesQueryDto,
   ) {
-    const categories = await this.categoriesService.findAll(userId, query);
-
-    return {
-      data: categories,
-    };
+    return { data: await this.categoriesService.findAll(userId, query) };
   }
 
   @Get(':id')
@@ -104,11 +96,7 @@ export class CategoriesController {
     @Param('id') categoryId: string,
     @CurrentUser('id') userId: string,
   ) {
-    const category = await this.categoriesService.findById(categoryId, userId);
-
-    return {
-      data: category,
-    };
+    return { data: await this.categoriesService.findById(categoryId, userId) };
   }
 
   @Patch(':id')
@@ -137,15 +125,7 @@ export class CategoriesController {
     @CurrentUser('id') userId: string,
     @Body() dto: UpdateCategoryDto,
   ) {
-    const category = await this.categoriesService.update(
-      categoryId,
-      userId,
-      dto,
-    );
-
-    return {
-      data: category,
-    };
+    return { data: await this.categoriesService.update(categoryId, userId, dto) };
   }
 
   @Delete(':id')
@@ -164,10 +144,8 @@ export class CategoriesController {
     @Param('id') categoryId: string,
     @CurrentUser('id') userId: string,
   ) {
-    const result = await this.categoriesService.archive(categoryId, userId);
-
     return {
-      data: result,
+      data: await this.categoriesService.archive(categoryId, userId),
     };
   }
 }

@@ -31,6 +31,8 @@ export class TransactionsService {
     dto: CreateTransactionDto,
     source: TransactionSource = TransactionSource.MANUAL,
   ) {
+    const categoryId = dto.categoryId?.trim() || undefined;
+
     const account = await this.accountsRepository.findByIdAndUserId(
       dto.accountId,
       userId,
@@ -48,16 +50,16 @@ export class TransactionsService {
       throw new BadRequestException('Account currency must be IDR');
     }
 
-    if (dto.type === TransactionType.TRANSFER && dto.categoryId) {
+    if (dto.type === TransactionType.TRANSFER && categoryId) {
       throw new BadRequestException(
         'Transfer transaction cannot have a category',
       );
     }
 
-    if (dto.categoryId) {
+    if (categoryId) {
       const category =
         await this.transactionsRepository.findCategoryByIdAndUserId(
-          dto.categoryId,
+          categoryId,
           userId,
         );
 
@@ -85,7 +87,7 @@ export class TransactionsService {
     return this.transactionsRepository.create({
       userId,
       accountId: dto.accountId,
-      categoryId: dto.categoryId ?? null,
+      categoryId: categoryId ?? null,
       type: dto.type,
       amount: dto.amount,
       currency: 'IDR',
@@ -119,6 +121,8 @@ export class TransactionsService {
     description?: string | null;
     metadata?: Prisma.InputJsonValue | typeof Prisma.DbNull;
   }) {
+    const categoryId = params.categoryId?.trim() || undefined;
+
     const account = await this.accountsRepository.findByIdAndUserId(
       params.accountId,
       params.userId,
@@ -136,24 +140,20 @@ export class TransactionsService {
       throw new BadRequestException('Account currency must be IDR');
     }
 
-    if (params.type === TransactionType.TRANSFER && params.categoryId) {
+    if (params.type === TransactionType.TRANSFER && categoryId) {
       throw new BadRequestException(
         'Transfer transaction cannot have a category',
       );
     }
 
-    if (params.categoryId) {
-      await this.validateCategory(
-        params.categoryId,
-        params.userId,
-        params.type,
-      );
+    if (categoryId) {
+      await this.validateCategory(categoryId, params.userId, params.type);
     }
 
     return this.transactionsRepository.create({
       userId: params.userId,
       accountId: params.accountId,
-      categoryId: params.categoryId ?? null,
+      categoryId: categoryId ?? null,
       type: params.type,
       amount: params.amount,
       currency: 'IDR',

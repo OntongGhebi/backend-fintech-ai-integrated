@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsDateString,
   IsNumber,
@@ -35,6 +36,7 @@ export class CreateTransferDto {
       'Transfer amount. Must be greater than 0 and contain at most 4 decimal places.',
     minimum: 0.0001,
   })
+  @Type(() => Number)
   @IsNumber(
     {
       maxDecimalPlaces: 4,
