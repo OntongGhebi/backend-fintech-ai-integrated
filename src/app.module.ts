@@ -34,6 +34,7 @@ import { telegramModule } from './modules/telegram/telegram.module';
 import { AIModule } from './modules/ai/ai.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     AIModule,
     DashboardModule,
     ReportsModule,
+    NotificationsModule,
   ],
   providers: [
     {
