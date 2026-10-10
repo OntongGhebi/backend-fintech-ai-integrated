@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
@@ -11,30 +12,64 @@ import {
   ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
-  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 
 import { AccessTokenGuard } from '../auth/guards/access-token.guard';
 import { CurrentUser } from '../auth/decorators/current-user-decorator';
 
-import { GetNotificationsQueryDto } from './dto/get-notification-query.dto';
-import { NotificationListResponseDto } from './dto/notification-list-response.dto';
-import { NotificationResponseDto } from './dto/notification-response.dto';
 import { NotificationsService } from './notifications.service';
+import { GetNotificationsQueryDto } from './dto/get-notification-query.dto';
+import { NotificationResponseDto } from './dto/notification-response.dto';
+import { NotificationListResponseDto } from './dto/notification-list-response.dto';
+import { NotificationPreferencesResponseDto } from './dto/notification-preferences-response.dto';
+import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
 
-@Controller('notifications')
 @ApiTags('Notifications')
-@UseGuards(AccessTokenGuard)
 @ApiBearerAuth()
+@UseGuards(AccessTokenGuard)
+@Controller('notifications')
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
+  @Get('preferences')
+  @ApiOperation({
+    summary: 'Get current user notification preferences',
+  })
+  @ApiOkResponse({
+    type: NotificationPreferencesResponseDto,
+  })
+  async getMyPreferences(
+    @CurrentUser('id') userId: string,
+  ): Promise<NotificationPreferencesResponseDto> {
+    const preferences =
+      await this.notificationsService.getMyPreferences(userId);
+
+    return Object.assign(new NotificationPreferencesResponseDto(), preferences);
+  }
+
+  @Patch('preferences')
+  @ApiOperation({
+    summary: 'Update current user notification preferences',
+  })
+  @ApiOkResponse({
+    type: NotificationPreferencesResponseDto,
+  })
+  async updateMyPreferences(
+    @CurrentUser('id') userId: string,
+    @Body() dto: UpdateNotificationPreferencesDto,
+  ): Promise<NotificationPreferencesResponseDto> {
+    const preferences = await this.notificationsService.updateMyPreferences(
+      userId,
+      dto,
+    );
+
+    return Object.assign(new NotificationPreferencesResponseDto(), preferences);
+  }
+
   @Get('unread-count')
   @ApiOperation({
-    summary: 'Get unread in-app notification count',
-    description:
-      'Returns the number of unread in-app notifications belonging to the authenticated user.',
+    summary: 'Get current user unread notification count',
   })
   @ApiOkResponse({
     schema: {
@@ -51,9 +86,7 @@ export class NotificationsController {
 
   @Get()
   @ApiOperation({
-    summary: 'List notifications',
-    description:
-      'Returns paginated notifications belonging to the authenticated user. Supports filtering by status and channel.',
+    summary: 'Get current user notifications',
   })
   @ApiOkResponse({
     type: NotificationListResponseDto,
@@ -62,34 +95,22 @@ export class NotificationsController {
     @CurrentUser('id') userId: string,
     @Query() query: GetNotificationsQueryDto,
   ): Promise<NotificationListResponseDto> {
-    const result = await this.notificationsService.findAllByUserId(userId, {
-      status: query.status,
-      channel: query.channel,
-      page: query.page,
-      limit: query.limit,
-    });
+    const result = await this.notificationsService.findAllByUserId(
+      userId,
+      query,
+    );
 
-    return {
-      data: result.data.map((notification) => ({
-        id: notification.id,
-        userId: notification.userId,
-        type: notification.type,
-        title: notification.title,
-        message: notification.message,
-        channel: notification.channel as NotificationResponseDto['channel'],
-        status: notification.status as NotificationResponseDto['status'],
-        readAt: notification.readAt,
-        createdAt: notification.createdAt,
-      })),
-      meta: result.meta,
-    };
+    return Object.assign(new NotificationListResponseDto(), {
+      ...result,
+      data: result.data.map((notification) =>
+        Object.assign(new NotificationResponseDto(), notification),
+      ),
+    });
   }
 
   @Patch('read-all')
   @ApiOperation({
-    summary: 'Mark all in-app notifications as read',
-    description:
-      'Marks all unread in-app notifications owned by the authenticated user as read.',
+    summary: 'Mark all current user in-app notifications as read',
   })
   @ApiOkResponse({
     schema: {
@@ -105,17 +126,9 @@ export class NotificationsController {
   @Patch(':notificationId/read')
   @ApiOperation({
     summary: 'Mark a notification as read',
-    description:
-      'Marks one unread in-app notification as read if it belongs to the authenticated user.',
-  })
-  @ApiParam({
-    name: 'notificationId',
-    description: 'Notification UUID.',
-    example: '9c7d6e5f-4a3b-2c1d-0e9f-8a7b6c5d4e3f',
   })
   @ApiOkResponse({
     type: NotificationResponseDto,
-    description: 'Notification marked as read.',
   })
   async markAsRead(
     @CurrentUser('id') userId: string,
@@ -127,29 +140,12 @@ export class NotificationsController {
       userId,
     );
 
-    return {
-      id: notification.id,
-      userId: notification.userId,
-      type: notification.type,
-      title: notification.title,
-      message: notification.message,
-      channel: notification.channel as NotificationResponseDto['channel'],
-      status: notification.status as NotificationResponseDto['status'],
-      readAt: notification.readAt,
-      createdAt: notification.createdAt,
-    };
+    return Object.assign(new NotificationResponseDto(), notification);
   }
 
   @Get(':notificationId')
   @ApiOperation({
-    summary: 'Get notification details',
-    description:
-      'Returns a notification only if it belongs to the authenticated user.',
-  })
-  @ApiParam({
-    name: 'notificationId',
-    description: 'Notification UUID.',
-    example: '9c7d6e5f-4a3b-2c1d-0e9f-8a7b6c5d4e3f',
+    summary: 'Get a notification by ID',
   })
   @ApiOkResponse({
     type: NotificationResponseDto,
@@ -164,16 +160,6 @@ export class NotificationsController {
       userId,
     );
 
-    return {
-      id: notification.id,
-      userId: notification.userId,
-      type: notification.type,
-      title: notification.title,
-      message: notification.message,
-      channel: notification.channel as NotificationResponseDto['channel'],
-      status: notification.status as NotificationResponseDto['status'],
-      readAt: notification.readAt,
-      createdAt: notification.createdAt,
-    };
+    return Object.assign(new NotificationResponseDto(), notification);
   }
 }

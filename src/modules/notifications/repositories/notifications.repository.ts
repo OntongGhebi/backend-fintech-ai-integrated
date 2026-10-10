@@ -6,6 +6,15 @@ import { NotificationStatus } from 'src/database/enums/notification-status.enum'
 
 import { GetNotificationsOptions } from '../types/notification.types';
 
+export interface UpdateNotificationPreferencesInput {
+  telegramEnabled?: boolean;
+  emailEnabled?: boolean;
+  budgetAlertEnabled?: boolean;
+  dailySummaryEnabled?: boolean;
+  weeklySummaryEnabled?: boolean;
+  monthlySummaryEnabled?: boolean;
+}
+
 @Injectable()
 export class NotificationsRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -102,5 +111,27 @@ export class NotificationsRepository {
     });
 
     return result.count;
+  }
+
+  async getOrCreatePreferences(userId: string) {
+    return this.prisma.notificationPreference.upsert({
+      where: { userId },
+      create: { userId },
+      update: {},
+    });
+  }
+
+  async updatePreferences(
+    userId: string,
+    data: UpdateNotificationPreferencesInput,
+  ) {
+    return this.prisma.notificationPreference.upsert({
+      where: { userId },
+      create: {
+        userId,
+        ...data,
+      },
+      update: data,
+    });
   }
 }

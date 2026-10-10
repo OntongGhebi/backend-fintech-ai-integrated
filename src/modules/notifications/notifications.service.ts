@@ -3,7 +3,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { NotificationsRepository } from './repositories/notifications.repository';
+import {
+  NotificationsRepository,
+  UpdateNotificationPreferencesInput,
+} from './repositories/notifications.repository';
 import { CreateNotificationInput } from './types/create-notification-input.type';
 import { Notification } from '../../../generated/prisma/client';
 import { NotificationChannel } from 'src/database/enums/notification-channel.enum';
@@ -106,5 +109,26 @@ export class NotificationsService {
     );
 
     return { updatedCount };
+  }
+
+  async getMyPreferences(userId: string) {
+    return this.notificationsRepository.getOrCreatePreferences(userId);
+  }
+
+  async updateMyPreferences(
+    userId: string,
+    input: UpdateNotificationPreferencesInput,
+  ) {
+    const hasUpdates = Object.values(input).some(
+      (value) => value !== undefined,
+    );
+
+    if (!hasUpdates) {
+      throw new BadRequestException(
+        'At least one notification preference must be provided',
+      );
+    }
+
+    return this.notificationsRepository.updatePreferences(userId, input);
   }
 }
