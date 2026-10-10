@@ -27,6 +27,7 @@ export class EmailService {
     this.resend = new Resend(apiKey);
     this.emailFrom = emailFrom;
   }
+
   async sendEmailVerification(
     email: string,
     name: string,
@@ -37,20 +38,12 @@ export class EmailService {
       to: email,
       subject: 'Verify your email address',
       html: `
-        <h2>Hello ${name},</h2>
-
-        <p>
-          Thank you for creating your account.
-        </p>
-
-        <p>
-          Please verify your email address by clicking
-          the button below:
-        </p>
-
+        <h2>Hello ${this.escapeHtml(name)},</h2>
+        <p>Thank you for creating your account.</p>
+        <p>Please verify your email address by clicking the button below:</p>
         <p>
           <a
-            href="${verificationUrl}"
+            href="${this.escapeHtml(verificationUrl)}"
             style="
               display: inline-block;
               padding: 12px 20px;
@@ -63,18 +56,70 @@ export class EmailService {
             Verify Email
           </a>
         </p>
-
-        <p>
-          This verification link will expire soon.
-        </p>
+        <p>This verification link will expire soon.</p>
       `,
     });
 
     if (error) {
       this.logger.error(`Failed to send verification email: ${error.message}`);
+
       throw new InternalServerErrorException(
         'Failed to send verification email',
       );
     }
+  }
+
+  async sendNotificationEmail(
+    email: string,
+    name: string,
+    title: string,
+    message: string,
+  ): Promise<void> {
+    const safeName = this.escapeHtml(name);
+    const safeTitle = this.escapeHtml(title);
+    const safeMessage = this.escapeHtml(message).replace(/\r?\n/g, '<br />');
+
+    const { error } = await this.resend.emails.send({
+      from: this.emailFrom,
+      to: email,
+      subject: title,
+      html: `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+          <h2>${safeTitle}</h2>
+          <p>Halo ${safeName},</p>
+          <p>${safeMessage}</p>
+          <hr />
+          <p style="font-size: 12px; color: #666;">
+            Email notifikasi dari aplikasi Fintech AI.
+          </p>
+        </div>
+      `,
+    });
+
+    if (error) {
+      this.logger.error(
+        `Failed to send notification email to ${email}: ${error.message}`,
+      );
+
+      throw new InternalServerErrorException(
+        'Failed to send notification email',
+      );
+    }
+
+    this.logger.log(`Notification email sent to ${email}`);
+  }
+
+  private escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, (character) => {
+      const entities: Record<string, string> = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      };
+
+      return entities[character] ?? character;
+    });
   }
 }
