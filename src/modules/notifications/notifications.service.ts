@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { NotificationsRepository } from './repositories/notifications.repository';
 import { CreateNotificationInput } from './types/create-notification-input.type';
 import { Notification } from '../../../generated/prisma/client';
@@ -73,5 +77,34 @@ export class NotificationsService {
 
   async getUnreadCount(userId: string): Promise<number> {
     return this.notificationsRepository.countUnreadByUserId(userId);
+  }
+
+  async markAsRead(notificationId: string, userId: string) {
+    const notification = await this.findOneByUserId(notificationId, userId);
+
+    if (String(notification.channel) !== String(NotificationChannel.IN_APP)) {
+      throw new BadRequestException(
+        'Only in-app notifications can be marked as read',
+      );
+    }
+
+    if (String(notification.status) === String(NotificationStatus.UNREAD)) {
+      await this.notificationsRepository.markAsRead(
+        notificationId,
+        userId,
+        new Date(),
+      );
+    }
+
+    return this.findOneByUserId(notificationId, userId);
+  }
+
+  async markAllAsRead(userId: string): Promise<{ updatedCount: number }> {
+    const updatedCount = await this.notificationsRepository.markAllAsRead(
+      userId,
+      new Date(),
+    );
+
+    return { updatedCount };
   }
 }

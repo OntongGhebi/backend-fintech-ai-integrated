@@ -72,4 +72,35 @@ export class NotificationsRepository {
       },
     });
   }
+
+  async markAsRead(notificationId: string, userId: string, readAt: Date) {
+    return this.prisma.notification.updateMany({
+      where: {
+        id: notificationId,
+        userId,
+        channel: NotificationChannel.IN_APP,
+        status: NotificationStatus.UNREAD,
+      },
+      data: {
+        status: NotificationStatus.READ,
+        readAt,
+      },
+    });
+  }
+
+  async markAllAsRead(userId: string, readAt: Date): Promise<number> {
+    const result = await this.prisma.notification.updateMany({
+      where: {
+        userId,
+        channel: NotificationChannel.IN_APP,
+        status: NotificationStatus.UNREAD,
+      },
+      data: {
+        status: NotificationStatus.READ,
+        readAt,
+      },
+    });
+
+    return result.count;
+  }
 }
