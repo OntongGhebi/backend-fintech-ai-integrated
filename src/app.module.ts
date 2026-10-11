@@ -36,6 +36,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PlansModule } from './modules/plans/plans.module';
+import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -79,6 +80,7 @@ import { PlansModule } from './modules/plans/plans.module';
     ReportsModule,
     NotificationsModule,
     PlansModule,
+    SubscriptionsModule,
   ],
   providers: [
     {
