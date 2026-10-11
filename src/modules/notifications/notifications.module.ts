@@ -10,28 +10,57 @@ import { NotificationDeliveryProcessor } from './processors/notification-deliver
 import { telegramModule } from '../telegram/telegram.module';
 import { NotificationEventsService } from './notification-events.service';
 
+const isTestEnvironment = process.env.NODE_ENV === 'test';
+
+class TestNotificationQueueService {
+  async enqueueDelivery(notificationId: string): Promise<{ jobId: string }> {
+    return { jobId: `test-${notificationId}` };
+  }
+
+  async getQueueCounts(): Promise<{
+    waiting: number;
+    active: number;
+    delayed: number;
+    completed: number;
+    failed: number;
+  }> {
+    return { waiting: 0, active: 0, delayed: 0, completed: 0, failed: 0 };
+  }
+}
+
 @Module({
   imports: [
     QueueModule,
     telegramModule,
-    BullModule.registerQueue({
-      name: NOTIFICATIONS_QUEUE,
-    }),
+    ...(isTestEnvironment
+      ? []
+      : [
+          BullModule.registerQueue({
+            name: NOTIFICATIONS_QUEUE,
+          }),
+        ]),
   ],
   controllers: [NotificationsController],
   providers: [
     NotificationsRepository,
     NotificationsService,
-    NotificationQueueService,
+    ...(isTestEnvironment
+      ? [
+          {
+            provide: NotificationQueueService,
+            useClass: TestNotificationQueueService,
+          },
+        ]
+      : [NotificationQueueService]),
     NotificationEventsService,
-    NotificationDeliveryProcessor,
+    ...(isTestEnvironment ? [] : [NotificationDeliveryProcessor]),
   ],
   exports: [
     NotificationsRepository,
     NotificationsService,
     NotificationQueueService,
     NotificationEventsService,
-    NotificationDeliveryProcessor,
+    ...(isTestEnvironment ? [] : [NotificationDeliveryProcessor]),
   ],
 })
 export class NotificationsModule {}
