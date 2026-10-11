@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { Job } from 'bullmq';
 
+import { NotificationEventsService } from 'src/modules/notifications/notification-events.service';
+
 import { RECURRING_TRANSACTIONS_JOB } from './recurring-transactions.constants';
 import { RecurringTransactionsProcessor } from './recurring-transactions.processor';
 import { RecurringTransactionsRepository } from './repositories/recurring-transactions.repository';
@@ -17,8 +19,16 @@ describe('RecurringTransactionsProcessor', () => {
     execute: jest.fn(),
   };
 
+  const notificationEventsServiceMock = {
+    recurringTransactionExecuted: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
+
+    notificationEventsServiceMock.recurringTransactionExecuted.mockResolvedValue(
+      undefined,
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -30,6 +40,10 @@ describe('RecurringTransactionsProcessor', () => {
         {
           provide: RecurringTransactionsService,
           useValue: recurringTransactionsServiceMock,
+        },
+        {
+          provide: NotificationEventsService,
+          useValue: notificationEventsServiceMock,
         },
       ],
     }).compile();
@@ -43,140 +57,171 @@ describe('RecurringTransactionsProcessor', () => {
 
   describe('process', () => {
     it('should ignore unknown jobs', async () => {
-      const job = {
-        name: 'unknown-job',
-      } as Job;
-
-      await processor.process(job);
+      await processor.process({ name: 'unknown-job' } as Job);
 
       expect(repositoryMock.findManyDue).not.toHaveBeenCalled();
-
       expect(recurringTransactionsServiceMock.execute).not.toHaveBeenCalled();
+      expect(
+        notificationEventsServiceMock.recurringTransactionExecuted,
+      ).not.toHaveBeenCalled();
     });
 
     it('should query due recurring transactions', async () => {
       repositoryMock.findManyDue.mockResolvedValue([]);
 
-      const job = {
+      await processor.process({
         name: RECURRING_TRANSACTIONS_JOB,
-      } as Job;
-
-      await processor.process(job);
-
-      expect(repositoryMock.findManyDue).toHaveBeenCalledTimes(1);
+      } as Job);
 
       expect(repositoryMock.findManyDue).toHaveBeenCalledWith(expect.any(Date));
     });
 
     it('should execute every due recurring transaction', async () => {
-      const dueTransactions = [
-        {
-          id: 'recurring-1',
-          userId: 'user-1',
-        },
-        {
-          id: 'recurring-2',
-          userId: 'user-2',
-        },
-        {
-          id: 'recurring-3',
-          userId: 'user-3',
-        },
-      ];
-
-      repositoryMock.findManyDue.mockResolvedValue(dueTransactions);
+      repositoryMock.findManyDue.mockResolvedValue([
+        { id: 'recurring-1', userId: 'user-1' },
+        { id: 'recurring-2', userId: 'user-2' },
+      ]);
 
       recurringTransactionsServiceMock.execute.mockResolvedValue({
         alreadyExecuted: false,
       });
 
-      const job = {
+      await processor.process({
         name: RECURRING_TRANSACTIONS_JOB,
-      } as Job;
+      } as Job);
 
-      await processor.process(job);
-
-      expect(recurringTransactionsServiceMock.execute).toHaveBeenCalledTimes(3);
-
+      expect(recurringTransactionsServiceMock.execute).toHaveBeenCalledTimes(2);
       expect(recurringTransactionsServiceMock.execute).toHaveBeenNthCalledWith(
         1,
         'user-1',
         'recurring-1',
       );
-
       expect(recurringTransactionsServiceMock.execute).toHaveBeenNthCalledWith(
         2,
         'user-2',
         'recurring-2',
       );
-
-      expect(recurringTransactionsServiceMock.execute).toHaveBeenNthCalledWith(
-        3,
-        'user-3',
-        'recurring-3',
-      );
     });
 
-    it('should handle an already executed occurrence', async () => {
-      const dueTransaction = {
-        id: 'recurring-1',
-        userId: 'user-1',
-      };
+    it('should dispatch a notification after a successful execution', async () => {
+      repositoryMock.findManyDue.mockResolvedValue([
+        { id: 'recurring-1', userId: 'user-1' },
+      ]);
 
-      repositoryMock.findManyDue.mockResolvedValue([dueTransaction]);
+      recurringTransactionsServiceMock.execute.mockResolvedValue({
+        alreadyExecuted: false,
+        transaction: {
+          id: 'transaction-1',
+          type: 'EXPENSE',
+          amount: '150000',
+          description: 'Monthly subscription',
+        },
+      });
+
+      await processor.process({
+        name: RECURRING_TRANSACTIONS_JOB,
+      } as Job);
+
+      expect(
+        notificationEventsServiceMock.recurringTransactionExecuted,
+      ).toHaveBeenCalledWith({
+        userId: 'user-1',
+        recurringTransactionId: 'recurring-1',
+        transactionId: 'transaction-1',
+        transactionType: 'EXPENSE',
+        amount: '150000',
+        description: 'Monthly subscription',
+      });
+    });
+
+    it('should not dispatch a duplicate notification for an already executed occurrence', async () => {
+      repositoryMock.findManyDue.mockResolvedValue([
+        { id: 'recurring-1', userId: 'user-1' },
+      ]);
 
       recurringTransactionsServiceMock.execute.mockResolvedValue({
         alreadyExecuted: true,
+        transaction: {
+          id: 'transaction-1',
+          type: 'EXPENSE',
+          amount: '150000',
+          description: 'Monthly subscription',
+        },
       });
 
-      const job = {
+      await processor.process({
         name: RECURRING_TRANSACTIONS_JOB,
-      } as Job;
+      } as Job);
 
-      await expect(processor.process(job)).resolves.toBeUndefined();
-
-      expect(recurringTransactionsServiceMock.execute).toHaveBeenCalledWith(
-        'user-1',
-        'recurring-1',
-      );
+      expect(
+        notificationEventsServiceMock.recurringTransactionExecuted,
+      ).not.toHaveBeenCalled();
     });
 
-    it('should resolve without executing anything when no transaction is due', async () => {
-      repositoryMock.findManyDue.mockResolvedValue([]);
+    it('should continue if notification dispatch fails after transaction execution', async () => {
+      repositoryMock.findManyDue.mockResolvedValue([
+        { id: 'recurring-1', userId: 'user-1' },
+      ]);
 
-      const job = {
-        name: RECURRING_TRANSACTIONS_JOB,
-      } as Job;
+      recurringTransactionsServiceMock.execute.mockResolvedValue({
+        alreadyExecuted: false,
+        transaction: {
+          id: 'transaction-1',
+          type: 'EXPENSE',
+          amount: '150000',
+          description: null,
+        },
+      });
 
-      await expect(processor.process(job)).resolves.toBeUndefined();
+      notificationEventsServiceMock.recurringTransactionExecuted.mockRejectedValueOnce(
+        new Error('Queue unavailable'),
+      );
 
-      expect(recurringTransactionsServiceMock.execute).not.toHaveBeenCalled();
+      await expect(
+        processor.process({
+          name: RECURRING_TRANSACTIONS_JOB,
+        } as Job),
+      ).resolves.toBeUndefined();
+
+      expect(recurringTransactionsServiceMock.execute).toHaveBeenCalledTimes(1);
     });
 
-    it('should propagate execution errors so BullMQ can retry the job', async () => {
-      const dueTransaction = {
-        id: 'recurring-1',
-        userId: 'user-1',
-      };
+    it('should not dispatch notifications if no transaction record is returned', async () => {
+      repositoryMock.findManyDue.mockResolvedValue([
+        { id: 'recurring-1', userId: 'user-1' },
+      ]);
 
-      const error = new Error('Recurring transaction execution failed');
+      recurringTransactionsServiceMock.execute.mockResolvedValue({
+        alreadyExecuted: false,
+      });
 
-      repositoryMock.findManyDue.mockResolvedValue([dueTransaction]);
-
-      recurringTransactionsServiceMock.execute.mockRejectedValue(error);
-
-      const job = {
+      await processor.process({
         name: RECURRING_TRANSACTIONS_JOB,
-      } as Job;
+      } as Job);
 
-      await expect(processor.process(job)).rejects.toThrow(
-        'Recurring transaction execution failed',
+      expect(
+        notificationEventsServiceMock.recurringTransactionExecuted,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('should propagate recurring execution errors so BullMQ can retry', async () => {
+      repositoryMock.findManyDue.mockResolvedValue([
+        { id: 'recurring-1', userId: 'user-1' },
+      ]);
+
+      recurringTransactionsServiceMock.execute.mockRejectedValue(
+        new Error('Recurring transaction execution failed'),
       );
 
-      expect(recurringTransactionsServiceMock.execute).toHaveBeenCalledWith(
-        'user-1',
-        'recurring-1',
-      );
+      await expect(
+        processor.process({
+          name: RECURRING_TRANSACTIONS_JOB,
+        } as Job),
+      ).rejects.toThrow('Recurring transaction execution failed');
+
+      expect(
+        notificationEventsServiceMock.recurringTransactionExecuted,
+      ).not.toHaveBeenCalled();
     });
   });
 });

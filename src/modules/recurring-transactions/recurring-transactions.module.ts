@@ -12,6 +12,7 @@ import { RecurringTransactionsRepository } from './repositories/recurring-transa
 import { RECURRING_TRANSACTIONS_QUEUE } from './recurring-transactions.constants';
 import { RecurringTransactionsScheduler } from './recurring-transactions.scheduler';
 import { RecurringTransactionsProcessor } from './recurring-transactions.processor';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 const isTestEnvironment = process.env.NODE_ENV === 'test';
 
@@ -20,6 +21,7 @@ const isTestEnvironment = process.env.NODE_ENV === 'test';
     AccountsModule,
     CategoriesModule,
     TransactionsModule,
+    NotificationsModule,
 
     ...(isTestEnvironment
       ? []

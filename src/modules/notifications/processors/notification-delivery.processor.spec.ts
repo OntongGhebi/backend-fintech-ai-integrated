@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { UnprocessableEntityException } from '@nestjs/common';
 
 import { NotificationChannel } from 'src/database/enums/notification-channel.enum';
@@ -71,7 +71,6 @@ describe('NotificationDeliveryProcessor', () => {
       opts: {
         attempts: overrides.attempts ?? NOTIFICATION_JOB_ATTEMPTS,
       },
-      discard: jest.fn(),
     }) as unknown as Job<NotificationDeliveryJob>;
 
   beforeEach(async () => {
@@ -202,7 +201,6 @@ describe('NotificationDeliveryProcessor', () => {
     );
 
     expect(prisma.notification.update).not.toHaveBeenCalled();
-    expect(job.discard).not.toHaveBeenCalled();
   });
 
   it('should mark the notification FAILED after the final failed attempt', async () => {
@@ -223,8 +221,6 @@ describe('NotificationDeliveryProcessor', () => {
       where: { id: 'notification-1' },
       data: { status: NotificationStatus.FAILED },
     });
-
-    expect(job.discard).not.toHaveBeenCalled();
   });
 
   it('should stop retrying when a permanent delivery error occurs', async () => {
@@ -239,9 +235,9 @@ describe('NotificationDeliveryProcessor', () => {
       attempts: 3,
     });
 
-    await expect(processor.process(job)).rejects.toBe(permanentError);
-
-    expect(job.discard).toHaveBeenCalledTimes(1);
+    await expect(processor.process(job)).rejects.toBeInstanceOf(
+      UnrecoverableError,
+    );
 
     expect(prisma.notification.update).toHaveBeenCalledWith({
       where: { id: 'notification-1' },
@@ -283,10 +279,8 @@ describe('NotificationDeliveryProcessor', () => {
     const job = createJob();
 
     await expect(processor.process(job)).rejects.toBeInstanceOf(
-      UnprocessableEntityException,
+      UnrecoverableError,
     );
-
-    expect(job.discard).toHaveBeenCalledTimes(1);
 
     expect(prisma.notification.update).toHaveBeenCalledWith({
       where: { id: 'notification-1' },

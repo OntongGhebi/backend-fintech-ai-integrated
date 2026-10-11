@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getQueueToken } from '@nestjs/bullmq';
 
+import { NotificationEventsService } from 'src/modules/notifications/notification-events.service';
+
 import { RECURRING_TRANSACTIONS_QUEUE } from './recurring-transactions.constants';
 import { RecurringTransactionsProcessor } from './recurring-transactions.processor';
 import { RecurringTransactionsRepository } from './repositories/recurring-transactions.repository';
@@ -36,6 +38,13 @@ describe('Recurring Transactions Queue Wiring', () => {
             execute: jest.fn(),
           },
         },
+
+        {
+          provide: NotificationEventsService,
+          useValue: {
+            recurringTransactionExecuted: jest.fn(),
+          },
+        },
       ],
     }).compile();
   });
@@ -64,5 +73,9 @@ describe('Recurring Transactions Queue Wiring', () => {
 
   it('should resolve the service dependency', () => {
     expect(module.get(RecurringTransactionsService)).toBeDefined();
+  });
+
+  it('should resolve the notification events dependency', () => {
+    expect(module.get(NotificationEventsService)).toBeDefined();
   });
 });

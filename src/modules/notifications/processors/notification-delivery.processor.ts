@@ -5,7 +5,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 
 import { NotificationChannel } from 'src/database/enums/notification-channel.enum';
 import { NotificationStatus } from 'src/database/enums/notification-status.enum';
@@ -174,7 +174,9 @@ export class NotificationDeliveryProcessor extends WorkerHost {
       }
 
       if (isPermanentError) {
-        job.discard();
+        throw new UnrecoverableError(
+          error instanceof Error ? error.message : String(error),
+        );
       }
 
       if (!(error instanceof ServiceUnavailableException)) {

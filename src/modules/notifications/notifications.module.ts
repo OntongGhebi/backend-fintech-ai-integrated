@@ -8,6 +8,7 @@ import { NotificationQueueService } from './notifications-queue.service';
 import { NOTIFICATIONS_QUEUE } from './notifications.constants';
 import { NotificationDeliveryProcessor } from './processors/notification-delivery.processor';
 import { telegramModule } from '../telegram/telegram.module';
+import { NotificationEventsService } from './notification-events.service';
 
 @Module({
   imports: [
@@ -22,12 +23,14 @@ import { telegramModule } from '../telegram/telegram.module';
     NotificationsRepository,
     NotificationsService,
     NotificationQueueService,
+    NotificationEventsService,
     NotificationDeliveryProcessor,
   ],
   exports: [
     NotificationsRepository,
     NotificationsService,
     NotificationQueueService,
+    NotificationEventsService,
     NotificationDeliveryProcessor,
   ],
 })
