@@ -35,6 +35,7 @@ import { AIModule } from './modules/ai/ai.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PlansModule } from './modules/plans/plans.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     DashboardModule,
     ReportsModule,
     NotificationsModule,
+    PlansModule,
   ],
   providers: [
     {
