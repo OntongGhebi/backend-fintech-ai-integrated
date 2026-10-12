@@ -38,6 +38,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { PlansModule } from './modules/plans/plans.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { PaymentCheckoutModule } from './modules/payments/payment-checkout.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
     PlansModule,
     SubscriptionsModule,
     PaymentsModule,
+    PaymentCheckoutModule,
   ],
   providers: [
     {

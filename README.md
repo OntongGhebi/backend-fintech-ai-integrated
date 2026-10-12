@@ -31,6 +31,32 @@
 $ npm install
 ```
 
+## Testing subscription checkout in Swagger
+
+Before testing checkout, configure `DATABASE_URL`, `MIDTRANS_SERVER_KEY`, and
+`MIDTRANS_CLIENT_KEY` in `.env`. Use Midtrans Sandbox credentials and keep
+`MIDTRANS_IS_PRODUCTION=false`.
+
+Apply the database migrations and seed an active test plan:
+
+```bash
+npx prisma migrate deploy
+npm run db:seed
+```
+
+Start the API and open Swagger at `/docs` (the API prefix is `/api/v1`). Then
+use the same authenticated user for these requests:
+
+1. `GET /api/v1/plans` and confirm that `PREMIUM_MONTHLY` is active.
+2. `POST /api/v1/subscriptions/trial` with
+   `{"planCode":"PREMIUM_MONTHLY"}`. Copy the returned subscription `id`.
+3. `POST /api/v1/payments/checkout` with
+   `{"subscriptionId":"<subscription-id>"}`.
+
+The checkout response includes the Midtrans Snap token and Sandbox redirect URL.
+If the account has already used its trial or has a current subscription, use a
+different account before starting the trial.
+
 ## Compile and run the project
 
 ```bash
