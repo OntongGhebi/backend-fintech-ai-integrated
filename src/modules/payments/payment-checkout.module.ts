@@ -7,6 +7,7 @@ import { MidtransSnapGateway } from './midtrans-snap.gateway';
 import { MidtransWebhookSignatureService } from './midtrans-webhook-signature.service';
 import { MidtransWebhookController } from './midtrans-webhook.controller';
 import { MidtransWebhookEventService } from './midtrans-webhook-event.service';
+import { MidtransWebhookProcessingService } from './midtrans-webhook-processing.service';
 
 @Module({
   imports: [ConfigModule],
@@ -16,11 +17,13 @@ import { MidtransWebhookEventService } from './midtrans-webhook-event.service';
     MidtransSnapGateway,
     MidtransWebhookSignatureService,
     MidtransWebhookEventService,
+    MidtransWebhookProcessingService,
   ],
   exports: [
     PaymentCheckoutService,
     MidtransWebhookSignatureService,
     MidtransWebhookEventService,
+    MidtransWebhookProcessingService,
   ],
 })
 export class PaymentCheckoutModule {}

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma/prisma.service';
 import { MidtransWebhookSignatureService } from './midtrans-webhook-signature.service';
 import { createHash } from 'node:crypto';
@@ -20,9 +20,46 @@ export class MidtransWebhookEventService {
   async receive(notification: unknown): Promise<ReceiveMidtransWebhookResult> {
     const verified = this.signatureService.verify(notification);
 
+    if (
+      typeof notification !== 'object' ||
+      notification === null ||
+      Array.isArray(notification)
+    ) {
+      throw new BadRequestException('Invalid notification payload.');
+    }
+
+    const payloadRecord = notification as Record<string, unknown>;
+
+    const transactionStatus = payloadRecord.transaction_status;
+    const transactionId = payloadRecord.transaction_id;
+
+    if (
+      typeof transactionStatus !== 'string' ||
+      transactionStatus.trim().length === 0
+    ) {
+      throw new BadRequestException('Midtrans transaction_status is required.');
+    }
+
+    if (
+      transactionId !== undefined &&
+      transactionId !== null &&
+      typeof transactionId !== 'string'
+    ) {
+      throw new BadRequestException('Invalid Midtrans transaction_id.');
+    }
+
+    const normalizedTransactionId =
+      typeof transactionId === 'string' ? transactionId : '';
+
     const eventId = createHash('sha256')
       .update(
-        `${verified.order_id}\n${verified.status_code}\n${verified.gross_amount}`,
+        [
+          verified.order_id,
+          verified.status_code,
+          verified.gross_amount,
+          normalizedTransactionId,
+          transactionStatus,
+        ].join('\n'),
         'utf8',
       )
       .digest('hex');

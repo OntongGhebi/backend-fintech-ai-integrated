@@ -2,7 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { createHash } from 'node:crypto';
 
-import { PrismaService } from '@/database/prisma/prisma.service';
+import { PrismaService } from 'src/database/prisma/prisma.service';
 
 import { MidtransWebhookEventService } from './midtrans-webhook-event.service';
 import { MidtransWebhookSignatureService } from './midtrans-webhook-signature.service';
@@ -137,14 +137,20 @@ describe('MidtransWebhookEventService', () => {
     );
   });
 
-  it('uses signed fields to derive the idempotency key', async () => {
+  it('uses signed and transaction fields to derive the idempotency key', async () => {
     const notification = makeNotification();
 
     const result = await service.receive(notification);
 
     const expectedEventId = createHash('sha256')
       .update(
-        `${notification.order_id}\n${notification.status_code}\n${notification.gross_amount}`,
+        [
+          notification.order_id,
+          notification.status_code,
+          notification.gross_amount,
+          notification.transaction_id,
+          notification.transaction_status,
+        ].join('\n'),
         'utf8',
       )
       .digest('hex');
