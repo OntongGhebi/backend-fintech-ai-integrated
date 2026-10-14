@@ -23,6 +23,8 @@ import { CurrentUser } from '../auth/decorators/current-user-decorator';
 import { GetPaymentsQueryDto } from './dto/get-payments-query.dto';
 import { PaymentListResponseDto } from './dto/payment-list-response.dto';
 import { PaymentResponseDto } from './dto/payment-response.dto';
+import { BillingHistoryQueryDto } from './dto/payment-history.dto';
+import { BillingHistoryService } from './billing-history.service';
 import { PaymentsService } from './payments.service';
 
 @ApiTags('Payments')
@@ -30,7 +32,27 @@ import { PaymentsService } from './payments.service';
 @UseGuards(AccessTokenGuard)
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly billingHistoryService: BillingHistoryService,
+  ) {}
+
+  @Get('history')
+  @ApiOperation({
+    summary: 'Get the authenticated user payment history',
+  })
+  @ApiOkResponse()
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid access token',
+  })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  async getPaymentHistory(
+    @CurrentUser() userId: string,
+    @Query() query: BillingHistoryQueryDto,
+  ) {
+    return this.billingHistoryService.getPaymentHistory(userId, query);
+  }
 
   @Get('me')
   @ApiOperation({

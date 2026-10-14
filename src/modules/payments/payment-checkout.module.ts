@@ -8,16 +8,23 @@ import { MidtransWebhookSignatureService } from './midtrans-webhook-signature.se
 import { MidtransWebhookController } from './midtrans-webhook.controller';
 import { MidtransWebhookEventService } from './midtrans-webhook-event.service';
 import { MidtransWebhookProcessingService } from './midtrans-webhook-processing.service';
+import { BillingHistoryController } from './billing-history.controller';
+import { BillingHistoryService } from './billing-history.service';
 
 @Module({
   imports: [ConfigModule],
-  controllers: [PaymentCheckoutController, MidtransWebhookController],
+  controllers: [
+    PaymentCheckoutController,
+    MidtransWebhookController,
+    BillingHistoryController,
+  ],
   providers: [
     PaymentCheckoutService,
     MidtransSnapGateway,
     MidtransWebhookSignatureService,
     MidtransWebhookEventService,
     MidtransWebhookProcessingService,
+    BillingHistoryService,
   ],
   exports: [
     PaymentCheckoutService,
