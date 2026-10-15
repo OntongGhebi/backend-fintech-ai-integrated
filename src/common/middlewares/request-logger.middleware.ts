@@ -1,6 +1,6 @@
 import { Injectable, Logger, NestMiddleware } from '@nestjs/common';
-import { NextFunction, Request, Response } from 'express';
-import { RequestWithId } from './request-id.middleware';
+import type { NextFunction, Response } from 'express';
+import type { RequestWithId } from './request-id.middleware';
 
 @Injectable()
 export class RequestLoggerMiddleware implements NestMiddleware {
@@ -13,7 +13,7 @@ export class RequestLoggerMiddleware implements NestMiddleware {
       const duration = Date.now() - startTime;
       const requestId = request.requestId;
       const method = request.method;
-      const path = request.originalUrl;
+      const path = request.path;
       const statusCode = response.statusCode;
 
       const message = [

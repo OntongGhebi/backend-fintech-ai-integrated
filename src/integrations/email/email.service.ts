@@ -61,7 +61,7 @@ export class EmailService {
     });
 
     if (error) {
-      this.logger.error(`Failed to send verification email: ${error.message}`);
+      this.logger.error('Failed to send verification email.');
 
       throw new InternalServerErrorException(
         'Failed to send verification email',
@@ -97,16 +97,14 @@ export class EmailService {
     });
 
     if (error) {
-      this.logger.error(
-        `Failed to send notification email to ${email}: ${error.message}`,
-      );
+      this.logger.error('Failed to send notification email.');
 
       throw new InternalServerErrorException(
         'Failed to send notification email',
       );
     }
 
-    this.logger.log(`Notification email sent to ${email}`);
+    this.logger.log('Notification email sent successfully.');
   }
 
   private escapeHtml(value: string): string {
