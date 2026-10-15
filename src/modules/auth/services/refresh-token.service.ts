@@ -246,10 +246,18 @@ export class RefreshTokenService {
         refreshToken,
         {
           secret: refreshSecret,
+          algorithms: ['HS256'],
         },
       );
 
-      if (!payload?.sub || !payload?.sid) {
+      if (
+        !payload ||
+        typeof payload !== 'object' ||
+        typeof payload.sub !== 'string' ||
+        payload.sub.length === 0 ||
+        typeof payload.sid !== 'string' ||
+        payload.sid.length === 0
+      ) {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
@@ -264,9 +272,7 @@ export class RefreshTokenService {
   }
 
   private getRefreshTokenExpiration(refreshToken: string): Date {
-    const decoded = this.jwtService.decode(refreshToken) as {
-      exp?: unknown;
-    } | null;
+    const decoded = this.jwtService.decode<{ exp?: unknown }>(refreshToken);
 
     if (
       !decoded ||
