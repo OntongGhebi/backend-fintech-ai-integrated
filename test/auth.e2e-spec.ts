@@ -1,11 +1,13 @@
 import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import request from 'supertest';
 
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/database/prisma/prisma.service';
 import { EmailVerificationService } from './../src/modules/auth/services/email-verification.service';
 import { createE2EApp } from './helpers/create-e2e-app';
+import { createUnthrottledThrottlerStorage } from './helpers/unthrottled-throttler-storage';
 
 jest.setTimeout(30000);
 
@@ -17,7 +19,10 @@ describe('Authentication (e2e)', () => {
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(ThrottlerStorage)
+      .useValue(createUnthrottledThrottlerStorage())
+      .compile();
 
     app = await createE2EApp(moduleFixture.createNestApplication());
 
