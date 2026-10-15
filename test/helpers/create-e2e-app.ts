@@ -20,14 +20,18 @@ export async function createE2EApp(
   });
 
   const apiPrefix = configService.get<string>('app.apiPrefix', 'api');
-
   app.setGlobalPrefix(apiPrefix);
 
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
+      forbidUnknownValues: true,
       transform: true,
+      validationError: {
+        target: false,
+        value: false,
+      },
     }),
   );
 
@@ -50,7 +54,6 @@ export async function createE2EApp(
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);
-
     SwaggerModule.setup('docs', app, document);
   }
 

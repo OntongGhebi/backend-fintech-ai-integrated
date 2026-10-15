@@ -9,17 +9,12 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-
   const configService = app.get(ConfigService);
 
-  /**
-   * Security
-   */
+  // Security headers.
   app.use(helmet());
 
-  /**
-   * CORS
-   */
+  // Allow only the configured frontend origin.
   const frontendUrl = configService.get<string>('app.frontendUrl');
 
   app.enableCors({
@@ -27,39 +22,28 @@ async function bootstrap() {
     credentials: true,
   });
 
-  /**
-   * Global API prefix
-   *
-   * Example:
-   * /api/v1/auth/login
-   */
+  // Global API prefix, e.g. /api/v1/auth/login.
   const apiPrefix = configService.get<string>('app.apiPrefix', 'api');
-
   app.setGlobalPrefix(apiPrefix);
 
-  /**
-   * Global validation
-   */
+  // Reject malformed and unexpected request input.
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
+      forbidUnknownValues: true,
       transform: true,
+      validationError: {
+        target: false,
+        value: false,
+      },
     }),
   );
 
-  /**
-   * Global exception filter
-   */
+  // Standardized HTTP error responses.
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  /**
-   * Swagger
-   *
-   * Swagger is enabled only outside production
-   * to avoid unnecessarily exposing API documentation
-   * in a production environment.
-   */
+  // Keep Swagger disabled in production.
   const nodeEnv = configService.get<string>('app.nodeEnv', 'development');
 
   if (nodeEnv !== 'production') {
@@ -77,16 +61,11 @@ async function bootstrap() {
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);
-
     SwaggerModule.setup('docs', app, document);
   }
 
-  /**
-   * Start application
-   */
   const port = configService.get<number>('app.port', 3000);
-
   await app.listen(port);
 }
 
-bootstrap();
+void bootstrap();
