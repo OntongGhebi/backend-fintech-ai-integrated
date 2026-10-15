@@ -90,6 +90,8 @@ export class PaymentCheckoutService {
         currency: 'IDR',
         status: 'PENDING',
         provider: 'MIDTRANS',
+        // This is our internal payment UUID, not a Midtrans transaction ID.
+        // providerPaymentId remains null until a provider transaction ID arrives.
         metadata: {
           checkoutProvider: 'MIDTRANS',
           environment: 'sandbox',
@@ -120,6 +122,7 @@ export class PaymentCheckoutService {
             metadata: {
               checkoutProvider: 'MIDTRANS',
               environment: 'sandbox',
+              planCode: subscription.plan.code,
               checkoutCreationFailed: true,
             },
           },
@@ -147,13 +150,14 @@ export class PaymentCheckoutService {
       );
     }
 
-    // Keep this database update outside the provider-error catch:
-    // a database failure after token creation does not prove the
-    // provider transaction failed.
+    /*
+     * Keep this update outside the provider-error catch.
+     * If the database update fails after Snap token creation, we cannot
+     * conclude that the provider-side checkout itself failed.
+     */
     const updatedPayment = await this.prisma.payment.update({
       where: { id: payment.id },
       data: {
-        providerPaymentId: payment.id,
         metadata: {
           checkoutProvider: 'MIDTRANS',
           environment: 'sandbox',

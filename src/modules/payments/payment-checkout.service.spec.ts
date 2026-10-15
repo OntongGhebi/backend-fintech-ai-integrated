@@ -48,7 +48,7 @@ describe('PaymentCheckoutService', () => {
     currency: 'IDR',
     status: 'PENDING',
     provider: 'MIDTRANS',
-    providerPaymentId: 'payment-uuid-1',
+    providerPaymentId: null,
     createdAt: new Date('2026-10-12T10:00:00.000Z'),
   };
 
@@ -104,8 +104,18 @@ describe('PaymentCheckoutService', () => {
         currency: 'IDR',
         status: 'PENDING',
         provider: 'MIDTRANS',
+        metadata: {
+          checkoutProvider: 'MIDTRANS',
+          environment: 'sandbox',
+          planCode: 'PREMIUM',
+        },
       }),
     });
+
+    // The local payment UUID is the Midtrans order_id.
+    // It must not be written as providerPaymentId.
+    const createCall = prismaMock.payment.create.mock.calls[0][0];
+    expect(createCall.data).not.toHaveProperty('providerPaymentId');
 
     expect(gatewayMock.createCheckout).toHaveBeenCalledWith({
       orderId: 'payment-uuid-1',
@@ -114,14 +124,18 @@ describe('PaymentCheckoutService', () => {
       itemName: 'Premium Plan',
     });
 
-    expect(prismaMock.payment.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'payment-uuid-1' },
-        data: expect.objectContaining({
-          providerPaymentId: 'payment-uuid-1',
-        }),
-      }),
-    );
+    expect(prismaMock.payment.update).toHaveBeenCalledWith({
+      where: { id: 'payment-uuid-1' },
+      data: {
+        metadata: {
+          checkoutProvider: 'MIDTRANS',
+          environment: 'sandbox',
+          planCode: 'PREMIUM',
+          snapToken: 'sandbox-snap-token',
+          redirectUrl: 'https://app.sandbox.midtrans.com/snap/v2/vtweb/example',
+        },
+      },
+    });
 
     expect(result).toEqual({
       payment: {
@@ -131,7 +145,7 @@ describe('PaymentCheckoutService', () => {
         currency: 'IDR',
         status: 'PENDING',
         provider: 'MIDTRANS',
-        providerPaymentId: 'payment-uuid-1',
+        providerPaymentId: null,
         createdAt: paymentMock.createdAt,
       },
       checkout: {
@@ -200,6 +214,9 @@ describe('PaymentCheckoutService', () => {
         data: expect.objectContaining({
           status: 'FAILED',
           failedAt: expect.any(Date),
+          metadata: expect.objectContaining({
+            checkoutCreationFailed: true,
+          }),
         }),
       }),
     );
@@ -216,5 +233,23 @@ describe('PaymentCheckoutService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(prismaMock.payment.create).not.toHaveBeenCalled();
+    expect(gatewayMock.createCheckout).not.toHaveBeenCalled();
+  });
+
+  it('rejects an inactive plan', async () => {
+    prismaMock.subscription.findFirst.mockResolvedValue({
+      ...subscriptionMock,
+      plan: {
+        ...subscriptionMock.plan,
+        isActive: false,
+      },
+    });
+
+    await expect(
+      service.createCheckout('user-uuid-1', 'subscription-uuid-1'),
+    ).rejects.toThrow('This plan is no longer available.');
+
+    expect(prismaMock.payment.create).not.toHaveBeenCalled();
+    expect(gatewayMock.createCheckout).not.toHaveBeenCalled();
   });
 });
