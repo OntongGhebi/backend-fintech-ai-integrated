@@ -1,0 +1,39 @@
+
+# Git metadata
+.git
+.gitignore
+
+# Dependencies and generated build output
+node_modules
+dist
+coverage
+.nyc_output
+generated
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets
+
+# Local tooling
+.vscode
+.idea
+.DS_Store
+*.log
+
+# Tests and local reports
+test
+tmp-reports-e2e.json
+
+# Local archives and temporary files
+*.zip
+*.tar
+*.tar.gz
+*.tmp
+*.bak
+
+# Local-only documentation exports
+*.pdf

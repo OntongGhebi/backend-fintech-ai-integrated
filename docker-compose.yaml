@@ -8,7 +8,7 @@ services:
       - '127.0.0.1:6379:6379'
 
     environment:
-      REDISCLI_AUTH: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+      REDISCLI_AUTH: '${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}'
 
     volumes:
       - redis_data:/data
@@ -18,7 +18,7 @@ services:
       - redis-server
       - /usr/local/etc/redis/redis.conf
       - --requirepass
-      - ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+      - '${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}'
 
     healthcheck:
       test: ['CMD-SHELL', 'redis-cli ping | grep -q PONG']
@@ -26,6 +26,49 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+
+    container_name: fintech-ai-api
+    restart: unless-stopped
+    init: true
+
+    env_file:
+      - .env
+
+    environment:
+      NODE_ENV: '${NODE_ENV:-development}'
+      PORT: '${PORT:-3000}'
+      API_PREFIX: '${API_PREFIX:-api/v1}'
+
+      # The API uses the Redis service inside this Compose network.
+      REDIS_URL: ''
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: '${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}'
+      REDIS_DB: '0'
+
+    ports:
+      - '127.0.0.1:${PORT:-3000}:${PORT:-3000}'
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const p=process.env.PORT||3000;const prefix=(process.env.API_PREFIX||'api/v1').replace(/^\\/+|\\/+$/g,'');fetch('http://127.0.0.1:'+p+'/'+prefix+'/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 volumes:
   redis_data:
