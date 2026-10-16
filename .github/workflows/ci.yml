@@ -1,0 +1,78 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-test:
+    name: Validate, Build, and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      NODE_ENV: test
+      PORT: '3000'
+      API_PREFIX: api/v1
+      APP_TIMEZONE: Asia/Jakarta
+      FRONTEND_URL: http://localhost:5173
+
+      # Dummy connection string for Prisma CLI validation.
+      # CI does not connect to a production database.
+      DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/fintech_ci?schema=public
+
+      # Test-only secrets; never use these values in production.
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-production-0001
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-production-0002
+
+      REDIS_HOST: localhost
+      REDIS_PORT: '6379'
+      REDIS_DB: '0'
+
+      AI_ENABLED: 'false'
+      AI_PROVIDER: none
+      AI_API_KEY: ''
+      AI_BASE_URL: ''
+      AI_MODEL: ''
+      AI_TIMEOUT_MS: '10000'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Build NestJS application
+        run: npm run build
+
+      - name: Run unit tests
+        run: npm test -- --runInBand
