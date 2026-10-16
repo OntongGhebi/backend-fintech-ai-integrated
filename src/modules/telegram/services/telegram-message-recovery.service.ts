@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 
 import { TelegramMessageRepository } from '../repositories/telegram-message.repository';
 
@@ -12,16 +17,50 @@ export interface TelegramMessageRecoveryResult {
 }
 
 @Injectable()
-export class TelegramMessageRecoveryService {
+export class TelegramMessageRecoveryService
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(TelegramMessageRecoveryService.name);
 
   static readonly DEFAULT_LEASE_TIMEOUT_MS = 5 * 60 * 1000;
 
   static readonly MAX_PROCESSING_ATTEMPTS = 3;
 
+  static readonly RECOVERY_INTERVAL_MS = 60 * 1000;
+
+  private recoveryInterval?: ReturnType<typeof setInterval>;
+
+  private scheduledRecoveryInProgress = false;
+
   constructor(
     private readonly telegramMessageRepository: TelegramMessageRepository,
   ) {}
+
+  onModuleInit(): void {
+    if (this.recoveryInterval) {
+      return;
+    }
+
+    this.recoveryInterval = setInterval(() => {
+      void this.runScheduledRecovery();
+    }, TelegramMessageRecoveryService.RECOVERY_INTERVAL_MS);
+
+    // Do not keep the Node.js process alive solely for this interval.
+    this.recoveryInterval.unref?.();
+
+    this.logger.log(
+      `Telegram message recovery scheduled every ${TelegramMessageRecoveryService.RECOVERY_INTERVAL_MS}ms`,
+    );
+  }
+
+  onModuleDestroy(): void {
+    if (!this.recoveryInterval) {
+      return;
+    }
+
+    clearInterval(this.recoveryInterval);
+    this.recoveryInterval = undefined;
+  }
 
   async recover(
     options: TelegramMessageRecoveryOptions = {},
@@ -54,5 +93,24 @@ export class TelegramMessageRecoveryService {
     }
 
     return result;
+  }
+
+  private async runScheduledRecovery(): Promise<void> {
+    if (this.scheduledRecoveryInProgress) {
+      return;
+    }
+
+    this.scheduledRecoveryInProgress = true;
+
+    try {
+      await this.recover();
+    } catch (error) {
+      this.logger.error(
+        'Scheduled Telegram message recovery failed.',
+        error instanceof Error ? error.stack : String(error),
+      );
+    } finally {
+      this.scheduledRecoveryInProgress = false;
+    }
   }
 }

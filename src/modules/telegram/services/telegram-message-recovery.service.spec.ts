@@ -17,8 +17,62 @@ describe('TelegramMessageRecoveryService', () => {
     );
   });
 
+  afterEach(() => {
+    service.onModuleDestroy();
+    jest.useRealTimers();
+  });
+
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  it('should schedule automatic recovery and clear the interval on destroy', async () => {
+    jest.useFakeTimers();
+
+    telegramMessageRepository.recoverStaleProcessing.mockResolvedValue({
+      recovered: 2,
+      failed: 0,
+    });
+
+    service.onModuleInit();
+
+    await jest.advanceTimersByTimeAsync(
+      TelegramMessageRecoveryService.RECOVERY_INTERVAL_MS,
+    );
+
+    expect(
+      telegramMessageRepository.recoverStaleProcessing,
+    ).toHaveBeenCalledTimes(1);
+
+    service.onModuleDestroy();
+
+    await jest.advanceTimersByTimeAsync(
+      TelegramMessageRecoveryService.RECOVERY_INTERVAL_MS,
+    );
+
+    expect(
+      telegramMessageRepository.recoverStaleProcessing,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not register multiple recovery intervals', async () => {
+    jest.useFakeTimers();
+
+    telegramMessageRepository.recoverStaleProcessing.mockResolvedValue({
+      recovered: 0,
+      failed: 0,
+    });
+
+    service.onModuleInit();
+    service.onModuleInit();
+
+    await jest.advanceTimersByTimeAsync(
+      TelegramMessageRecoveryService.RECOVERY_INTERVAL_MS,
+    );
+
+    expect(
+      telegramMessageRepository.recoverStaleProcessing,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it('should use the default lease timeout and maximum attempts', async () => {
@@ -46,14 +100,13 @@ describe('TelegramMessageRecoveryService', () => {
       telegramMessageRepository.recoverStaleProcessing.mock.calls[0];
 
     expect(staleBefore).toBeInstanceOf(Date);
-
     expect(maxAttempts).toBe(3);
 
-    const staleBeforeTimestamp = staleBefore.getTime();
+    expect(staleBefore.getTime()).toBeGreaterThanOrEqual(
+      before - 5 * 60 * 1000,
+    );
 
-    expect(staleBeforeTimestamp).toBeGreaterThanOrEqual(before - 5 * 60 * 1000);
-
-    expect(staleBeforeTimestamp).toBeLessThanOrEqual(after - 5 * 60 * 1000);
+    expect(staleBefore.getTime()).toBeLessThanOrEqual(after - 5 * 60 * 1000);
   });
 
   it('should use a custom lease timeout', async () => {
@@ -75,11 +128,9 @@ describe('TelegramMessageRecoveryService', () => {
 
     expect(maxAttempts).toBe(3);
 
-    const staleBeforeTimestamp = staleBefore.getTime();
+    expect(staleBefore.getTime()).toBeGreaterThanOrEqual(before - 60_000);
 
-    expect(staleBeforeTimestamp).toBeGreaterThanOrEqual(before - 60_000);
-
-    expect(staleBeforeTimestamp).toBeLessThanOrEqual(after - 60_000);
+    expect(staleBefore.getTime()).toBeLessThanOrEqual(after - 60_000);
   });
 
   it('should report recovered and failed messages', async () => {
@@ -88,9 +139,7 @@ describe('TelegramMessageRecoveryService', () => {
       failed: 2,
     });
 
-    const result = await service.recover();
-
-    expect(result).toEqual({
+    await expect(service.recover()).resolves.toEqual({
       recovered: 4,
       failed: 2,
     });
@@ -102,59 +151,22 @@ describe('TelegramMessageRecoveryService', () => {
       failed: 0,
     });
 
-    const result = await service.recover();
-
-    expect(result).toEqual({
+    await expect(service.recover()).resolves.toEqual({
       recovered: 0,
       failed: 0,
     });
   });
 
-  it('should reject a zero lease timeout', async () => {
-    await expect(
-      service.recover({
-        leaseTimeoutMs: 0,
-      }),
-    ).rejects.toThrow('leaseTimeoutMs must be a positive finite number');
+  it.each([0, -1000, Infinity, NaN])(
+    'should reject invalid lease timeout: %s',
+    async (leaseTimeoutMs) => {
+      await expect(service.recover({ leaseTimeoutMs })).rejects.toThrow(
+        'leaseTimeoutMs must be a positive finite number',
+      );
 
-    expect(
-      telegramMessageRepository.recoverStaleProcessing,
-    ).not.toHaveBeenCalled();
-  });
-
-  it('should reject a negative lease timeout', async () => {
-    await expect(
-      service.recover({
-        leaseTimeoutMs: -1000,
-      }),
-    ).rejects.toThrow('leaseTimeoutMs must be a positive finite number');
-
-    expect(
-      telegramMessageRepository.recoverStaleProcessing,
-    ).not.toHaveBeenCalled();
-  });
-
-  it('should reject an infinite lease timeout', async () => {
-    await expect(
-      service.recover({
-        leaseTimeoutMs: Infinity,
-      }),
-    ).rejects.toThrow('leaseTimeoutMs must be a positive finite number');
-
-    expect(
-      telegramMessageRepository.recoverStaleProcessing,
-    ).not.toHaveBeenCalled();
-  });
-
-  it('should reject NaN as a lease timeout', async () => {
-    await expect(
-      service.recover({
-        leaseTimeoutMs: NaN,
-      }),
-    ).rejects.toThrow('leaseTimeoutMs must be a positive finite number');
-
-    expect(
-      telegramMessageRepository.recoverStaleProcessing,
-    ).not.toHaveBeenCalled();
-  });
+      expect(
+        telegramMessageRepository.recoverStaleProcessing,
+      ).not.toHaveBeenCalled();
+    },
+  );
 });

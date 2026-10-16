@@ -26,10 +26,10 @@ export class EmailProcessor extends WorkerHost {
 
     const { email, name, verificationUrl } = job.data;
 
-    this.logger.log(`Processing email verification job ${job.id} for ${email}`);
+    this.logger.log(`Processing email verification job ${job.id}`);
 
     await this.emailService.sendEmailVerification(email, name, verificationUrl);
 
-    this.logger.log(`Verification email sent successfully to ${email}`);
+    this.logger.log(`Verification email job ${job.id} completed successfully`);
   }
 }
