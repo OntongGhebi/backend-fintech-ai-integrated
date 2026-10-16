@@ -386,6 +386,8 @@ model Transaction {
   @@index([userId, status])
   @@index([userId, recurringTransactionId, transactionDate])
   @@index([deletedAt])
+  @@index([userId, status, currency, deletedAt, transactionDate(sort: Desc), createdAt(sort: Desc), id(sort: Desc)], map: "tx_user_status_currency_date_idx")
+  @@index([userId, type, status, currency, deletedAt, transactionDate(sort: Desc), createdAt(sort: Desc), id(sort: Desc)], map: "tx_user_type_status_currency_date_idx")
   @@map("transactions")
 }
 
