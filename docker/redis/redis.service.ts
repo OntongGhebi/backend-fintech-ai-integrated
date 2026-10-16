@@ -14,24 +14,32 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly client: Redis;
 
   constructor(private readonly configService: ConfigService) {
-    const host = this.configService.get<string>('redis.host', 'localhost');
+    const redisUrl = this.configService.get<string>('redis.url')?.trim();
 
-    const port = this.configService.get<number>('redis.port', 6379);
-
-    const password = this.configService.get<string>('redis.password');
-
-    const db = this.configService.get<number>('redis.db', 0);
-
-    this.client = new Redis({
-      host,
-      port,
-      password,
-      db,
+    const commonOptions = {
       lazyConnect: true,
       maxRetriesPerRequest: null,
-    });
+    } as const;
+
+    if (redisUrl) {
+      this.client = new Redis(redisUrl, commonOptions);
+    } else {
+      const host = this.configService.get<string>('redis.host', 'localhost');
+      const port = this.configService.get<number>('redis.port', 6379);
+      const password = this.configService.get<string>('redis.password');
+      const db = this.configService.get<number>('redis.db', 0);
+
+      this.client = new Redis({
+        host,
+        port,
+        password,
+        db,
+        ...commonOptions,
+      });
+    }
 
     this.client.on('error', (error: Error) => {
+      // Avoid logging connection strings, credentials, or provider details.
       this.logger.error(`Redis connection error: ${error.message}`);
     });
 
@@ -78,6 +86,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    if (this.client.status === 'end') {
+      return;
+    }
+
     await this.client.quit();
   }
 

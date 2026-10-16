@@ -7,9 +7,13 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
-async function bootstrap() {
+async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+
+  // Allow NestJS lifecycle hooks to run when the process receives
+  // supported shutdown signals.
+  app.enableShutdownHooks();
 
   // Security headers.
   app.use(helmet());
@@ -23,7 +27,7 @@ async function bootstrap() {
   });
 
   // Global API prefix, e.g. /api/v1/auth/login.
-  const apiPrefix = configService.get<string>('app.apiPrefix', 'api');
+  const apiPrefix = configService.get<string>('app.apiPrefix', 'api/v1');
   app.setGlobalPrefix(apiPrefix);
 
   // Reject malformed and unexpected request input.
