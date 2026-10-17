@@ -68,6 +68,21 @@ jobs:
       - name: Validate Prisma schema
         run: npx prisma validate
 
+      - name: Verify tracked Prisma migrations
+        shell: bash
+        run: |
+          test -f src/database/prisma/migrations/migration_lock.toml
+
+          migration_count=$(git ls-files \
+            'src/database/prisma/migrations/*/migration.sql' | wc -l)
+
+          if [ "$migration_count" -eq 0 ]; then
+            echo "ERROR: No tracked Prisma migration files were found."
+            exit 1
+          fi
+
+          echo "Tracked Prisma migration files: $migration_count"
+
       - name: Generate Prisma Client
         run: npx prisma generate
 
