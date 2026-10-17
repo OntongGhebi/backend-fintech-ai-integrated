@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
+import { TransactionSource } from 'src/database/enums/transaction-source.enum';
 import { TransactionType } from 'src/database/enums/transaction-type.enum';
 
 import { TransactionsService } from '../../../transactions/transactions.service';
@@ -50,15 +51,19 @@ export class ConfirmedTransactionService {
 
     const type = this.mapTransactionType(intent.transactionType);
 
-    return this.transactionsService.create(confirmation.userId, {
-      accountId: intent.accountId,
-      categoryId: intent.categoryId,
-      type,
-      amount: intent.amount,
-      currency: 'IDR',
-      description: intent.description?.trim() || undefined,
-      transactionDate: (intent.transactionDate ?? new Date()).toISOString(),
-    });
+    return this.transactionsService.create(
+      confirmation.userId,
+      {
+        accountId: intent.accountId,
+        categoryId: intent.categoryId,
+        type,
+        amount: intent.amount,
+        currency: 'IDR',
+        description: intent.description?.trim() || undefined,
+        transactionDate: (intent.transactionDate ?? new Date()).toISOString(),
+      },
+      TransactionSource.TELEGRAM,
+    );
   }
 
   private mapTransactionType(type: 'INCOME' | 'EXPENSE'): TransactionType {

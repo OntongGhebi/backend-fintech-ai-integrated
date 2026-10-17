@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 
 import { ConfirmedTransactionService } from './confirmed-transaction.service';
+import { TransactionSource } from 'src/database/enums/transaction-source.enum';
 import { TransactionType } from 'src/database/enums/transaction-type.enum';
 
 describe('ConfirmedTransactionService', () => {
@@ -70,15 +71,31 @@ describe('ConfirmedTransactionService', () => {
 
     expect(result).toEqual(createdTransaction);
 
-    expect(transactionsService.create).toHaveBeenCalledWith('user-id', {
-      accountId: 'account-id',
-      categoryId: 'category-id',
-      type: TransactionType.EXPENSE,
-      amount: 25000,
-      currency: 'IDR',
-      description: 'beli makan',
-      transactionDate: '2026-09-26T10:00:00.000Z',
-    });
+    expect(transactionsService.create).toHaveBeenCalledWith(
+      'user-id',
+      {
+        accountId: 'account-id',
+        categoryId: 'category-id',
+        type: TransactionType.EXPENSE,
+        amount: 25000,
+        currency: 'IDR',
+        description: 'beli makan',
+        transactionDate: '2026-09-26T10:00:00.000Z',
+      },
+      TransactionSource.TELEGRAM,
+    );
+  });
+
+  it('should mark Telegram-created transactions with TELEGRAM source', async () => {
+    transactionsService.create.mockResolvedValue({ id: 'transaction-id' });
+
+    await service.create(confirmedConfirmation);
+
+    expect(transactionsService.create).toHaveBeenCalledWith(
+      'user-id',
+      expect.objectContaining({ accountId: 'account-id' }),
+      TransactionSource.TELEGRAM,
+    );
   });
 
   it('should create an expense without category', async () => {
@@ -105,6 +122,7 @@ describe('ConfirmedTransactionService', () => {
         amount: 25000,
         currency: 'IDR',
       }),
+      TransactionSource.TELEGRAM,
     );
   });
 
@@ -130,6 +148,7 @@ describe('ConfirmedTransactionService', () => {
         amount: 25000,
         currency: 'IDR',
       }),
+      TransactionSource.TELEGRAM,
     );
   });
 
@@ -248,6 +267,7 @@ describe('ConfirmedTransactionService', () => {
       expect.objectContaining({
         transactionDate: '2026-09-26T10:00:00.000Z',
       }),
+      TransactionSource.TELEGRAM,
     );
   });
 });

@@ -27,7 +27,7 @@ export class TelegramTransactionErrorService {
     }
 
     if (error instanceof ConflictException) {
-      return 'Transaksi tidak dapat dibuat karena terjadi konflik. Silakan coba lagi.';
+      return 'Status transaksi belum dapat dipastikan karena terjadi konflik. Jangan kirim konfirmasi berulang; periksa daftar transaksi terlebih dahulu.';
     }
 
     if (error instanceof ForbiddenException) {
@@ -35,10 +35,10 @@ export class TelegramTransactionErrorService {
     }
 
     if (error instanceof ServiceUnavailableException) {
-      return 'Layanan sedang tidak tersedia. Silakan coba lagi beberapa saat lagi.';
+      return 'Layanan sedang tidak tersedia dan status transaksi belum dapat dipastikan. Jangan kirim konfirmasi berulang; periksa daftar transaksi terlebih dahulu.';
     }
 
-    return 'Transaksi gagal dibuat. Silakan coba lagi.';
+    return 'Status transaksi belum dapat dipastikan. Jangan kirim konfirmasi berulang; periksa daftar transaksi terlebih dahulu.';
   }
 
   private handleNotFound(error: NotFoundException): string {

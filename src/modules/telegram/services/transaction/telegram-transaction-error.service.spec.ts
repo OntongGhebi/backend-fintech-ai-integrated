@@ -89,7 +89,7 @@ describe('TelegramTransactionErrorService', () => {
     const error = new ConflictException();
 
     expect(service.handle(error)).toBe(
-      'Transaksi tidak dapat dibuat karena terjadi konflik. Silakan coba lagi.',
+      'Status transaksi belum dapat dipastikan karena terjadi konflik. Jangan kirim konfirmasi berulang; periksa daftar transaksi terlebih dahulu.',
     );
   });
 
@@ -105,7 +105,7 @@ describe('TelegramTransactionErrorService', () => {
     const error = new ServiceUnavailableException();
 
     expect(service.handle(error)).toBe(
-      'Layanan sedang tidak tersedia. Silakan coba lagi beberapa saat lagi.',
+      'Layanan sedang tidak tersedia dan status transaksi belum dapat dipastikan. Jangan kirim konfirmasi berulang; periksa daftar transaksi terlebih dahulu.',
     );
   });
 
@@ -115,13 +115,13 @@ describe('TelegramTransactionErrorService', () => {
     );
 
     expect(service.handle(error)).toBe(
-      'Transaksi gagal dibuat. Silakan coba lagi.',
+      'Status transaksi belum dapat dipastikan. Jangan kirim konfirmasi berulang; periksa daftar transaksi terlebih dahulu.',
     );
   });
 
   it('should hide non-error thrown values', () => {
     expect(service.handle('database failure')).toBe(
-      'Transaksi gagal dibuat. Silakan coba lagi.',
+      'Status transaksi belum dapat dipastikan. Jangan kirim konfirmasi berulang; periksa daftar transaksi terlebih dahulu.',
     );
   });
 

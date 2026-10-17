@@ -396,7 +396,7 @@ describe('TelegramTransactionConfirmationService', () => {
     );
 
     errorService.handle.mockReturnValue(
-      'Transaksi gagal dibuat. Silakan coba lagi.',
+      'Status transaksi belum dapat dipastikan. Jangan kirim konfirmasi berulang; periksa daftar transaksi terlebih dahulu.',
     );
 
     const result = await service.handle(
@@ -409,7 +409,8 @@ describe('TelegramTransactionConfirmationService', () => {
       handled: true,
       action: 'CONFIRM',
       status: 'PROCESSING',
-      message: 'Transaksi gagal dibuat. Silakan coba lagi.',
+      message:
+        'Status transaksi belum dapat dipastikan. Jangan kirim konfirmasi berulang; periksa daftar transaksi terlebih dahulu.',
     });
 
     expect(confirmedTransactionService.create).toHaveBeenCalledTimes(1);
