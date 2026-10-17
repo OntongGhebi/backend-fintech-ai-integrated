@@ -1,0 +1,79 @@
+name: Release Readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-release:
+    name: Verify Release Candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      NODE_ENV: test
+      PORT: '3000'
+      API_PREFIX: api/v1
+      APP_TIMEZONE: Asia/Jakarta
+      FRONTEND_URL: http://localhost:5173
+      DATABASE_URL: postgresql://ci_user:ci_password@localhost:5432/fintech_ci?schema=public
+      JWT_ACCESS_SECRET: ci-only-access-secret-not-for-production-0001
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-production-0002
+      REDIS_HOST: localhost
+      REDIS_PORT: '6379'
+      REDIS_DB: '0'
+      AI_ENABLED: 'false'
+      AI_PROVIDER: none
+      AI_API_KEY: ''
+      AI_BASE_URL: ''
+      AI_MODEL: ''
+      AI_TIMEOUT_MS: '10000'
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npm run db:validate
+
+      - name: Verify tracked Prisma migrations
+        shell: bash
+        run: |
+          test -f src/database/prisma/migrations/migration_lock.toml
+
+          migration_count=$(git ls-files \
+            'src/database/prisma/migrations/*/migration.sql' | wc -l)
+
+          if [ "$migration_count" -eq 0 ]; then
+            echo "ERROR: No tracked Prisma migration files were found."
+            exit 1
+          fi
+
+          echo "Tracked Prisma migration files: $migration_count"
+
+      - name: Generate Prisma Client
+        run: npm run db:generate
+
+      - name: Build application
+        run: npm run build
+
+      - name: Run unit tests
+        run: npm test -- --runInBand
+
+      - name: Check patch formatting
+        run: git diff --check
