@@ -139,6 +139,15 @@ enum TelegramProcessingStatus {
   IGNORED
 }
 
+enum TelegramTransactionConfirmationStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  CANCELLED
+  EXPIRED
+  COMPLETED
+}
+
 enum AIMessageRole {
   SYSTEM
   USER
@@ -186,6 +195,7 @@ model User {
   transactions            Transaction[]
   budgets                 Budget[]
   recurringTransactions   RecurringTransaction[]
+  telegramTransactionConfirmations TelegramTransactionConfirmation[]
 
   subscriptions Subscription[]
   payments      Payment[]
@@ -354,6 +364,7 @@ model Transaction {
   userId     String  @db.Uuid
   accountId  String  @db.Uuid
   categoryId String? @db.Uuid
+  telegramConfirmationId String? @unique @db.Uuid
 
   recurringTransactionId String? @db.Uuid
   recurringExecutionKey  String? @unique @db.VarChar(255)
@@ -377,6 +388,7 @@ model Transaction {
   category Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
   recurringTransaction RecurringTransaction? @relation(fields: [recurringTransactionId], references: [id])
+  telegramConfirmation TelegramTransactionConfirmation? @relation("TelegramConfirmationTransaction", fields: [telegramConfirmationId], references: [id], onDelete: Restrict)
 
   @@index([userId, transactionDate])
   @@index([userId, type, transactionDate])
@@ -692,6 +704,7 @@ model TelegramAccount {
   // Relations
   user     User              @relation(fields: [userId], references: [id], onDelete: Restrict)
   messages TelegramMessage[]
+  confirmations TelegramTransactionConfirmation[]
 
   @@unique([telegramUserId])
   @@index([userId])
@@ -734,7 +747,43 @@ model TelegramMessage {
 }
 
 // ============================================================
-// 18. AI CONVERSATIONS
+// 18. TELEGRAM TRANSACTION CONFIRMATION
+// ============================================================
+
+model TelegramTransactionConfirmation {
+  id                String @id @default(uuid()) @db.Uuid
+  userId            String @db.Uuid
+  telegramAccountId String @db.Uuid
+
+  chatId          String @db.VarChar(100)
+  sourceMessageId String @db.VarChar(100)
+  telegramUserId  BigInt
+
+  intent Json @db.JsonB
+
+  status TelegramTransactionConfirmationStatus @default(PENDING)
+
+  expiresAt DateTime @db.Timestamptz(6)
+
+  transaction Transaction? @relation("TelegramConfirmationTransaction")
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  telegramAccount TelegramAccount @relation(fields: [telegramAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, sourceMessageId])
+  @@index([userId, status, createdAt])
+  @@index([chatId, status, createdAt])
+  @@index([status, expiresAt])
+  @@map("telegram_transaction_confirmations")
+}
+
+
+// ============================================================
+// 19. AI CONVERSATIONS
 // ============================================================
 
 model AIConversation {
@@ -756,7 +805,7 @@ model AIConversation {
 }
 
 // ============================================================
-// 19. AI MESSAGES
+// 20. AI MESSAGES
 // ============================================================
 
 model AIMessage {
@@ -779,7 +828,7 @@ model AIMessage {
 }
 
 // ============================================================
-// 20. AI USAGE
+// 21. AI USAGE
 // ============================================================
 
 model AIUsage {
@@ -808,7 +857,7 @@ model AIUsage {
 }
 
 // ============================================================
-// 21. NOTIFICATIONS
+// 22. NOTIFICATIONS
 // ============================================================
 
 model Notification {
@@ -836,7 +885,7 @@ model Notification {
 }
 
 // ============================================================
-// 22. NOTIFICATION PREFERENCES
+// 23. NOTIFICATION PREFERENCES
 // ============================================================
 
 model NotificationPreference {
@@ -862,7 +911,7 @@ model NotificationPreference {
 }
 
 // ============================================================
-// 23. AUDIT LOGS
+// 24. AUDIT LOGS
 // ============================================================
 
 model AuditLog {
@@ -891,7 +940,7 @@ model AuditLog {
 }
 
 // ============================================================
-// 24. WEBHOOK EVENTS
+// 25. WEBHOOK EVENTS
 // ============================================================
 
 model WebhookEvent {
