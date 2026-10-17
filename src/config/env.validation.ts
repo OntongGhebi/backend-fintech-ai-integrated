@@ -1,6 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import {
   IsIn,
+  IsNotEmpty,
   IsNumberString,
   IsOptional,
   IsString,
@@ -8,6 +9,7 @@ import {
 } from 'class-validator';
 
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
+const SUPPORTED_AI_PROVIDERS = ['none', 'openai-compatible'] as const;
 
 class EnvironmentVariables {
   @IsOptional()
@@ -31,9 +33,11 @@ class EnvironmentVariables {
   FRONTEND_URL?: string;
 
   @IsString()
+  @IsNotEmpty()
   DATABASE_URL!: string;
 
   @IsString()
+  @IsNotEmpty()
   JWT_ACCESS_SECRET!: string;
 
   @IsOptional()
@@ -41,6 +45,7 @@ class EnvironmentVariables {
   JWT_ACCESS_EXPIRES_IN?: string;
 
   @IsString()
+  @IsNotEmpty()
   JWT_REFRESH_SECRET!: string;
 
   @IsOptional()
@@ -72,7 +77,7 @@ class EnvironmentVariables {
   AI_ENABLED?: string;
 
   @IsOptional()
-  @IsString()
+  @IsIn([...SUPPORTED_AI_PROVIDERS])
   AI_PROVIDER?: string;
 
   @IsOptional()
@@ -92,20 +97,22 @@ class EnvironmentVariables {
   AI_TIMEOUT_MS?: string;
 }
 
+function getNonEmptyString(
+  config: Record<string, unknown>,
+  key: string,
+): string {
+  const value = config[key];
+
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 function validateProductionSecurity(config: Record<string, unknown>): void {
   if (config.NODE_ENV !== 'production') {
     return;
   }
 
-  const accessSecret =
-    typeof config.JWT_ACCESS_SECRET === 'string'
-      ? config.JWT_ACCESS_SECRET
-      : '';
-
-  const refreshSecret =
-    typeof config.JWT_REFRESH_SECRET === 'string'
-      ? config.JWT_REFRESH_SECRET
-      : '';
+  const accessSecret = getNonEmptyString(config, 'JWT_ACCESS_SECRET');
+  const refreshSecret = getNonEmptyString(config, 'JWT_REFRESH_SECRET');
 
   if (accessSecret.length < MIN_PRODUCTION_SECRET_LENGTH) {
     throw new Error(
@@ -125,8 +132,7 @@ function validateProductionSecurity(config: Record<string, unknown>): void {
     );
   }
 
-  const frontendUrl =
-    typeof config.FRONTEND_URL === 'string' ? config.FRONTEND_URL.trim() : '';
+  const frontendUrl = getNonEmptyString(config, 'FRONTEND_URL');
 
   if (!frontendUrl) {
     throw new Error(
@@ -149,6 +155,70 @@ function validateProductionSecurity(config: Record<string, unknown>): void {
       'Environment validation failed: FRONTEND_URL must use HTTPS in production.',
     );
   }
+
+  const redisUrl = getNonEmptyString(config, 'REDIS_URL');
+  const redisHost = getNonEmptyString(config, 'REDIS_HOST');
+
+  if (!redisUrl && !redisHost) {
+    throw new Error(
+      'Environment validation failed: REDIS_URL or REDIS_HOST must be explicitly configured in production.',
+    );
+  }
+}
+
+function validateAiConfiguration(config: Record<string, unknown>): void {
+  const provider = getNonEmptyString(config, 'AI_PROVIDER') || 'none';
+  const explicitlyEnabled = config.AI_ENABLED === 'true';
+  const providerConfigured = provider !== 'none';
+  const aiEnabled = explicitlyEnabled || providerConfigured;
+
+  if (!aiEnabled) {
+    return;
+  }
+
+  if (provider === 'none') {
+    throw new Error(
+      'Environment validation failed: AI_PROVIDER must be configured when AI_ENABLED=true.',
+    );
+  }
+
+  const apiKey = getNonEmptyString(config, 'AI_API_KEY');
+  const baseUrl = getNonEmptyString(config, 'AI_BASE_URL');
+  const model = getNonEmptyString(config, 'AI_MODEL');
+
+  if (!apiKey) {
+    throw new Error(
+      'Environment validation failed: AI_API_KEY is required when AI is enabled.',
+    );
+  }
+
+  if (!baseUrl) {
+    throw new Error(
+      'Environment validation failed: AI_BASE_URL is required when AI is enabled.',
+    );
+  }
+
+  let parsedBaseUrl: URL;
+
+  try {
+    parsedBaseUrl = new URL(baseUrl);
+  } catch {
+    throw new Error(
+      'Environment validation failed: AI_BASE_URL must be a valid HTTP or HTTPS URL when AI is enabled.',
+    );
+  }
+
+  if (!['http:', 'https:'].includes(parsedBaseUrl.protocol)) {
+    throw new Error(
+      'Environment validation failed: AI_BASE_URL must use HTTP or HTTPS when AI is enabled.',
+    );
+  }
+
+  if (!model) {
+    throw new Error(
+      'Environment validation failed: AI_MODEL is required when AI is enabled.',
+    );
+  }
 }
 
 export function validateEnvironment(
@@ -169,6 +239,7 @@ export function validateEnvironment(
   }
 
   validateProductionSecurity(config);
+  validateAiConfiguration(config);
 
   return config;
 }
