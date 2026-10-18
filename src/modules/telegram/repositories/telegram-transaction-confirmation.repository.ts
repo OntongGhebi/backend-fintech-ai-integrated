@@ -1,13 +1,12 @@
 import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from 'src/database/prisma/prisma.service';
-import { TelegramTransactionConfirmationStatus } from '../../../../generated/prisma/enums';
 import { Prisma } from '../../../../generated/prisma/client';
+import { TelegramTransactionConfirmationStatus } from '../../../../generated/prisma/enums';
 
 import {
   CreateTransactionConfirmationInput,
   PendingTransactionConfirmation,
-  //   TransactionConfirmationStatus,
 } from '../transaction-message/types/transaction-confirmation.types';
 import { ResolvedTransactionIntent } from '../transaction-message/types/resolved-transaction-intent.types';
 
@@ -22,16 +21,21 @@ type ConfirmationRecord = {
   status: TelegramTransactionConfirmationStatus;
   createdAt: Date;
   expiresAt: Date;
+  updatedAt?: Date;
   transaction?: { id: string } | null;
 };
 
 type ConfirmationUpdateManyArgs = {
   where: {
-    id: string;
+    id?: string;
+    chatId?: string;
     status: TelegramTransactionConfirmationStatus;
     expiresAt?: { lte?: Date; gt?: Date };
+    updatedAt?: { lte?: Date };
   };
-  data: { status: TelegramTransactionConfirmationStatus };
+  data: {
+    status: TelegramTransactionConfirmationStatus;
+  };
 };
 
 @Injectable()
@@ -55,27 +59,9 @@ export class TelegramTransactionConfirmationRepository {
     const now = new Date();
 
     try {
-      const confirmationModel = (
-        this.prisma as unknown as {
-          telegramTransactionConfirmation: {
-            create: (args: {
-              data: {
-                userId: string;
-                telegramAccountId: string;
-                chatId: string;
-                sourceMessageId: string;
-                telegramUserId: bigint;
-                intent: Prisma.InputJsonValue;
-                status: TelegramTransactionConfirmationStatus;
-                expiresAt: Date;
-              };
-              include: { transaction: { select: { id: true } } };
-            }) => Promise<ConfirmationRecord>;
-          };
-        }
-      ).telegramTransactionConfirmation;
+      const model = this.confirmationModel();
 
-      const record = await confirmationModel.create({
+      const record = await model.create({
         data: {
           userId: input.userId,
           telegramAccountId: input.telegramAccountId,
@@ -114,18 +100,7 @@ export class TelegramTransactionConfirmationRepository {
   async findById(
     confirmationId: string,
   ): Promise<PendingTransactionConfirmation | undefined> {
-    const confirmationModel = (
-      this.prisma as unknown as {
-        telegramTransactionConfirmation: {
-          findUnique: (args: {
-            where: { id: string };
-            include: { transaction: { select: { id: true } } };
-          }) => Promise<ConfirmationRecord | null>;
-        };
-      }
-    ).telegramTransactionConfirmation;
-
-    const record = await confirmationModel.findUnique({
+    const record = await this.confirmationModel().findUnique({
       where: { id: confirmationId },
       include: { transaction: { select: { id: true } } },
     });
@@ -137,23 +112,7 @@ export class TelegramTransactionConfirmationRepository {
     chatId: string,
     sourceMessageId: string,
   ): Promise<PendingTransactionConfirmation | undefined> {
-    const confirmationModel = (
-      this.prisma as unknown as {
-        telegramTransactionConfirmation: {
-          findUnique: (args: {
-            where: {
-              chatId_sourceMessageId: {
-                chatId: string;
-                sourceMessageId: string;
-              };
-            };
-            include: { transaction: { select: { id: true } } };
-          }) => Promise<ConfirmationRecord | null>;
-        };
-      }
-    ).telegramTransactionConfirmation;
-
-    const record = await confirmationModel.findUnique({
+    const record = await this.confirmationModel().findUnique({
       where: {
         chatId_sourceMessageId: {
           chatId,
@@ -169,22 +128,10 @@ export class TelegramTransactionConfirmationRepository {
   async findPendingByChatId(
     chatId: string,
   ): Promise<PendingTransactionConfirmation | undefined> {
-    const confirmationModel = (
-      this.prisma as unknown as {
-        telegramTransactionConfirmation: {
-          findFirst: (args: {
-            where: {
-              chatId: string;
-              status: TelegramTransactionConfirmationStatus;
-            };
-            orderBy: { createdAt: 'desc' };
-            include: { transaction: { select: { id: true } } };
-          }) => Promise<ConfirmationRecord | null>;
-        };
-      }
-    ).telegramTransactionConfirmation;
+    await this.recoverStaleProcessingByChatId(chatId);
+    await this.expirePendingByChatId(chatId);
 
-    const record = await confirmationModel.findFirst({
+    const record = await this.confirmationModel().findFirst({
       where: {
         chatId,
         status: TelegramTransactionConfirmationStatus.PENDING,
@@ -193,69 +140,72 @@ export class TelegramTransactionConfirmationRepository {
       include: { transaction: { select: { id: true } } },
     });
 
-    if (!record) {
-      return undefined;
-    }
-
-    if (record.expiresAt.getTime() <= Date.now()) {
-      await this.updateConfirmationMany({
-        where: {
-          id: record.id,
-          status: TelegramTransactionConfirmationStatus.PENDING,
-          expiresAt: { lte: new Date() },
-        },
-        data: { status: TelegramTransactionConfirmationStatus.EXPIRED },
-      });
-
-      return this.findById(record.id);
-    }
-
-    return this.toDomain(record);
+    return record ? this.toDomain(record) : undefined;
   }
 
   async findLatestByChatId(
     chatId: string,
   ): Promise<PendingTransactionConfirmation | undefined> {
-    const confirmationModel = (
-      this.prisma as unknown as {
-        telegramTransactionConfirmation: {
-          findFirst: (args: {
-            where: { chatId: string };
-            orderBy: { createdAt: 'desc' };
-            include: { transaction: { select: { id: true } } };
-          }) => Promise<ConfirmationRecord | null>;
-        };
-      }
-    ).telegramTransactionConfirmation;
+    // Recover first. A recovered confirmation whose TTL has elapsed must
+    // expire immediately rather than become actionable again.
+    await this.recoverStaleProcessingByChatId(chatId);
+    await this.expirePendingByChatId(chatId);
 
-    const record = await confirmationModel.findFirst({
+    const record = await this.confirmationModel().findFirst({
       where: { chatId },
       orderBy: { createdAt: 'desc' },
       include: { transaction: { select: { id: true } } },
     });
 
-    if (!record) {
-      return undefined;
-    }
+    return record ? this.toDomain(record) : undefined;
+  }
 
-    // Expire stale pending confirmations even if the user has not replied yet.
-    if (
-      record.status === TelegramTransactionConfirmationStatus.PENDING &&
-      record.expiresAt.getTime() <= Date.now()
-    ) {
-      await this.updateConfirmationMany({
-        where: {
-          id: record.id,
-          status: TelegramTransactionConfirmationStatus.PENDING,
-          expiresAt: { lte: new Date() },
-        },
-        data: { status: TelegramTransactionConfirmationStatus.EXPIRED },
-      });
+  /**
+   * Restores abandoned PROCESSING confirmations to PENDING after the recovery
+   * threshold. The conditional update prevents a stale recovery request from
+   * overwriting a status changed by another request.
+   *
+   * A transaction and COMPLETED status are committed atomically by the
+   * transaction repository, so a stale PROCESSING state is safe to retry.
+   */
+  async recoverStaleProcessingByChatId(
+    chatId: string,
+    staleBefore: Date = new Date(Date.now() - this.ttlMs),
+  ): Promise<number> {
+    const result = await this.updateConfirmationMany({
+      where: {
+        chatId,
+        status: TelegramTransactionConfirmationStatus.PROCESSING,
+        updatedAt: { lte: staleBefore },
+      },
+      data: {
+        status: TelegramTransactionConfirmationStatus.PENDING,
+      },
+    });
 
-      return this.findById(record.id);
-    }
+    return result.count;
+  }
 
-    return this.toDomain(record);
+  /**
+   * Expires every pending confirmation in the chat whose TTL has elapsed.
+   * The status predicate makes concurrent expiry attempts safe.
+   */
+  async expirePendingByChatId(
+    chatId: string,
+    now: Date = new Date(),
+  ): Promise<number> {
+    const result = await this.updateConfirmationMany({
+      where: {
+        chatId,
+        status: TelegramTransactionConfirmationStatus.PENDING,
+        expiresAt: { lte: now },
+      },
+      data: {
+        status: TelegramTransactionConfirmationStatus.EXPIRED,
+      },
+    });
+
+    return result.count;
   }
 
   async confirm(
@@ -263,28 +213,15 @@ export class TelegramTransactionConfirmationRepository {
   ): Promise<PendingTransactionConfirmation | undefined> {
     const now = new Date();
 
-    const confirmationModel = (
-      this.prisma as unknown as {
-        telegramTransactionConfirmation: {
-          updateMany: (args: {
-            where: {
-              id: string;
-              status: TelegramTransactionConfirmationStatus;
-              expiresAt: { gt: Date };
-            };
-            data: { status: TelegramTransactionConfirmationStatus };
-          }) => Promise<{ count: number }>;
-        };
-      }
-    ).telegramTransactionConfirmation;
-
-    const result = await confirmationModel.updateMany({
+    const result = await this.updateConfirmationMany({
       where: {
         id: confirmationId,
         status: TelegramTransactionConfirmationStatus.PENDING,
         expiresAt: { gt: now },
       },
-      data: { status: TelegramTransactionConfirmationStatus.CONFIRMED },
+      data: {
+        status: TelegramTransactionConfirmationStatus.CONFIRMED,
+      },
     });
 
     if (result.count === 0) {
@@ -294,7 +231,9 @@ export class TelegramTransactionConfirmationRepository {
           status: TelegramTransactionConfirmationStatus.PENDING,
           expiresAt: { lte: now },
         },
-        data: { status: TelegramTransactionConfirmationStatus.EXPIRED },
+        data: {
+          status: TelegramTransactionConfirmationStatus.EXPIRED,
+        },
       });
     }
 
@@ -309,7 +248,9 @@ export class TelegramTransactionConfirmationRepository {
         id: confirmationId,
         status: TelegramTransactionConfirmationStatus.CONFIRMED,
       },
-      data: { status: TelegramTransactionConfirmationStatus.PROCESSING },
+      data: {
+        status: TelegramTransactionConfirmationStatus.PROCESSING,
+      },
     });
 
     return this.findById(confirmationId);
@@ -326,7 +267,9 @@ export class TelegramTransactionConfirmationRepository {
         status: TelegramTransactionConfirmationStatus.PENDING,
         expiresAt: { gt: now },
       },
-      data: { status: TelegramTransactionConfirmationStatus.CANCELLED },
+      data: {
+        status: TelegramTransactionConfirmationStatus.CANCELLED,
+      },
     });
 
     if (cancelled.count === 0) {
@@ -336,7 +279,9 @@ export class TelegramTransactionConfirmationRepository {
           status: TelegramTransactionConfirmationStatus.PENDING,
           expiresAt: { lte: now },
         },
-        data: { status: TelegramTransactionConfirmationStatus.EXPIRED },
+        data: {
+          status: TelegramTransactionConfirmationStatus.EXPIRED,
+        },
       });
     }
 
@@ -344,9 +289,9 @@ export class TelegramTransactionConfirmationRepository {
   }
 
   /**
-   * Links the transaction to its confirmation and completes the confirmation
-   * atomically. The unique FK on Transaction.telegramConfirmationId protects
-   * against linking one transaction to multiple confirmations.
+   * Compatibility operation for the existing Telegram confirmation flow.
+   * Transaction creation should use the atomic transaction repository method;
+   * this method only links a transaction that has already been created.
    */
   async markCompleted(
     confirmationId: string,
@@ -406,7 +351,9 @@ export class TelegramTransactionConfirmationRepository {
 
       await transactionClient.telegramTransactionConfirmation.update({
         where: { id: confirmationId },
-        data: { status: TelegramTransactionConfirmationStatus.COMPLETED },
+        data: {
+          status: TelegramTransactionConfirmationStatus.COMPLETED,
+        },
       });
     });
 
@@ -472,19 +419,55 @@ export class TelegramTransactionConfirmationRepository {
     );
   }
 
-  private updateConfirmationMany(
-    args: ConfirmationUpdateManyArgs,
-  ): Promise<{ count: number }> {
-    const confirmationModel = (
+  private confirmationModel() {
+    return (
       this.prisma as unknown as {
         telegramTransactionConfirmation: {
+          create: (args: {
+            data: {
+              userId: string;
+              telegramAccountId: string;
+              chatId: string;
+              sourceMessageId: string;
+              telegramUserId: bigint;
+              intent: Prisma.InputJsonValue;
+              status: TelegramTransactionConfirmationStatus;
+              expiresAt: Date;
+            };
+            include: { transaction: { select: { id: true } } };
+          }) => Promise<ConfirmationRecord>;
+          findUnique: (args: {
+            where:
+              | { id: string }
+              | {
+                  chatId_sourceMessageId: {
+                    chatId: string;
+                    sourceMessageId: string;
+                  };
+                };
+            include: { transaction: { select: { id: true } } };
+          }) => Promise<ConfirmationRecord | null>;
+          findFirst: (args: {
+            where:
+              | { chatId: string }
+              | {
+                  chatId: string;
+                  status: TelegramTransactionConfirmationStatus;
+                };
+            orderBy: { createdAt: 'desc' };
+            include: { transaction: { select: { id: true } } };
+          }) => Promise<ConfirmationRecord | null>;
           updateMany: (
-            updateArgs: ConfirmationUpdateManyArgs,
+            args: ConfirmationUpdateManyArgs,
           ) => Promise<{ count: number }>;
         };
       }
     ).telegramTransactionConfirmation;
+  }
 
-    return confirmationModel.updateMany(args);
+  private updateConfirmationMany(
+    args: ConfirmationUpdateManyArgs,
+  ): Promise<{ count: number }> {
+    return this.confirmationModel().updateMany(args);
   }
 }

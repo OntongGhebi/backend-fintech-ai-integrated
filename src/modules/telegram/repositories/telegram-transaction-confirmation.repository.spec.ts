@@ -1,9 +1,12 @@
-import { TelegramTransactionConfirmationRepository } from './telegram-transaction-confirmation.repository';
+import { Prisma } from '../../../../generated/prisma/client';
+import { TelegramTransactionConfirmationStatus as Status } from '../../../../generated/prisma/enums';
 import { PrismaService } from 'src/database/prisma/prisma.service';
-import { TelegramTransactionConfirmationStatus } from '../../../../generated/prisma/enums';
+
+import { TelegramTransactionConfirmationRepository } from './telegram-transaction-confirmation.repository';
 
 describe('TelegramTransactionConfirmationRepository', () => {
   let repository: TelegramTransactionConfirmationRepository;
+
   let prisma: {
     telegramTransactionConfirmation: {
       create: jest.Mock;
@@ -47,8 +50,9 @@ describe('TelegramTransactionConfirmationRepository', () => {
     telegramAccountId: 'telegram-account-id',
     telegramUserId: BigInt(123456),
     intent,
-    status: TelegramTransactionConfirmationStatus.PENDING,
+    status: Status.PENDING,
     createdAt: now,
+    updatedAt: now,
     expiresAt: new Date(now.getTime() + 5 * 60 * 1000),
     transaction: null,
     ...overrides,
@@ -68,6 +72,10 @@ describe('TelegramTransactionConfirmationRepository', () => {
         update: jest.fn(),
       },
     };
+
+    prisma.telegramTransactionConfirmation.updateMany.mockResolvedValue({
+      count: 0,
+    });
 
     repository = new TelegramTransactionConfirmationRepository(
       prisma as unknown as PrismaService,
@@ -92,13 +100,14 @@ describe('TelegramTransactionConfirmationRepository', () => {
     expect(result.telegramUserId).toBe(BigInt(123456));
     expect(result.intent.amount).toBe(25000);
     expect(result.createdAt).toEqual(now);
+
     expect(prisma.telegramTransactionConfirmation.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           userId: 'user-id',
           chatId: 'chat-id',
           sourceMessageId: 'message-id',
-          status: TelegramTransactionConfirmationStatus.PENDING,
+          status: Status.PENDING,
           intent: expect.objectContaining({ amount: 25000 }),
         }),
         include: { transaction: { select: { id: true } } },
@@ -108,7 +117,7 @@ describe('TelegramTransactionConfirmationRepository', () => {
 
   it('returns an existing confirmation for the same chat and source message', async () => {
     prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
-      record({ status: TelegramTransactionConfirmationStatus.CONFIRMED }),
+      record({ status: Status.CONFIRMED }),
     );
 
     const result = await repository.create({
@@ -144,36 +153,141 @@ describe('TelegramTransactionConfirmationRepository', () => {
     );
   });
 
-  it('marks an expired pending confirmation as expired', async () => {
-    prisma.telegramTransactionConfirmation.findFirst.mockResolvedValue(
-      record({
-        expiresAt: new Date(now.getTime() - 1000),
-      }),
-    );
+  it('recovers a stale PROCESSING confirmation to PENDING', async () => {
     prisma.telegramTransactionConfirmation.updateMany.mockResolvedValue({
       count: 1,
     });
-    prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
-      record({
-        status: TelegramTransactionConfirmationStatus.EXPIRED,
-        expiresAt: new Date(now.getTime() - 1000),
-      }),
+
+    const staleBefore = new Date('2026-10-17T09:55:00.000Z');
+    const count = await repository.recoverStaleProcessingByChatId(
+      'chat-id',
+      staleBefore,
     );
 
-    const result = await repository.findPendingByChatId('chat-id');
+    expect(count).toBe(1);
+    expect(
+      prisma.telegramTransactionConfirmation.updateMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        chatId: 'chat-id',
+        status: Status.PROCESSING,
+        updatedAt: { lte: staleBefore },
+      },
+      data: { status: Status.PENDING },
+    });
+  });
 
-    expect(result?.status).toBe('EXPIRED');
+  it('does not overwrite a PROCESSING status if no stale record matched', async () => {
+    prisma.telegramTransactionConfirmation.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    const count = await repository.recoverStaleProcessingByChatId(
+      'chat-id',
+      new Date('2026-10-17T09:55:00.000Z'),
+    );
+
+    expect(count).toBe(0);
     expect(
       prisma.telegramTransactionConfirmation.updateMany,
     ).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          id: 'confirmation-id',
-          status: TelegramTransactionConfirmationStatus.PENDING,
+          chatId: 'chat-id',
+          status: Status.PROCESSING,
         }),
-        data: { status: TelegramTransactionConfirmationStatus.EXPIRED },
+        data: { status: Status.PENDING },
       }),
     );
+  });
+
+  it('expires pending confirmations whose expiry time has elapsed', async () => {
+    prisma.telegramTransactionConfirmation.updateMany.mockResolvedValue({
+      count: 2,
+    });
+
+    const count = await repository.expirePendingByChatId(
+      'chat-id',
+      new Date('2026-10-17T10:10:00.000Z'),
+    );
+
+    expect(count).toBe(2);
+    expect(
+      prisma.telegramTransactionConfirmation.updateMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        chatId: 'chat-id',
+        status: Status.PENDING,
+        expiresAt: { lte: new Date('2026-10-17T10:10:00.000Z') },
+      },
+      data: { status: Status.EXPIRED },
+    });
+  });
+
+  it('runs recovery before expiry and reads the latest confirmation', async () => {
+    prisma.telegramTransactionConfirmation.findFirst.mockResolvedValue(
+      record({ status: Status.EXPIRED }),
+    );
+    prisma.telegramTransactionConfirmation.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 });
+
+    const result = await repository.findLatestByChatId('chat-id');
+
+    expect(result?.status).toBe('EXPIRED');
+    expect(
+      prisma.telegramTransactionConfirmation.updateMany,
+    ).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          chatId: 'chat-id',
+          status: Status.PROCESSING,
+          updatedAt: expect.objectContaining({ lte: expect.any(Date) }),
+        }),
+        data: { status: Status.PENDING },
+      }),
+    );
+    expect(
+      prisma.telegramTransactionConfirmation.updateMany,
+    ).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: {
+          chatId: 'chat-id',
+          status: Status.PENDING,
+          expiresAt: { lte: expect.any(Date) },
+        },
+        data: { status: Status.EXPIRED },
+      }),
+    );
+    expect(
+      prisma.telegramTransactionConfirmation.findFirst,
+    ).toHaveBeenCalledWith({
+      where: { chatId: 'chat-id' },
+      orderBy: { createdAt: 'desc' },
+      include: { transaction: { select: { id: true } } },
+    });
+  });
+
+  it('finds a pending confirmation by chat id', async () => {
+    prisma.telegramTransactionConfirmation.findFirst.mockResolvedValue(
+      record(),
+    );
+
+    const result = await repository.findPendingByChatId('chat-id');
+
+    expect(result?.status).toBe('PENDING');
+    expect(
+      prisma.telegramTransactionConfirmation.findFirst,
+    ).toHaveBeenCalledWith({
+      where: {
+        chatId: 'chat-id',
+        status: Status.PENDING,
+      },
+      orderBy: { createdAt: 'desc' },
+      include: { transaction: { select: { id: true } } },
+    });
   });
 
   it('confirms a pending, non-expired confirmation', async () => {
@@ -181,7 +295,7 @@ describe('TelegramTransactionConfirmationRepository', () => {
       count: 1,
     });
     prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
-      record({ status: TelegramTransactionConfirmationStatus.CONFIRMED }),
+      record({ status: Status.CONFIRMED }),
     );
 
     const result = await repository.confirm('confirmation-id');
@@ -193,10 +307,10 @@ describe('TelegramTransactionConfirmationRepository', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           id: 'confirmation-id',
-          status: TelegramTransactionConfirmationStatus.PENDING,
+          status: Status.PENDING,
           expiresAt: expect.objectContaining({ gt: expect.any(Date) }),
         }),
-        data: { status: TelegramTransactionConfirmationStatus.CONFIRMED },
+        data: { status: Status.CONFIRMED },
       }),
     );
   });
@@ -206,7 +320,7 @@ describe('TelegramTransactionConfirmationRepository', () => {
       count: 0,
     });
     prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
-      record({ status: TelegramTransactionConfirmationStatus.CANCELLED }),
+      record({ status: Status.CANCELLED }),
     );
 
     const result = await repository.confirm('confirmation-id');
@@ -214,18 +328,29 @@ describe('TelegramTransactionConfirmationRepository', () => {
     expect(result?.status).toBe('CANCELLED');
   });
 
+  it('does not cancel a confirmation that is no longer pending', async () => {
+    prisma.telegramTransactionConfirmation.updateMany.mockResolvedValue({
+      count: 0,
+    });
+    prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
+      record({ status: Status.CONFIRMED }),
+    );
+
+    const result = await repository.cancel('confirmation-id');
+
+    expect(result?.status).toBe('CONFIRMED');
+  });
+
   it('links the transaction and marks confirmation completed in one database transaction', async () => {
     const tx = {
       telegramTransactionConfirmation: {
         findUnique: jest.fn().mockResolvedValue({
           id: 'confirmation-id',
-          status: TelegramTransactionConfirmationStatus.PROCESSING,
+          status: Status.PROCESSING,
         }),
         update: jest
           .fn()
-          .mockResolvedValue(
-            record({ status: TelegramTransactionConfirmationStatus.COMPLETED }),
-          ),
+          .mockResolvedValue(record({ status: Status.COMPLETED })),
       },
       transaction: {
         update: jest.fn().mockResolvedValue({
@@ -236,12 +361,13 @@ describe('TelegramTransactionConfirmationRepository', () => {
     };
 
     prisma.$transaction.mockImplementation(
-      async (callback: (transactionClient: typeof tx) => Promise<void>) =>
+      async (callback: (transactionClient: typeof tx) => Promise<unknown>) =>
         callback(tx),
     );
+
     prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
       record({
-        status: TelegramTransactionConfirmationStatus.COMPLETED,
+        status: Status.COMPLETED,
         transaction: { id: 'transaction-id' },
       }),
     );
@@ -258,7 +384,7 @@ describe('TelegramTransactionConfirmationRepository', () => {
     });
     expect(tx.telegramTransactionConfirmation.update).toHaveBeenCalledWith({
       where: { id: 'confirmation-id' },
-      data: { status: TelegramTransactionConfirmationStatus.COMPLETED },
+      data: { status: Status.COMPLETED },
     });
     expect(result?.status).toBe('COMPLETED');
     expect(result?.transactionId).toBe('transaction-id');
@@ -270,5 +396,62 @@ describe('TelegramTransactionConfirmationRepository', () => {
     expect(repository.parseAction('batal')).toBe('CANCEL');
     expect(repository.parseAction('NO')).toBe('CANCEL');
     expect(repository.parseAction('mungkin')).toBe('UNKNOWN');
+  });
+
+  it('serializes and restores a transaction date in persisted intent', async () => {
+    const transactionDate = new Date('2026-10-17T09:30:00.000Z');
+    const persistedIntent = {
+      ...intent,
+      transactionDate: transactionDate.toISOString(),
+    };
+
+    prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
+      record({ intent: persistedIntent }),
+    );
+
+    const result = await repository.findById('confirmation-id');
+
+    expect(result?.intent.transactionDate).toEqual(transactionDate);
+  });
+
+  it('rethrows unique violations if no duplicate confirmation exists', async () => {
+    const error = Object.assign(new Error('Unique violation'), {
+      code: 'P2002',
+    });
+
+    prisma.telegramTransactionConfirmation.findUnique
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(error);
+
+    prisma.telegramTransactionConfirmation.create.mockRejectedValue(error);
+
+    await expect(
+      repository.create({
+        userId: 'user-id',
+        chatId: 'chat-id',
+        sourceMessageId: 'message-id',
+        telegramAccountId: 'telegram-account-id',
+        telegramUserId: BigInt(123456),
+        intent: intent as never,
+      }),
+    ).rejects.toBe(error);
+  });
+
+  it('does not hide a non-unique create error', async () => {
+    const error = new Error('Database unavailable');
+
+    prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(null);
+    prisma.telegramTransactionConfirmation.create.mockRejectedValue(error);
+
+    await expect(
+      repository.create({
+        userId: 'user-id',
+        chatId: 'chat-id',
+        sourceMessageId: 'message-id',
+        telegramAccountId: 'telegram-account-id',
+        telegramUserId: BigInt(123456),
+        intent: intent as never,
+      }),
+    ).rejects.toBe(error);
   });
 });
