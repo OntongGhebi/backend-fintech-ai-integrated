@@ -1,8 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
-import { TransactionSource } from 'src/database/enums/transaction-source.enum';
 import { TransactionType } from 'src/database/enums/transaction-type.enum';
-
 import { TransactionsService } from '../../../transactions/transactions.service';
 import { PendingTransactionConfirmation } from '../types/transaction-confirmation.types';
 
@@ -39,7 +37,11 @@ export class ConfirmedTransactionService {
       throw new BadRequestException('Unsupported transaction type');
     }
 
-    if (intent.amount === undefined || intent.amount <= 0) {
+    if (
+      intent.amount === undefined ||
+      !Number.isFinite(intent.amount) ||
+      intent.amount <= 0
+    ) {
       throw new BadRequestException(
         'Transaction amount must be greater than zero',
       );
@@ -49,31 +51,24 @@ export class ConfirmedTransactionService {
       throw new BadRequestException('Transaction account is required');
     }
 
-    const type = this.mapTransactionType(intent.transactionType);
-
-    return this.transactionsService.create(
-      confirmation.userId,
-      {
-        accountId: intent.accountId,
-        categoryId: intent.categoryId,
-        type,
-        amount: intent.amount,
-        currency: 'IDR',
-        description: intent.description?.trim() || undefined,
-        transactionDate: (intent.transactionDate ?? new Date()).toISOString(),
-      },
-      TransactionSource.TELEGRAM,
-    );
+    return this.transactionsService.createTelegramConfirmedTransaction({
+      userId: confirmation.userId,
+      confirmationId: confirmation.id,
+      accountId: intent.accountId,
+      categoryId: intent.categoryId,
+      type: this.mapTransactionType(intent.transactionType),
+      amount: intent.amount,
+      description: intent.description?.trim() || null,
+      transactionDate: new Date(intent.transactionDate ?? new Date()),
+    });
   }
 
   private mapTransactionType(type: 'INCOME' | 'EXPENSE'): TransactionType {
     switch (type) {
       case 'INCOME':
         return TransactionType.INCOME;
-
       case 'EXPENSE':
         return TransactionType.EXPENSE;
-
       default:
         throw new BadRequestException('Unsupported transaction type');
     }

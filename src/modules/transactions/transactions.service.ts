@@ -206,6 +206,65 @@ export class TransactionsService {
     return category;
   }
 
+  async createTelegramConfirmedTransaction(params: {
+    userId: string;
+    confirmationId: string;
+    accountId: string;
+    categoryId?: string | null;
+    type: TransactionType;
+    amount: number;
+    description?: string | null;
+    transactionDate: Date;
+  }) {
+    const categoryId = params.categoryId?.trim() || undefined;
+
+    const account = await this.accountsRepository.findByIdAndUserId(
+      params.accountId,
+      params.userId,
+    );
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    if (!account.isActive) {
+      throw new BadRequestException('Account is inactive');
+    }
+
+    if (account.currency !== 'IDR') {
+      throw new BadRequestException('Account currency must be IDR');
+    }
+
+    if (
+      params.type === TransactionType.TRANSFER ||
+      ![TransactionType.INCOME, TransactionType.EXPENSE].includes(params.type)
+    ) {
+      throw new BadRequestException('Unsupported Telegram transaction type');
+    }
+
+    if (categoryId) {
+      await this.validateCategory(categoryId, params.userId, params.type);
+    }
+
+    return this.transactionsRepository.createTelegramConfirmedTransaction({
+      confirmationId: params.confirmationId,
+      transactionData: {
+        userId: params.userId,
+        accountId: params.accountId,
+        categoryId: categoryId ?? null,
+        type: params.type,
+        amount: params.amount,
+        currency: 'IDR',
+        description: params.description?.trim() || null,
+        transactionDate: params.transactionDate,
+        source: TransactionSource.TELEGRAM,
+        status: 'ACTIVE',
+        transferGroupId: null,
+        metadata: Prisma.DbNull,
+      },
+    });
+  }
+
   async findManyByUserId(userId: string, query: GetTransactionsQueryDto) {
     if (
       query.startDate &&
