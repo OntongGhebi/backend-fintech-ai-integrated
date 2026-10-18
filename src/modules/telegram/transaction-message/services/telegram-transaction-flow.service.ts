@@ -167,7 +167,7 @@ export class TelegramTransactionFlowService {
     context: TelegramMessageDispatchContext,
     resolvedIntent: ResolvedTransactionIntent,
   ): Promise<void> {
-    const confirmation = this.transactionConfirmationService.create({
+    const confirmation = await this.transactionConfirmationService.create({
       userId: context.userId,
       chatId: context.chatId.toString(),
       sourceMessageId: context.messageId.toString(),

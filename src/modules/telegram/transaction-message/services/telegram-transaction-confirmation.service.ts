@@ -44,7 +44,7 @@ export class TelegramTransactionConfirmationService {
   async handle(
     context: TelegramTransactionConfirmationContext,
   ): Promise<TelegramTransactionConfirmationResult> {
-    const latest = this.transactionConfirmationService.findLatestByChatId(
+    const latest = await this.transactionConfirmationService.findLatestByChatId(
       context.chatId,
     );
 
@@ -120,7 +120,9 @@ export class TelegramTransactionConfirmationService {
       return this.handleCancel(latest);
     }
 
-    const confirmation = this.transactionConfirmationService.confirm(latest.id);
+    const confirmation = await this.transactionConfirmationService.confirm(
+      latest.id,
+    );
 
     if (!confirmation) {
       return this.noPendingResult();
@@ -162,10 +164,12 @@ export class TelegramTransactionConfirmationService {
     return this.processConfirmed(confirmation);
   }
 
-  private handleCancel(
+  private async handleCancel(
     confirmation: PendingTransactionConfirmation,
-  ): TelegramTransactionConfirmationResult {
-    const result = this.transactionConfirmationService.cancel(confirmation.id);
+  ): Promise<TelegramTransactionConfirmationResult> {
+    const result = await this.transactionConfirmationService.cancel(
+      confirmation.id,
+    );
 
     if (!result) {
       return this.noPendingResult();
@@ -195,7 +199,7 @@ export class TelegramTransactionConfirmationService {
   private async processConfirmed(
     confirmation: PendingTransactionConfirmation,
   ): Promise<TelegramTransactionConfirmationResult> {
-    const processing = this.transactionConfirmationService.markProcessing(
+    const processing = await this.transactionConfirmationService.markProcessing(
       confirmation.id,
     );
 
@@ -222,7 +226,7 @@ export class TelegramTransactionConfirmationService {
       const transaction =
         await this.confirmedTransactionService.create(processing);
 
-      this.transactionConfirmationService.markCompleted(
+      await this.transactionConfirmationService.markCompleted(
         processing.id,
         transaction.id,
       );

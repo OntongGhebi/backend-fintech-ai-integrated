@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 
-import { TransactionConfirmationService } from './transaction-confirmation.service';
-import { TransactionConfirmationAction } from './transaction-confirmation.service';
+import {
+  TransactionConfirmationAction,
+  TransactionConfirmationService,
+} from './transaction-confirmation.service';
 import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
 
 export interface TransactionConfirmationReplyContext {
@@ -23,23 +25,15 @@ export class TransactionConfirmationReplyService {
     private readonly transactionConfirmationMessageService: TransactionConfirmationMessageService,
   ) {}
 
-  handle(
+  async handle(
     context: TransactionConfirmationReplyContext,
-  ): TransactionConfirmationReplyResult {
-    const pending = this.transactionConfirmationService.findPendingByChatId(
-      context.chatId,
-    );
+  ): Promise<TransactionConfirmationReplyResult> {
+    const pending =
+      await this.transactionConfirmationService.findPendingByChatId(
+        context.chatId,
+      );
 
-    if (!pending) {
-      return {
-        handled: false,
-        action: 'UNKNOWN',
-        message:
-          this.transactionConfirmationMessageService.formatNoPendingConfirmation(),
-      };
-    }
-
-    if (pending.userId !== context.userId) {
+    if (!pending || pending.userId !== context.userId) {
       return {
         handled: false,
         action: 'UNKNOWN',
@@ -62,17 +56,12 @@ export class TransactionConfirmationReplyService {
     }
 
     if (action === 'CONFIRM') {
-      const confirmation = this.transactionConfirmationService.confirm(
+      const confirmation = await this.transactionConfirmationService.confirm(
         pending.id,
       );
 
       if (!confirmation) {
-        return {
-          handled: false,
-          action,
-          message:
-            this.transactionConfirmationMessageService.formatNoPendingConfirmation(),
-        };
+        return this.noPendingResult(action);
       }
 
       if (confirmation.status === 'EXPIRED') {
@@ -83,6 +72,10 @@ export class TransactionConfirmationReplyService {
         };
       }
 
+      if (confirmation.status !== 'CONFIRMED') {
+        return this.noPendingResult(action);
+      }
+
       return {
         handled: true,
         action,
@@ -90,15 +83,12 @@ export class TransactionConfirmationReplyService {
       };
     }
 
-    const confirmation = this.transactionConfirmationService.cancel(pending.id);
+    const confirmation = await this.transactionConfirmationService.cancel(
+      pending.id,
+    );
 
     if (!confirmation) {
-      return {
-        handled: false,
-        action,
-        message:
-          this.transactionConfirmationMessageService.formatNoPendingConfirmation(),
-      };
+      return this.noPendingResult(action);
     }
 
     if (confirmation.status === 'EXPIRED') {
@@ -109,10 +99,25 @@ export class TransactionConfirmationReplyService {
       };
     }
 
+    if (confirmation.status !== 'CANCELLED') {
+      return this.noPendingResult(action);
+    }
+
     return {
       handled: true,
       action,
       message: this.transactionConfirmationMessageService.formatCancelled(),
+    };
+  }
+
+  private noPendingResult(
+    action: TransactionConfirmationAction,
+  ): TransactionConfirmationReplyResult {
+    return {
+      handled: false,
+      action,
+      message:
+        this.transactionConfirmationMessageService.formatNoPendingConfirmation(),
     };
   }
 }

@@ -1,11 +1,26 @@
+import { Test, TestingModule } from '@nestjs/testing';
+
+import { TelegramTransactionConfirmationRepository } from '../../repositories/telegram-transaction-confirmation.repository';
+import { PendingTransactionConfirmation } from '../types/transaction-confirmation.types';
+import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
 import { TransactionConfirmationReplyService } from './transaction-confirmation-reply.service';
 import { TransactionConfirmationService } from './transaction-confirmation.service';
-import { TransactionConfirmationMessageService } from './transaction-confirmation-message.service';
 
 describe('TransactionConfirmationReplyService', () => {
   let service: TransactionConfirmationReplyService;
   let confirmationService: TransactionConfirmationService;
-  let messageService: TransactionConfirmationMessageService;
+
+  const repository = {
+    create: jest.fn(),
+    findById: jest.fn(),
+    findBySourceMessageId: jest.fn(),
+    findPendingByChatId: jest.fn(),
+    findLatestByChatId: jest.fn(),
+    confirm: jest.fn(),
+    markProcessing: jest.fn(),
+    markCompleted: jest.fn(),
+    cancel: jest.fn(),
+  };
 
   const intent = {
     intent: 'CREATE_TRANSACTION' as const,
@@ -26,31 +41,50 @@ describe('TransactionConfirmationReplyService', () => {
     },
   };
 
-  beforeEach(() => {
-    confirmationService = new TransactionConfirmationService();
+  const pending: PendingTransactionConfirmation = {
+    id: 'confirmation-id',
+    userId: 'user-id',
+    telegramAccountId: 'telegram-account-id',
+    telegramUserId: BigInt(123456),
+    chatId: 'chat-id',
+    sourceMessageId: 'message-id',
+    intent,
+    status: 'PENDING',
+    createdAt: new Date('2026-09-26T10:00:00.000Z'),
+    expiresAt: new Date('2026-09-26T10:05:00.000Z'),
+  };
 
-    messageService = new TransactionConfirmationMessageService();
+  beforeEach(async () => {
+    jest.resetAllMocks();
 
-    service = new TransactionConfirmationReplyService(
-      confirmationService,
-      messageService,
-    );
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        TransactionConfirmationService,
+        TransactionConfirmationReplyService,
+        TransactionConfirmationMessageService,
+        {
+          provide: TelegramTransactionConfirmationRepository,
+          useValue: repository,
+        },
+      ],
+    }).compile();
+
+    service = module.get(TransactionConfirmationReplyService);
+    confirmationService = module.get(TransactionConfirmationService);
   });
 
-  const createPending = () =>
-    confirmationService.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: 'telegram-user-id',
-      chatId: 'chat-id',
-      sourceMessageId: 'message-id',
-      intent,
+  const createPending = () => {
+    repository.findPendingByChatId.mockResolvedValue(pending);
+  };
+
+  it('should confirm a pending transaction when user replies YA', async () => {
+    createPending();
+    repository.confirm.mockResolvedValue({
+      ...pending,
+      status: 'CONFIRMED',
     });
 
-  it('should confirm a pending transaction when user replies YA', () => {
-    const pending = createPending();
-
-    const result = service.handle({
+    const result = await service.handle({
       userId: 'user-id',
       chatId: 'chat-id',
       text: 'YA',
@@ -59,16 +93,20 @@ describe('TransactionConfirmationReplyService', () => {
     expect(result.handled).toBe(true);
     expect(result.action).toBe('CONFIRM');
     expect(result.message).toContain('Transaksi dikonfirmasi');
-
-    expect(confirmationService.findPendingByChatId('chat-id')).toBeUndefined();
-
-    expect(confirmationService.confirm(pending.id)?.status).toBe('CONFIRMED');
+    expect(repository.confirm).toHaveBeenCalledWith(pending.id);
+    await expect(
+      confirmationService.findPendingByChatId('chat-id'),
+    ).resolves.toBe(pending);
   });
 
-  it('should cancel a pending transaction when user replies BATAL', () => {
-    const pending = createPending();
+  it('should cancel a pending transaction when user replies BATAL', async () => {
+    createPending();
+    repository.cancel.mockResolvedValue({
+      ...pending,
+      status: 'CANCELLED',
+    });
 
-    const result = service.handle({
+    const result = await service.handle({
       userId: 'user-id',
       chatId: 'chat-id',
       text: 'BATAL',
@@ -77,14 +115,13 @@ describe('TransactionConfirmationReplyService', () => {
     expect(result.handled).toBe(true);
     expect(result.action).toBe('CANCEL');
     expect(result.message).toContain('Transaksi dibatalkan');
-
-    expect(confirmationService.confirm(pending.id)?.status).toBe('CANCELLED');
+    expect(repository.cancel).toHaveBeenCalledWith(pending.id);
   });
 
-  it('should handle unknown confirmation action', () => {
+  it('should handle unknown confirmation action', async () => {
     createPending();
 
-    const result = service.handle({
+    const result = await service.handle({
       userId: 'user-id',
       chatId: 'chat-id',
       text: 'mungkin',
@@ -95,8 +132,10 @@ describe('TransactionConfirmationReplyService', () => {
     expect(result.message).toContain('belum memahami');
   });
 
-  it('should return no pending confirmation when none exists', () => {
-    const result = service.handle({
+  it('should return no pending confirmation when none exists', async () => {
+    repository.findPendingByChatId.mockResolvedValue(undefined);
+
+    const result = await service.handle({
       userId: 'user-id',
       chatId: 'chat-id',
       text: 'YA',
@@ -106,10 +145,10 @@ describe('TransactionConfirmationReplyService', () => {
     expect(result.message).toContain('Tidak ada transaksi');
   });
 
-  it('should not allow another user to confirm the transaction', () => {
+  it('should not allow another user to confirm the transaction', async () => {
     createPending();
 
-    const result = service.handle({
+    const result = await service.handle({
       userId: 'another-user-id',
       chatId: 'chat-id',
       text: 'YA',
@@ -117,14 +156,17 @@ describe('TransactionConfirmationReplyService', () => {
 
     expect(result.handled).toBe(false);
     expect(result.action).toBe('UNKNOWN');
-
-    expect(confirmationService.findPendingByChatId('chat-id')).toBeDefined();
+    expect(repository.confirm).not.toHaveBeenCalled();
   });
 
-  it('should normalize confirmation replies', () => {
+  it('should normalize confirmation replies', async () => {
     createPending();
+    repository.confirm.mockResolvedValue({
+      ...pending,
+      status: 'CONFIRMED',
+    });
 
-    const result = service.handle({
+    const result = await service.handle({
       userId: 'user-id',
       chatId: 'chat-id',
       text: '   ya   ',
@@ -133,16 +175,22 @@ describe('TransactionConfirmationReplyService', () => {
     expect(result.action).toBe('CONFIRM');
   });
 
-  it('should not process a second reply after confirmation', () => {
-    createPending();
+  it('should not process a second reply after confirmation', async () => {
+    repository.findPendingByChatId
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce(undefined);
+    repository.confirm.mockResolvedValue({
+      ...pending,
+      status: 'CONFIRMED',
+    });
 
-    const first = service.handle({
+    const first = await service.handle({
       userId: 'user-id',
       chatId: 'chat-id',
       text: 'YA',
     });
 
-    const second = service.handle({
+    const second = await service.handle({
       userId: 'user-id',
       chatId: 'chat-id',
       text: 'YA',
@@ -150,5 +198,6 @@ describe('TransactionConfirmationReplyService', () => {
 
     expect(first.action).toBe('CONFIRM');
     expect(second.handled).toBe(false);
+    expect(repository.confirm).toHaveBeenCalledTimes(1);
   });
 });

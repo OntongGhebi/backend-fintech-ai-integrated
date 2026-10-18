@@ -134,25 +134,25 @@ describe('TelegramTransactionConfirmationService', () => {
       description: 'beli makan',
     };
 
-    transactionConfirmationService.findLatestByChatId.mockReturnValue(
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
       confirmation,
     );
 
     transactionConfirmationService.parseAction.mockReturnValue('CONFIRM');
 
-    transactionConfirmationService.confirm.mockReturnValue({
+    transactionConfirmationService.confirm.mockResolvedValue({
       ...confirmation,
       status: 'CONFIRMED',
     });
 
-    transactionConfirmationService.markProcessing.mockReturnValue({
+    transactionConfirmationService.markProcessing.mockResolvedValue({
       ...confirmation,
       status: 'PROCESSING',
     });
 
     confirmedTransactionService.create.mockResolvedValue(transaction);
 
-    transactionConfirmationService.markCompleted.mockReturnValue({
+    transactionConfirmationService.markCompleted.mockResolvedValue({
       ...confirmation,
       status: 'COMPLETED',
       transactionId: 'transaction-id',
@@ -185,7 +185,7 @@ describe('TelegramTransactionConfirmationService', () => {
   it('should cancel without creating a transaction', async () => {
     const confirmation = createConfirmation();
 
-    transactionConfirmationService.findLatestByChatId.mockReturnValue(
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
       confirmation,
     );
 
@@ -217,7 +217,7 @@ describe('TelegramTransactionConfirmationService', () => {
   it('should not create a transaction for unknown reply', async () => {
     const confirmation = createConfirmation();
 
-    transactionConfirmationService.findLatestByChatId.mockReturnValue(
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
       confirmation,
     );
 
@@ -246,7 +246,7 @@ describe('TelegramTransactionConfirmationService', () => {
       userId: 'another-user-id',
     });
 
-    transactionConfirmationService.findLatestByChatId.mockReturnValue(
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
       confirmation,
     );
 
@@ -287,19 +287,19 @@ describe('TelegramTransactionConfirmationService', () => {
 
     transactionConfirmationService.parseAction.mockReturnValue('CONFIRM');
 
-    transactionConfirmationService.confirm.mockReturnValue({
+    transactionConfirmationService.confirm.mockResolvedValue({
       ...confirmation,
       status: 'CONFIRMED',
     });
 
-    transactionConfirmationService.markProcessing.mockReturnValue({
+    transactionConfirmationService.markProcessing.mockResolvedValue({
       ...confirmation,
       status: 'PROCESSING',
     });
 
     confirmedTransactionService.create.mockResolvedValue(transaction);
 
-    transactionConfirmationService.markCompleted.mockReturnValue({
+    transactionConfirmationService.markCompleted.mockResolvedValue({
       ...confirmation,
       status: 'COMPLETED',
       transactionId: 'transaction-id',
@@ -331,7 +331,7 @@ describe('TelegramTransactionConfirmationService', () => {
       status: 'PROCESSING',
     });
 
-    transactionConfirmationService.findLatestByChatId.mockReturnValue(
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
       confirmation,
     );
 
@@ -354,7 +354,7 @@ describe('TelegramTransactionConfirmationService', () => {
       transactionId: 'transaction-id',
     });
 
-    transactionConfirmationService.findLatestByChatId.mockReturnValue(
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
       confirmation,
     );
 
@@ -375,18 +375,18 @@ describe('TelegramTransactionConfirmationService', () => {
   it('should keep confirmation in processing state when transaction creation fails', async () => {
     const confirmation = createConfirmation();
 
-    transactionConfirmationService.findLatestByChatId.mockReturnValue(
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
       confirmation,
     );
 
     transactionConfirmationService.parseAction.mockReturnValue('CONFIRM');
 
-    transactionConfirmationService.confirm.mockReturnValue({
+    transactionConfirmationService.confirm.mockResolvedValue({
       ...confirmation,
       status: 'CONFIRMED',
     });
 
-    transactionConfirmationService.markProcessing.mockReturnValue({
+    transactionConfirmationService.markProcessing.mockResolvedValue({
       ...confirmation,
       status: 'PROCESSING',
     });
@@ -427,18 +427,18 @@ describe('TelegramTransactionConfirmationService', () => {
   it('should return mapped domain error message', async () => {
     const confirmation = createConfirmation();
 
-    transactionConfirmationService.findLatestByChatId.mockReturnValue(
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
       confirmation,
     );
 
     transactionConfirmationService.parseAction.mockReturnValue('CONFIRM');
 
-    transactionConfirmationService.confirm.mockReturnValue({
+    transactionConfirmationService.confirm.mockResolvedValue({
       ...confirmation,
       status: 'CONFIRMED',
     });
 
-    transactionConfirmationService.markProcessing.mockReturnValue({
+    transactionConfirmationService.markProcessing.mockResolvedValue({
       ...confirmation,
       status: 'PROCESSING',
     });
@@ -473,7 +473,7 @@ describe('TelegramTransactionConfirmationService', () => {
   it('should not process a confirmation twice when the confirmation is already confirmed', async () => {
     const confirmation = createConfirmation();
 
-    transactionConfirmationService.findLatestByChatId.mockReturnValue({
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue({
       ...confirmation,
       status: 'CONFIRMED',
     });

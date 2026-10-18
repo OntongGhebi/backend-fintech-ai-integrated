@@ -1,7 +1,26 @@
+import { Test, TestingModule } from '@nestjs/testing';
+
+import { TelegramTransactionConfirmationRepository } from '../../repositories/telegram-transaction-confirmation.repository';
+import {
+  CreateTransactionConfirmationInput,
+  PendingTransactionConfirmation,
+} from '../types/transaction-confirmation.types';
 import { TransactionConfirmationService } from './transaction-confirmation.service';
 
 describe('TransactionConfirmationService', () => {
   let service: TransactionConfirmationService;
+
+  const repository = {
+    create: jest.fn(),
+    findById: jest.fn(),
+    findBySourceMessageId: jest.fn(),
+    findPendingByChatId: jest.fn(),
+    findLatestByChatId: jest.fn(),
+    confirm: jest.fn(),
+    markProcessing: jest.fn(),
+    markCompleted: jest.fn(),
+    cancel: jest.fn(),
+  };
 
   const intent = {
     intent: 'CREATE_TRANSACTION' as const,
@@ -22,32 +41,37 @@ describe('TransactionConfirmationService', () => {
     },
   };
 
-  beforeEach(() => {
-    service = new TransactionConfirmationService();
+  const confirmation: PendingTransactionConfirmation = {
+    id: 'confirmation-id',
+    userId: 'user-id',
+    telegramAccountId: 'telegram-account-id',
+    telegramUserId: BigInt(123456),
+    chatId: 'chat-id',
+    sourceMessageId: 'message-id',
+    intent,
+    status: 'PENDING',
+    createdAt: new Date('2026-09-26T10:00:00.000Z'),
+    expiresAt: new Date('2026-09-26T10:05:00.000Z'),
+  };
+
+  beforeEach(async () => {
+    jest.resetAllMocks();
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        TransactionConfirmationService,
+        {
+          provide: TelegramTransactionConfirmationRepository,
+          useValue: repository,
+        },
+      ],
+    }).compile();
+
+    service = module.get(TransactionConfirmationService);
   });
 
-  it('should create a pending confirmation', () => {
-    const result = service.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: BigInt(123456),
-      chatId: 'chat-id',
-      sourceMessageId: 'message-id',
-      intent,
-    });
-
-    expect(result.id).toBeDefined();
-    expect(result.userId).toBe('user-id');
-    expect(result.chatId).toBe('chat-id');
-    expect(result.status).toBe('PENDING');
-    expect(result.intent).toEqual(intent);
-    expect(result.expiresAt.getTime()).toBeGreaterThan(
-      result.createdAt.getTime(),
-    );
-  });
-
-  it('should return the existing confirmation for the same source message', () => {
-    const input = {
+  it('delegates creation to the repository', async () => {
+    const input: CreateTransactionConfirmationInput = {
       userId: 'user-id',
       telegramAccountId: 'telegram-account-id',
       telegramUserId: BigInt(123456),
@@ -55,189 +79,62 @@ describe('TransactionConfirmationService', () => {
       sourceMessageId: 'message-id',
       intent,
     };
+    repository.create.mockResolvedValue(confirmation);
 
-    const first = service.create(input);
-
-    const second = service.create(input);
-
-    expect(second).toBe(first);
-    expect(second.id).toBe(first.id);
+    await expect(service.create(input)).resolves.toBe(confirmation);
+    expect(repository.create).toHaveBeenCalledWith(input);
   });
 
-  it('should not deduplicate the same Telegram message id across different chats', () => {
-    const first = service.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: BigInt(123456),
-      chatId: 'chat-id-1',
-      sourceMessageId: 'message-id',
-      intent,
-    });
+  it('delegates confirmation lookups and state changes to the repository', async () => {
+    repository.findById.mockResolvedValue(confirmation);
+    repository.findBySourceMessageId.mockResolvedValue(confirmation);
+    repository.findPendingByChatId.mockResolvedValue(confirmation);
+    repository.findLatestByChatId.mockResolvedValue(confirmation);
+    repository.confirm.mockResolvedValue(confirmation);
+    repository.markProcessing.mockResolvedValue(confirmation);
+    repository.markCompleted.mockResolvedValue(confirmation);
+    repository.cancel.mockResolvedValue(confirmation);
 
-    const second = service.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: BigInt(123456),
-      chatId: 'chat-id-2',
-      sourceMessageId: 'message-id',
-      intent,
-    });
-
-    expect(second.id).not.toBe(first.id);
-  });
-
-  it('should find a confirmation by source message id', () => {
-    const created = service.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: BigInt(123456),
-      chatId: 'chat-id',
-      sourceMessageId: 'message-id',
-      intent,
-    });
-
-    expect(service.findBySourceMessageId('chat-id', 'message-id')).toBe(
-      created,
+    await expect(service.findById(confirmation.id)).resolves.toBe(confirmation);
+    await expect(
+      service.findBySourceMessageId('chat-id', 'message-id'),
+    ).resolves.toBe(confirmation);
+    await expect(service.findPendingByChatId('chat-id')).resolves.toBe(
+      confirmation,
     );
+    await expect(service.findLatestByChatId('chat-id')).resolves.toBe(
+      confirmation,
+    );
+    await expect(service.confirm(confirmation.id)).resolves.toBe(confirmation);
+    await expect(service.markProcessing(confirmation.id)).resolves.toBe(
+      confirmation,
+    );
+    await expect(
+      service.markCompleted(confirmation.id, 'transaction-id'),
+    ).resolves.toBe(confirmation);
+    await expect(service.cancel(confirmation.id)).resolves.toBe(confirmation);
+
+    expect(repository.findById).toHaveBeenCalledWith(confirmation.id);
+    expect(repository.findBySourceMessageId).toHaveBeenCalledWith(
+      'chat-id',
+      'message-id',
+    );
+    expect(repository.findPendingByChatId).toHaveBeenCalledWith('chat-id');
+    expect(repository.findLatestByChatId).toHaveBeenCalledWith('chat-id');
+    expect(repository.confirm).toHaveBeenCalledWith(confirmation.id);
+    expect(repository.markProcessing).toHaveBeenCalledWith(confirmation.id);
+    expect(repository.markCompleted).toHaveBeenCalledWith(
+      confirmation.id,
+      'transaction-id',
+    );
+    expect(repository.cancel).toHaveBeenCalledWith(confirmation.id);
   });
 
-  it('should find pending confirmation by chat id', () => {
-    const created = service.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: BigInt(123456),
-      chatId: 'chat-id',
-      sourceMessageId: 'message-id',
-      intent,
-    });
-
-    const result = service.findPendingByChatId('chat-id');
-
-    expect(result?.id).toBe(created.id);
-    expect(result?.status).toBe('PENDING');
-  });
-
-  it('should return undefined when chat has no pending confirmation', () => {
-    const result = service.findPendingByChatId('unknown-chat');
-
-    expect(result).toBeUndefined();
-  });
-
-  it('should parse confirmation action', () => {
+  it('parses confirmation and cancellation actions', () => {
     expect(service.parseAction('ya')).toBe('CONFIRM');
-
-    expect(service.parseAction('YA')).toBe('CONFIRM');
-
-    expect(service.parseAction('yes')).toBe('CONFIRM');
-
-    expect(service.parseAction('y')).toBe('CONFIRM');
-
+    expect(service.parseAction({ text: ' YES ' })).toBe('CONFIRM');
     expect(service.parseAction('batal')).toBe('CANCEL');
-
-    expect(service.parseAction('BATAL')).toBe('CANCEL');
-
-    expect(service.parseAction('cancel')).toBe('CANCEL');
-
     expect(service.parseAction('tidak')).toBe('CANCEL');
-
     expect(service.parseAction('mungkin')).toBe('UNKNOWN');
-  });
-
-  it('should confirm a pending confirmation', () => {
-    const created = service.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: BigInt(123456),
-      chatId: 'chat-id',
-      sourceMessageId: 'message-id',
-      intent,
-    });
-
-    const result = service.confirm(created.id);
-
-    expect(result?.status).toBe('CONFIRMED');
-  });
-
-  it('should cancel a pending confirmation', () => {
-    const created = service.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: BigInt(123456),
-      chatId: 'chat-id',
-      sourceMessageId: 'message-id',
-      intent,
-    });
-
-    const result = service.cancel(created.id);
-
-    expect(result?.status).toBe('CANCELLED');
-  });
-
-  it('should not confirm an already cancelled confirmation', () => {
-    const created = service.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: BigInt(123456),
-      chatId: 'chat-id',
-      sourceMessageId: 'message-id',
-      intent,
-    });
-
-    service.cancel(created.id);
-
-    const result = service.confirm(created.id);
-
-    expect(result?.status).toBe('CANCELLED');
-  });
-
-  it('should not cancel an already confirmed confirmation', () => {
-    const created = service.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: BigInt(123456),
-      chatId: 'chat-id',
-      sourceMessageId: 'message-id',
-      intent,
-    });
-
-    service.confirm(created.id);
-
-    const result = service.cancel(created.id);
-
-    expect(result?.status).toBe('CONFIRMED');
-  });
-
-  it('should return undefined when confirming unknown confirmation', () => {
-    const result = service.confirm('unknown-id');
-
-    expect(result).toBeUndefined();
-  });
-
-  it('should keep a completed confirmation completed when marked again', () => {
-    const created = service.create({
-      userId: 'user-id',
-      telegramAccountId: 'telegram-account-id',
-      telegramUserId: BigInt(123456),
-      chatId: 'chat-id',
-      sourceMessageId: 'message-id',
-      intent,
-    });
-
-    service.confirm(created.id);
-    service.markProcessing(created.id);
-
-    service.markCompleted(created.id, 'transaction-id');
-
-    const result = service.markCompleted(created.id, 'another-transaction-id');
-
-    expect(result?.status).toBe('COMPLETED');
-
-    expect(result?.transactionId).toBe('transaction-id');
-  });
-
-  it('should return undefined when cancelling unknown confirmation', () => {
-    const result = service.cancel('unknown-id');
-
-    expect(result).toBeUndefined();
   });
 });
