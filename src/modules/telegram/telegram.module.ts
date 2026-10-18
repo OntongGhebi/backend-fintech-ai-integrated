@@ -48,6 +48,8 @@ import { TelegramTransactionFlowErrorService } from './services/transaction/tele
 import { AITransactionMessageParser } from './transaction-message/parsers/ai-transaction-message.parser';
 import { TelegramTransactionMessageParser } from './transaction-message/parsers/telegram-transaction-message.parser';
 import { TelegramTransactionConfirmationRepository } from './repositories/telegram-transaction-confirmation.repository';
+import { TelegramTransactionConfirmationMaintenanceRepository } from './repositories/telegram-transaction-confirmation-maintenance.repository';
+import { TelegramTransactionConfirmationRecoveryService } from './services/telegram-transaction-confirmation-recovery.service';
 
 @Module({
   imports: [
@@ -71,6 +73,7 @@ import { TelegramTransactionConfirmationRepository } from './repositories/telegr
     TelegramAccountRepository,
     TelegramMessageRepository,
     TelegramTransactionConfirmationRepository,
+    TelegramTransactionConfirmationMaintenanceRepository,
 
     TelegramCommandParser,
     TelegramCommandRouter,
@@ -79,6 +82,7 @@ import { TelegramTransactionConfirmationRepository } from './repositories/telegr
     TelegramMessageDispatcherService,
     TelegramMessageProcessingService,
     TelegramMessageRecoveryService,
+    TelegramTransactionConfirmationRecoveryService,
 
     AITransactionMessageParser,
     TelegramTransactionMessageParser,
@@ -126,6 +130,7 @@ import { TelegramTransactionConfirmationRepository } from './repositories/telegr
     TelegramIncomingMessageService,
     TelegramMessageProcessingService,
     TelegramMessageRecoveryService,
+    TelegramTransactionConfirmationRecoveryService,
 
     TransactionMessagePipelineService,
     TransactionIntentResolutionService,
