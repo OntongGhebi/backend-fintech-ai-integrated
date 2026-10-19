@@ -43,6 +43,7 @@ lerna-debug.log*
 .env.production.local
 .env.local
 .env.*
+.env.test
 !.env.example
 
 # Local secrets and credentials

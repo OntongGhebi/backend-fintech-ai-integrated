@@ -27,7 +27,9 @@ describe('Telegram Transaction Confirmation — PostgreSQL Integration', () => {
 
   beforeAll(async () => {
     if (!process.env.DATABASE_URL) {
-      throw new Error('DATABASE_URL must point to a dedicated test database.');
+      throw new Error(
+        'DATABASE_URL is missing. Configure it in backend/.env.test with a dedicated test database.',
+      );
     }
 
     prisma = new PrismaService();

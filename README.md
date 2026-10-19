@@ -72,6 +72,10 @@ $ npm run start:prod
 
 ## Run tests
 
+Create `backend/.env.test` using the example below and set `DATABASE_URL` to a
+dedicated PostgreSQL test database. Do not point it at development or production
+data. Apply the project's migrations to that database before the first run.
+
 ```bash
 # unit tests
 $ npm run test
@@ -79,9 +83,17 @@ $ npm run test
 # e2e tests
 $ npm run test:e2e
 
+# run one e2e file
+$ npm run test:e2e -- test/dashboard.e2e-spec.ts
+
 # test coverage
 $ npm run test:cov
 ```
+
+The E2E scripts load `.env.test` before starting Jest and run serially
+(`--runInBand`) to reduce contention from multiple Nest application instances
+and database operations. The test environment file is excluded from version
+control.
 
 ## Deployment
 

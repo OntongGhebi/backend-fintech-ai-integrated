@@ -7,7 +7,7 @@ import { AppModule } from '../src/app.module';
 import { EmailVerificationService } from '../src/modules/auth/services/email-verification.service';
 import { createE2EApp } from './helpers/create-e2e-app';
 
-jest.setTimeout(30000);
+jest.setTimeout(60000);
 
 describe('Dashboard E2E', () => {
   let app: INestApplication;

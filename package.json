@@ -23,9 +23,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "set NODE_ENV=test&& node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json",
-    "test:e2e:cov": "set NODE_ENV=test&& node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --coverage",
-    "test:all:cov": "jest --coverage && set NODE_ENV=test&& node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --coverage"
+    "test:e2e": "set NODE_ENV=test&& node --env-file=.env.test --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --runInBand",
+    "test:e2e:cov": "set NODE_ENV=test&& node --env-file=.env.test --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --coverage --runInBand",
+    "test:all:cov": "jest --coverage && set NODE_ENV=test&& node --env-file=.env.test --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.json --coverage --runInBand"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
