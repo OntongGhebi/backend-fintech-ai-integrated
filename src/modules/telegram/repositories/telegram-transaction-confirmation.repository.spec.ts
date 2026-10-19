@@ -1,5 +1,8 @@
 import { Prisma } from '../../../../generated/prisma/client';
-import { TelegramTransactionConfirmationStatus as Status } from '../../../../generated/prisma/enums';
+import {
+  TelegramTransactionConfirmationStatus as Status,
+  TelegramTransactionConfirmationStatus,
+} from '../../../../generated/prisma/enums';
 import { PrismaService } from 'src/database/prisma/prisma.service';
 
 import { TelegramTransactionConfirmationRepository } from './telegram-transaction-confirmation.repository';
@@ -453,5 +456,49 @@ describe('TelegramTransactionConfirmationRepository', () => {
         intent: intent as never,
       }),
     ).rejects.toBe(error);
+  });
+
+  it('claims a confirmed confirmation for exactly one processing attempt', async () => {
+    prisma.telegramTransactionConfirmation.updateMany.mockResolvedValue({
+      count: 1,
+    });
+
+    prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
+      record({
+        status: TelegramTransactionConfirmationStatus.PROCESSING,
+      }),
+    );
+
+    const result = await repository.markProcessing('confirmation-id');
+
+    expect(
+      prisma.telegramTransactionConfirmation.updateMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        id: 'confirmation-id',
+        status: TelegramTransactionConfirmationStatus.CONFIRMED,
+      },
+      data: {
+        status: TelegramTransactionConfirmationStatus.PROCESSING,
+      },
+    });
+
+    expect(result?.status).toBe('PROCESSING');
+    expect(
+      prisma.telegramTransactionConfirmation.findUnique,
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not process a confirmation when another worker already claimed it', async () => {
+    prisma.telegramTransactionConfirmation.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    const result = await repository.markProcessing('confirmation-id');
+
+    expect(result).toBeUndefined();
+    expect(
+      prisma.telegramTransactionConfirmation.findUnique,
+    ).not.toHaveBeenCalled();
   });
 });

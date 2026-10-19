@@ -243,7 +243,7 @@ export class TelegramTransactionConfirmationRepository {
   async markProcessing(
     confirmationId: string,
   ): Promise<PendingTransactionConfirmation | undefined> {
-    await this.updateConfirmationMany({
+    const claim = await this.updateConfirmationMany({
       where: {
         id: confirmationId,
         status: TelegramTransactionConfirmationStatus.CONFIRMED,
@@ -252,6 +252,12 @@ export class TelegramTransactionConfirmationRepository {
         status: TelegramTransactionConfirmationStatus.PROCESSING,
       },
     });
+
+    // Only the worker that atomically changed CONFIRMED -> PROCESSING
+    // owns this processing attempt.
+    if (claim.count !== 1) {
+      return undefined;
+    }
 
     return this.findById(confirmationId);
   }

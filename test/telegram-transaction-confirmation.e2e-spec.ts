@@ -396,5 +396,48 @@ describe('Telegram transaction confirmation integration', () => {
 
       createdConfirmationIds.push(results[0].id);
     });
+
+    it('creates only one transaction when the same confirmation is handled concurrently', async () => {
+      const confirmation = await createConfirmation(randomUUID());
+
+      const context = {
+        userId,
+        chatId,
+        sourceMessageId: confirmation.sourceMessageId,
+        telegramAccountId,
+        telegramUserId,
+        text: 'YA',
+      };
+
+      const results = await Promise.all([
+        confirmationService.handle(context),
+        confirmationService.handle(context),
+      ]);
+
+      const stored =
+        await prisma.telegramTransactionConfirmation.findUniqueOrThrow({
+          where: { id: confirmation.id },
+          include: { transaction: true },
+        });
+
+      const transactions = await prisma.transaction.findMany({
+        where: { telegramConfirmationId: confirmation.id },
+        select: { id: true },
+      });
+
+      expect(stored.status).toBe(
+        TelegramTransactionConfirmationStatus.COMPLETED,
+      );
+      expect(stored.transaction).not.toBeNull();
+      expect(transactions).toHaveLength(1);
+
+      const transactionIds = results
+        .map((result) => result.transactionId)
+        .filter((id): id is string => Boolean(id));
+
+      expect(new Set(transactionIds)).toEqual(new Set([transactions[0].id]));
+
+      createdTransactionIds.push(transactions[0].id);
+    });
   });
 });
