@@ -133,6 +133,15 @@ export class RecurringTransactionsRepository {
     });
   }
 
+  /**
+   * Updates a recurring transaction owned by the specified user.
+   *
+   * IMPORTANT:
+   * The data argument must contain scalar field updates,
+   * such as accountId and categoryId. Do not pass nested
+   * relation operations such as account.connect or category.connect
+   * to updateMany().
+   */
   async update(
     recurringTransactionId: string,
     userId: string,

@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+
 import { AccountsService } from '../accounts/accounts.service';
 import { CategoriesService } from '../categories/categories.service';
 
@@ -54,7 +55,6 @@ export class RecurringTransactionsService {
           id: dto.accountId,
         },
       },
-
       ...(dto.categoryId
         ? {
             category: {
@@ -109,10 +109,13 @@ export class RecurringTransactionsService {
       throw new NotFoundException('Recurring transaction not found');
     }
 
+    // Validate that the selected account belongs to this user.
     if (dto.accountId !== undefined) {
       await this.accountsService.findById(dto.accountId, userId);
     }
 
+    // Validate category ownership when a category is provided.
+    // A null categoryId explicitly removes the category association.
     if (dto.categoryId !== undefined && dto.categoryId !== null) {
       await this.categoriesService.findById(dto.categoryId, userId);
     }
@@ -148,33 +151,25 @@ export class RecurringTransactionsService {
       throw new BadRequestException('The calculated nextRunAt exceeds endDate');
     }
 
+    /*
+     * IMPORTANT:
+     * updateMany() only accepts scalar field updates.
+     * Use accountId/categoryId instead of account.connect,
+     * category.connect, or category.disconnect.
+     */
     const updateData: Parameters<
       typeof this.recurringTransactionsRepository.update
     >[2] = {
       ...(dto.accountId !== undefined
         ? {
-            account: {
-              connect: {
-                id: dto.accountId,
-              },
-            },
+            accountId: dto.accountId,
           }
         : {}),
 
       ...(dto.categoryId !== undefined
-        ? dto.categoryId === null
-          ? {
-              category: {
-                disconnect: true,
-              },
-            }
-          : {
-              category: {
-                connect: {
-                  id: dto.categoryId,
-                },
-              },
-            }
+        ? {
+            categoryId: dto.categoryId,
+          }
         : {}),
 
       ...(dto.type !== undefined
@@ -220,6 +215,12 @@ export class RecurringTransactionsService {
           }
         : {}),
     };
+
+    if (Object.keys(updateData).length === 0) {
+      throw new BadRequestException(
+        'At least one field must be provided for update',
+      );
+    }
 
     const result = await this.recurringTransactionsRepository.update(
       recurringTransactionId,
@@ -293,6 +294,7 @@ export class RecurringTransactionsService {
 
   private parseDate(value: string, fieldName: string) {
     const date = new Date(value);
+
     if (Number.isNaN(date.getTime())) {
       throw new BadRequestException(`${fieldName} must be a valid date`);
     }
@@ -310,12 +312,15 @@ export class RecurringTransactionsService {
       case RecurringFrequency.DAILY:
         nextRunAt.setUTCDate(nextRunAt.getUTCDate() + 1);
         break;
+
       case RecurringFrequency.WEEKLY:
         nextRunAt.setUTCDate(nextRunAt.getUTCDate() + 7);
         break;
+
       case RecurringFrequency.MONTHLY:
         nextRunAt.setUTCMonth(nextRunAt.getUTCMonth() + 1);
         break;
+
       case RecurringFrequency.YEARLY:
         nextRunAt.setUTCFullYear(nextRunAt.getUTCFullYear() + 1);
         break;
