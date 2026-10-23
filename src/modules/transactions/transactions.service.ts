@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 
 import { Prisma } from '../../../generated/prisma/client.js';
@@ -11,6 +13,7 @@ import { TransactionSource } from 'src/database/enums/transaction-source.enum';
 import { TransactionType } from 'src/database/enums/transaction-type.enum';
 
 import { AccountsRepository } from '../accounts/repositories/accounts.repository';
+import { NotificationEventsService } from '../notifications/notification-events.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { GetTransactionsQueryDto } from './dto/get-transaction-query.dto';
 import { TransactionsRepository } from './repositories/transactions.repository';
@@ -24,6 +27,8 @@ export class TransactionsService {
   constructor(
     private readonly transactionsRepository: TransactionsRepository,
     private readonly accountsRepository: AccountsRepository,
+    @Inject(forwardRef(() => NotificationEventsService))
+    private readonly notificationEventsService: NotificationEventsService,
   ) {}
 
   async create(
@@ -84,7 +89,7 @@ export class TransactionsService {
       }
     }
 
-    return this.transactionsRepository.create({
+    const transaction = await this.transactionsRepository.create({
       userId,
       accountId: dto.accountId,
       categoryId: categoryId ?? null,
@@ -98,6 +103,9 @@ export class TransactionsService {
       transferGroupId: null,
       metadata: Prisma.DbNull,
     });
+
+    await this.notifyBudgetAlertSafely(transaction);
+    return transaction;
   }
 
   /**
@@ -150,7 +158,7 @@ export class TransactionsService {
       await this.validateCategory(categoryId, params.userId, params.type);
     }
 
-    return this.transactionsRepository.create({
+    const transaction = await this.transactionsRepository.create({
       userId: params.userId,
       accountId: params.accountId,
       categoryId: categoryId ?? null,
@@ -164,6 +172,31 @@ export class TransactionsService {
       transferGroupId: null,
       metadata: params.metadata ?? Prisma.DbNull,
     });
+
+    await this.notifyBudgetAlertSafely(transaction);
+    return transaction;
+  }
+
+  private async notifyBudgetAlertSafely(transaction: {
+    id: string;
+    userId: string;
+    type: TransactionTypeValue;
+    amount: unknown;
+    categoryId: string | null;
+    transactionDate: Date;
+  }): Promise<void> {
+    try {
+      await this.notificationEventsService.budgetExpenseCreated({
+        userId: transaction.userId,
+        transactionId: transaction.id,
+        type: transaction.type as TransactionType,
+        amount: String(transaction.amount),
+        categoryId: transaction.categoryId,
+        transactionDate: transaction.transactionDate,
+      });
+    } catch {
+      // The persisted transaction must remain successful if alert handling fails.
+    }
   }
 
   private async validateCategory(
@@ -246,23 +279,27 @@ export class TransactionsService {
       await this.validateCategory(categoryId, params.userId, params.type);
     }
 
-    return this.transactionsRepository.createTelegramConfirmedTransaction({
-      confirmationId: params.confirmationId,
-      transactionData: {
-        userId: params.userId,
-        accountId: params.accountId,
-        categoryId: categoryId ?? null,
-        type: params.type,
-        amount: params.amount,
-        currency: 'IDR',
-        description: params.description?.trim() || null,
-        transactionDate: params.transactionDate,
-        source: TransactionSource.TELEGRAM,
-        status: 'ACTIVE',
-        transferGroupId: null,
-        metadata: Prisma.DbNull,
-      },
-    });
+    const transaction =
+      await this.transactionsRepository.createTelegramConfirmedTransaction({
+        confirmationId: params.confirmationId,
+        transactionData: {
+          userId: params.userId,
+          accountId: params.accountId,
+          categoryId: categoryId ?? null,
+          type: params.type,
+          amount: params.amount,
+          currency: 'IDR',
+          description: params.description?.trim() || null,
+          transactionDate: params.transactionDate,
+          source: TransactionSource.TELEGRAM,
+          status: 'ACTIVE',
+          transferGroupId: null,
+          metadata: Prisma.DbNull,
+        },
+      });
+
+    if (transaction) await this.notifyBudgetAlertSafely(transaction);
+    return transaction;
   }
 
   async findManyByUserId(userId: string, query: GetTransactionsQueryDto) {

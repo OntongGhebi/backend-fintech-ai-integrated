@@ -16,12 +16,14 @@ import { GetTransactionsQueryDto } from './dto/get-transaction-query.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { TransactionsRepository } from './repositories/transactions.repository';
 import { TransactionsService } from './transactions.service';
+import { NotificationEventsService } from '../notifications/notification-events.service';
 
 describe('TransactionsService', () => {
   let service: TransactionsService;
 
   let transactionsRepository: jest.Mocked<TransactionsRepository>;
   let accountsRepository: jest.Mocked<AccountsRepository>;
+  let notificationEventsService: jest.Mocked<NotificationEventsService>;
 
   const userId = '11111111-1111-4111-8111-111111111111';
 
@@ -128,9 +130,15 @@ describe('TransactionsService', () => {
       softDelete: jest.fn(),
     } as unknown as jest.Mocked<AccountsRepository>;
 
+    notificationEventsService = {
+      budgetExpenseCreated: jest.fn().mockResolvedValue(undefined),
+      recurringTransactionExecuted: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<NotificationEventsService>;
+
     service = new TransactionsService(
       transactionsRepository,
       accountsRepository,
+      notificationEventsService,
     );
   });
 
@@ -188,6 +196,17 @@ describe('TransactionsService', () => {
         status: 'ACTIVE',
         transferGroupId: null,
         metadata: Prisma.DbNull,
+      });
+
+      expect(
+        notificationEventsService.budgetExpenseCreated,
+      ).toHaveBeenCalledWith({
+        userId,
+        transactionId,
+        type: TransactionType.EXPENSE,
+        amount: '75000',
+        categoryId,
+        transactionDate: new Date(transactionDate),
       });
     });
 
@@ -434,6 +453,29 @@ describe('TransactionsService', () => {
         id: 'transaction-1',
         source: TransactionSource.AI,
       });
+    });
+
+    it('should isolate budget notification failure after transaction persistence', async () => {
+      const incomeDto: CreateTransactionDto = {
+        accountId,
+        type: TransactionType.INCOME,
+        amount: 5000000,
+        transactionDate,
+      };
+      accountsRepository.findByIdAndUserId.mockResolvedValue(
+        activeAccount as never,
+      );
+      transactionsRepository.create.mockResolvedValue(
+        activeTransaction as never,
+      );
+      notificationEventsService.budgetExpenseCreated.mockRejectedValueOnce(
+        new Error('notification unavailable'),
+      );
+
+      await expect(service.create(userId, incomeDto)).resolves.toEqual(
+        activeTransaction,
+      );
+      expect(transactionsRepository.create).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
 import { AccountsModule } from '../accounts/accounts.module';
@@ -56,7 +56,7 @@ import { TelegramTransactionConfirmationRecoveryService } from './services/teleg
     ConfigModule,
     AccountsModule,
     CategoriesModule,
-    TransactionsModule,
+    forwardRef(() => TransactionsModule),
     AIModule,
   ],
 

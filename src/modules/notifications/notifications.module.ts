@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
+import { TransactionsModule } from '../transactions/transactions.module';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { NotificationsRepository } from './repositories/notifications.repository';
@@ -13,25 +14,32 @@ import { NotificationEventsService } from './notification-events.service';
 const isTestEnvironment = process.env.NODE_ENV === 'test';
 
 class TestNotificationQueueService {
-  async enqueueDelivery(notificationId: string): Promise<{ jobId: string }> {
-    return { jobId: `test-${notificationId}` };
+  enqueueDelivery(notificationId: string): Promise<{ jobId: string }> {
+    return Promise.resolve({ jobId: `test-${notificationId}` });
   }
 
-  async getQueueCounts(): Promise<{
+  getQueueCounts(): Promise<{
     waiting: number;
     active: number;
     delayed: number;
     completed: number;
     failed: number;
   }> {
-    return { waiting: 0, active: 0, delayed: 0, completed: 0, failed: 0 };
+    return Promise.resolve({
+      waiting: 0,
+      active: 0,
+      delayed: 0,
+      completed: 0,
+      failed: 0,
+    });
   }
 }
 
 @Module({
   imports: [
     QueueModule,
-    telegramModule,
+    forwardRef(() => telegramModule),
+    forwardRef(() => TransactionsModule),
     ...(isTestEnvironment
       ? []
       : [

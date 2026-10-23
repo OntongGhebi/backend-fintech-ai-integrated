@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { AI_PROVIDER } from './constants/ai.constants';
@@ -35,7 +35,7 @@ import { DatabaseModule } from 'src/database/database.module';
 import { AIPrivacyService } from './services/ai-privacy.service';
 
 @Module({
-  imports: [DatabaseModule, TransactionsModule],
+  imports: [DatabaseModule, forwardRef(() => TransactionsModule)],
   providers: [
     AIService,
     AIChatService,
