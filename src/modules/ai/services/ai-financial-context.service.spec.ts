@@ -233,5 +233,164 @@ describe('AIFinancialContextService', () => {
         'Database connection failed',
       );
     });
+
+    describe('budget period calculations', () => {
+      const fixedNow = new Date('2026-10-21T08:00:00.000Z');
+
+      const budgetFixture = (
+        period: string,
+        startDate: Date,
+        endDate: Date | null = null,
+      ) => ({
+        name: `Budget ${period}`,
+        amount: '1000000.00',
+        startDate,
+        endDate,
+        period,
+        categoryId: null,
+        category: { name: 'Kebutuhan' },
+      });
+
+      beforeEach(() => {
+        jest.useFakeTimers();
+        jest.setSystemTime(fixedNow);
+      });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      it('should calculate DAILY budget spending from local midnight to now', async () => {
+        prismaMock.budget.findMany.mockResolvedValue([
+          budgetFixture('DAILY', new Date('2026-10-01T00:00:00.000Z')),
+        ]);
+
+        await service.getContext('user-1');
+
+        const budgetAggregateCall =
+          prismaMock.transaction.aggregate.mock.calls[2];
+
+        expect(budgetAggregateCall[0].where.transactionDate).toEqual({
+          gte: new Date('2026-10-20T17:00:00.000Z'),
+          lt: new Date('2026-10-21T08:00:00.001Z'),
+        });
+      });
+
+      it('should calculate WEEKLY budget spending from Monday local midnight', async () => {
+        prismaMock.budget.findMany.mockResolvedValue([
+          budgetFixture('WEEKLY', new Date('2026-10-01T00:00:00.000Z')),
+        ]);
+
+        await service.getContext('user-1');
+
+        const budgetAggregateCall =
+          prismaMock.transaction.aggregate.mock.calls[2];
+
+        expect(budgetAggregateCall[0].where.transactionDate).toEqual({
+          gte: new Date('2026-10-18T17:00:00.000Z'),
+          lt: new Date('2026-10-21T08:00:00.001Z'),
+        });
+      });
+
+      it('should calculate MONTHLY budget spending from the first day of the month', async () => {
+        prismaMock.budget.findMany.mockResolvedValue([
+          budgetFixture('MONTHLY', new Date('2026-09-01T00:00:00.000Z')),
+        ]);
+
+        await service.getContext('user-1');
+
+        const budgetAggregateCall =
+          prismaMock.transaction.aggregate.mock.calls[2];
+
+        expect(budgetAggregateCall[0].where.transactionDate).toEqual({
+          gte: new Date('2026-09-30T17:00:00.000Z'),
+          lt: new Date('2026-10-21T08:00:00.001Z'),
+        });
+      });
+
+      it('should calculate YEARLY budget spending from January 1 local midnight', async () => {
+        prismaMock.budget.findMany.mockResolvedValue([
+          budgetFixture('YEARLY', new Date('2025-01-01T00:00:00.000Z')),
+        ]);
+
+        await service.getContext('user-1');
+
+        const budgetAggregateCall =
+          prismaMock.transaction.aggregate.mock.calls[2];
+
+        expect(budgetAggregateCall[0].where.transactionDate).toEqual({
+          gte: new Date('2025-12-31T17:00:00.000Z'),
+          lt: new Date('2026-10-21T08:00:00.001Z'),
+        });
+      });
+
+      it('should use configured startDate and endDate for CUSTOM budgets', async () => {
+        prismaMock.budget.findMany.mockResolvedValue([
+          budgetFixture(
+            'CUSTOM',
+            new Date('2026-10-01T00:00:00.000Z'),
+            new Date('2026-10-31T17:00:00.000Z'),
+          ),
+        ]);
+
+        await service.getContext('user-1');
+
+        const budgetAggregateCall =
+          prismaMock.transaction.aggregate.mock.calls[2];
+
+        expect(budgetAggregateCall[0].where.transactionDate).toEqual({
+          gte: new Date('2026-10-01T00:00:00.000Z'),
+          lt: new Date('2026-10-21T08:00:00.001Z'),
+        });
+      });
+
+      it('should clamp recurring budget calculations to the configured budget startDate', async () => {
+        prismaMock.budget.findMany.mockResolvedValue([
+          budgetFixture('MONTHLY', new Date('2026-10-10T00:00:00.000Z')),
+        ]);
+
+        await service.getContext('user-1');
+
+        const budgetAggregateCall =
+          prismaMock.transaction.aggregate.mock.calls[2];
+
+        expect(budgetAggregateCall[0].where.transactionDate.gte).toEqual(
+          new Date('2026-10-10T00:00:00.000Z'),
+        );
+      });
+
+      it('should clamp spending to the configured budget endDate', async () => {
+        prismaMock.budget.findMany.mockResolvedValue([
+          budgetFixture(
+            'MONTHLY',
+            new Date('2026-10-01T00:00:00.000Z'),
+            new Date('2026-10-15T00:00:00.000Z'),
+          ),
+        ]);
+
+        await service.getContext('user-1');
+
+        const budgetAggregateCall =
+          prismaMock.transaction.aggregate.mock.calls[2];
+
+        expect(budgetAggregateCall[0].where.transactionDate.lt).toEqual(
+          new Date('2026-10-15T00:00:00.000Z'),
+        );
+      });
+
+      it('should not query spending for an empty budget period', async () => {
+        prismaMock.budget.findMany.mockResolvedValue([
+          budgetFixture(
+            'CUSTOM',
+            new Date('2026-10-22T00:00:00.000Z'),
+            new Date('2026-10-25T00:00:00.000Z'),
+          ),
+        ]);
+
+        await service.getContext('user-1');
+
+        expect(prismaMock.transaction.aggregate).toHaveBeenCalledTimes(2);
+      });
+    });
   });
 });

@@ -40,6 +40,17 @@ export interface AIFinancialContext {
   }>;
 }
 
+interface DateRange {
+  start: Date;
+  end: Date;
+}
+
+interface CalendarParts {
+  year: number;
+  month: number;
+  day: number;
+}
+
 @Injectable()
 export class AIFinancialContextService {
   constructor(private readonly prisma: PrismaService) {}
@@ -55,7 +66,12 @@ export class AIFinancialContextService {
     const currency = preference?.currency ?? 'IDR';
     const timezone = preference?.timezone ?? 'Asia/Jakarta';
 
-    const { start, end } = this.getCurrentMonthRange(now, timezone);
+    // Validate the timezone early rather than silently producing incorrect
+    // financial reporting periods.
+    this.getCalendarParts(now, timezone);
+
+    const period = this.getCalendarRange('MONTHLY', now, timezone);
+    const { start, end } = period;
 
     const transactionWhere = {
       userId,
@@ -124,60 +140,71 @@ export class AIFinancialContextService {
 
     const categoryTotals = new Map<
       string,
-      { amount: number; transactionCount: number }
+      { amountMinor: bigint; transactionCount: number }
     >();
 
     for (const transaction of expenseTransactions) {
       const category = transaction.category?.name ?? 'Tanpa kategori';
       const existing = categoryTotals.get(category) ?? {
-        amount: 0,
+        amountMinor: 0n,
         transactionCount: 0,
       };
 
-      existing.amount += Number(transaction.amount);
+      existing.amountMinor += this.toMinorUnits(transaction.amount);
       existing.transactionCount += 1;
       categoryTotals.set(category, existing);
     }
 
-    const totalIncome = Number(income._sum.amount ?? 0);
-    const totalExpense = Number(expense._sum.amount ?? 0);
+    const totalIncomeMinor = this.toMinorUnits(income._sum.amount ?? 0);
+    const totalExpenseMinor = this.toMinorUnits(expense._sum.amount ?? 0);
 
     const budgetResults = await Promise.all(
       budgets.map(async (budget) => {
-        const budgetStart = new Date(
-          Math.max(budget.startDate.getTime(), start.getTime()),
-        );
-        const budgetEnd = new Date(
-          Math.min(budget.endDate?.getTime() ?? end.getTime(), end.getTime()),
+        const budgetRange = this.getBudgetRange(
+          budget.period,
+          budget.startDate,
+          budget.endDate,
+          now,
+          timezone,
         );
 
-        const spentResult = await this.prisma.transaction.aggregate({
-          where: {
-            userId,
-            deletedAt: null,
-            status: 'ACTIVE',
-            type: 'EXPENSE',
-            currency,
-            transactionDate: {
-              gte: budgetStart,
-              lt: budgetEnd,
-            },
-            ...(budget.categoryId ? { categoryId: budget.categoryId } : {}),
-          },
-          _sum: { amount: true },
-        });
+        const spentResult =
+          budgetRange.start < budgetRange.end
+            ? await this.prisma.transaction.aggregate({
+                where: {
+                  userId,
+                  deletedAt: null,
+                  status: 'ACTIVE',
+                  type: 'EXPENSE',
+                  currency,
+                  transactionDate: {
+                    gte: budgetRange.start,
+                    lt: budgetRange.end,
+                  },
+                  ...(budget.categoryId
+                    ? { categoryId: budget.categoryId }
+                    : {}),
+                },
+                _sum: { amount: true },
+              })
+            : { _sum: { amount: null } };
 
-        const limit = Number(budget.amount);
-        const spent = Number(spentResult._sum.amount ?? 0);
+        const limitMinor = this.toMinorUnits(budget.amount);
+        const spentMinor = this.toMinorUnits(spentResult._sum.amount ?? 0);
+        const remainingMinor = limitMinor - spentMinor;
+
+        const usagePercentage =
+          limitMinor > 0n
+            ? Number((spentMinor * 10000n) / limitMinor) / 100
+            : 0;
 
         return {
           name: budget.name,
           category: budget.category?.name ?? null,
-          limit: this.money(limit),
-          spent: this.money(spent),
-          remaining: this.money(limit - spent),
-          usagePercentage:
-            limit > 0 ? Math.round((spent / limit) * 10000) / 100 : 0,
+          limit: this.fromMinorUnits(limitMinor),
+          spent: this.fromMinorUnits(spentMinor),
+          remaining: this.fromMinorUnits(remainingMinor),
+          usagePercentage,
           currency,
         };
       }),
@@ -192,19 +219,23 @@ export class AIFinancialContextService {
         endDateExclusive: end.toISOString(),
       },
       summary: {
-        totalIncome: this.money(totalIncome),
-        totalExpense: this.money(totalExpense),
-        netCashFlow: this.money(totalIncome - totalExpense),
+        totalIncome: this.fromMinorUnits(totalIncomeMinor),
+        totalExpense: this.fromMinorUnits(totalExpenseMinor),
+        netCashFlow: this.fromMinorUnits(totalIncomeMinor - totalExpenseMinor),
         incomeTransactionCount: income._count._all,
         expenseTransactionCount: expense._count._all,
       },
       expensesByCategory: [...categoryTotals.entries()]
         .map(([category, value]) => ({
           category,
-          amount: this.money(value.amount),
+          amount: this.fromMinorUnits(value.amountMinor),
           transactionCount: value.transactionCount,
         }))
-        .sort((a, b) => Number(b.amount) - Number(a.amount)),
+        .sort((a, b) => {
+          const left = this.toMinorUnits(a.amount);
+          const right = this.toMinorUnits(b.amount);
+          return left > right ? -1 : left < right ? 1 : 0;
+        }),
       recentTransactions: recentTransactions.map((transaction) => ({
         date: transaction.transactionDate.toISOString(),
         type: transaction.type,
@@ -217,42 +248,142 @@ export class AIFinancialContextService {
     };
   }
 
-  private money(value: number): string {
-    return value.toFixed(2);
-  }
-
-  private getCurrentMonthRange(
+  /**
+   * Returns the current calendar period in the user's timezone.
+   * The end boundary is exclusive.
+   */
+  private getCalendarRange(
+    period: string,
     now: Date,
     timezone: string,
-  ): { start: Date; end: Date } {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-    }).formatToParts(now);
+  ): DateRange {
+    const current = this.getCalendarParts(now, timezone);
+    let startParts: CalendarParts;
+    let endParts: CalendarParts;
 
-    const year = Number(parts.find((part) => part.type === 'year')?.value);
-    const month = Number(parts.find((part) => part.type === 'month')?.value);
+    switch (period) {
+      case 'DAILY': {
+        startParts = current;
+        endParts = this.addCalendarDays(current, 1);
+        break;
+      }
 
-    const start = this.localMidnightToUtc(year, month, timezone);
-    const nextMonth = month === 12 ? 1 : month + 1;
-    const nextYear = month === 12 ? year + 1 : year;
+      case 'WEEKLY': {
+        const weekday = new Date(
+          Date.UTC(current.year, current.month - 1, current.day),
+        ).getUTCDay();
+
+        // Monday is the first day of the week.
+        const daysSinceMonday = (weekday + 6) % 7;
+        startParts = this.addCalendarDays(current, -daysSinceMonday);
+        endParts = this.addCalendarDays(startParts, 7);
+        break;
+      }
+
+      case 'YEARLY': {
+        startParts = { year: current.year, month: 1, day: 1 };
+        endParts = { year: current.year + 1, month: 1, day: 1 };
+        break;
+      }
+
+      case 'MONTHLY':
+      default: {
+        startParts = { year: current.year, month: current.month, day: 1 };
+        endParts =
+          current.month === 12
+            ? { year: current.year + 1, month: 1, day: 1 }
+            : { year: current.year, month: current.month + 1, day: 1 };
+        break;
+      }
+    }
 
     return {
-      start,
-      end: this.localMidnightToUtc(nextYear, nextMonth, timezone),
+      start: this.localMidnightToUtc(startParts, timezone),
+      end: this.localMidnightToUtc(endParts, timezone),
     };
   }
 
-  private localMidnightToUtc(
-    year: number,
-    month: number,
+  /**
+   * Calculates the relevant spending window for a budget.
+   * CUSTOM budgets use their configured date range; recurring budgets use
+   * the current calendar cycle, clipped to the configured budget dates.
+   */
+  private getBudgetRange(
+    period: string,
+    budgetStart: Date,
+    budgetEnd: Date | null,
+    now: Date,
     timezone: string,
-  ): Date {
-    const targetUtc = Date.UTC(year, month - 1, 1, 0, 0, 0);
+  ): DateRange {
+    let range: DateRange;
+
+    if (period === 'CUSTOM') {
+      range = {
+        start: budgetStart,
+        end: budgetEnd ?? now,
+      };
+    } else {
+      range = this.getCalendarRange(period, now, timezone);
+    }
+
+    const start = new Date(
+      Math.max(range.start.getTime(), budgetStart.getTime()),
+    );
+
+    // Do not include future transactions in the current budget calculation.
+    const end = new Date(
+      Math.min(
+        range.end.getTime(),
+        budgetEnd?.getTime() ?? Number.POSITIVE_INFINITY,
+        now.getTime() + 1,
+      ),
+    );
+
+    return { start, end };
+  }
+
+  private getCalendarParts(date: Date, timezone: string): CalendarParts {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+    }).formatToParts(date);
+
+    const read = (type: string): number => {
+      const value = parts.find((part) => part.type === type)?.value;
+      if (!value) {
+        throw new Error(`Unable to determine ${type} in timezone ${timezone}`);
+      }
+      return Number(value);
+    };
+
+    return {
+      year: read('year'),
+      month: read('month'),
+      day: read('day'),
+    };
+  }
+
+  private addCalendarDays(parts: CalendarParts, days: number): CalendarParts {
+    const date = new Date(
+      Date.UTC(parts.year, parts.month - 1, parts.day + days),
+    );
+
+    return {
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate(),
+    };
+  }
+
+  private localMidnightToUtc(parts: CalendarParts, timezone: string): Date {
+    const targetUtc = Date.UTC(parts.year, parts.month - 1, parts.day, 0, 0, 0);
+
     let result = targetUtc;
 
-    for (let i = 0; i < 3; i += 1) {
+    // Iteratively solve for the UTC instant that represents local midnight.
+    for (let i = 0; i < 4; i += 1) {
       const formatted = new Intl.DateTimeFormat('en-GB', {
         timeZone: timezone,
         year: 'numeric',
@@ -264,8 +395,13 @@ export class AIFinancialContextService {
         hourCycle: 'h23',
       }).formatToParts(new Date(result));
 
-      const value = (type: string) =>
-        Number(formatted.find((part) => part.type === type)?.value);
+      const value = (type: string): number => {
+        const part = formatted.find((item) => item.type === type)?.value;
+        if (!part) {
+          throw new Error(`Unable to resolve ${type} for timezone ${timezone}`);
+        }
+        return Number(part);
+      };
 
       const representedUtc = Date.UTC(
         value('year'),
@@ -280,5 +416,40 @@ export class AIFinancialContextService {
     }
 
     return new Date(result);
+  }
+
+  /**
+   * Converts a decimal monetary amount to two-decimal minor units.
+   * Prisma Decimal values are stringified before conversion to avoid
+   * accumulating binary floating-point errors.
+   */
+  private toMinorUnits(value: unknown): bigint {
+    const raw = String(value);
+
+    if (!/^-?\d+(?:\.\d+)?$/.test(raw)) {
+      throw new Error(`Invalid monetary amount: ${raw}`);
+    }
+
+    const negative = raw.startsWith('-');
+    const unsigned = negative ? raw.slice(1) : raw;
+    const [whole, fraction = ''] = unsigned.split('.');
+    const paddedFraction = fraction.padEnd(3, '0');
+
+    // Round half up to the currency precision used by this context.
+    const cents =
+      BigInt(whole) * 100n +
+      BigInt(paddedFraction.slice(0, 2) || '0') +
+      (Number(paddedFraction[2]) >= 5 ? 1n : 0n);
+
+    return negative ? -cents : cents;
+  }
+
+  private fromMinorUnits(value: bigint): string {
+    const negative = value < 0n;
+    const absolute = negative ? -value : value;
+    const whole = absolute / 100n;
+    const fraction = (absolute % 100n).toString().padStart(2, '0');
+
+    return `${negative ? '-' : ''}${whole.toString()}.${fraction}`;
   }
 }
