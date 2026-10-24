@@ -33,9 +33,11 @@ import { AIProvider } from './providers/ai-provider.interface';
 import { TransactionsModule } from '../transactions/transactions.module';
 import { DatabaseModule } from 'src/database/database.module';
 import { AIPrivacyService } from './services/ai-privacy.service';
+import { AiController } from './ai.controller';
 
 @Module({
   imports: [DatabaseModule, forwardRef(() => TransactionsModule)],
+  controllers: [AiController],
   providers: [
     AIService,
     AIChatService,

@@ -53,9 +53,7 @@ export class OpenAICompatibleAIProvider implements AIProvider {
 
   async complete(request: AICompletionRequest): Promise<AICompletionResponse> {
     const apiKey = this.configService.get<string>('ai.apiKey', '');
-
     const baseUrl = this.configService.get<string>('ai.baseUrl', '');
-
     const model = this.getModel();
 
     if (!apiKey) {
@@ -72,8 +70,8 @@ export class OpenAICompatibleAIProvider implements AIProvider {
 
     const timeoutMs = this.configService.get<number>('ai.timeoutMs', 30_000);
 
+    const fallbackModels = this.getFallbackModels(model);
     const controller = new AbortController();
-
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
@@ -85,6 +83,7 @@ export class OpenAICompatibleAIProvider implements AIProvider {
         },
         body: JSON.stringify({
           model,
+          ...(fallbackModels.length > 0 ? { models: fallbackModels } : {}),
           messages: request.messages as OpenAICompatibleMessage[],
           temperature: request.temperature ?? 0,
           max_tokens: request.maxTokens,
@@ -112,7 +111,6 @@ export class OpenAICompatibleAIProvider implements AIProvider {
       }
 
       const data = (await response.json()) as OpenAICompatibleResponse;
-
       const rawContent = data.choices?.[0]?.message?.content;
 
       if (typeof rawContent !== 'string') {
@@ -140,10 +138,18 @@ export class OpenAICompatibleAIProvider implements AIProvider {
         );
       }
 
+      const actualModel = data.model ?? model;
+
+      if (actualModel !== model) {
+        this.logger.log(
+          `AI model fallback succeeded: configured=${model}, actual=${actualModel}`,
+        );
+      }
+
       return {
         content,
         provider: 'openai-compatible',
-        model: data.model ?? model,
+        model: actualModel,
         usage: this.mapUsage(data.usage),
       };
     } catch (error) {
@@ -175,6 +181,29 @@ export class OpenAICompatibleAIProvider implements AIProvider {
     return this.configService.get<string>('ai.model', '');
   }
 
+  private getFallbackModels(primaryModel: string): string[] {
+    const configuredModels = this.configService.get<string[]>(
+      'ai.fallbackModels',
+      [],
+    );
+
+    if (!Array.isArray(configuredModels)) {
+      return [];
+    }
+
+    return [
+      ...new Set(
+        configuredModels
+          .filter(
+            (model): model is string =>
+              typeof model === 'string' && model.trim().length > 0,
+          )
+          .map((model) => model.trim())
+          .filter((model) => model !== primaryModel),
+      ),
+    ];
+  }
+
   private buildCompletionUrl(baseUrl: string): string {
     const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
 
@@ -193,9 +222,7 @@ export class OpenAICompatibleAIProvider implements AIProvider {
     }
 
     const inputTokens = usage.prompt_tokens ?? 0;
-
     const outputTokens = usage.completion_tokens ?? 0;
-
     const totalTokens = usage.total_tokens ?? inputTokens + outputTokens;
 
     return {
