@@ -70,11 +70,6 @@ describe('AIFinancialContextService', () => {
     });
 
     it('should use the requesting user preferences', async () => {
-      prismaMock.userPreference.findUnique.mockResolvedValue({
-        currency: 'IDR',
-        timezone: 'Asia/Jakarta',
-      });
-
       await service.getContext('user-123');
 
       expect(prismaMock.userPreference.findUnique).toHaveBeenCalledWith({
@@ -95,14 +90,14 @@ describe('AIFinancialContextService', () => {
       expect(result.timezone).toBe('Asia/Jakarta');
     });
 
-    it('should scope transaction queries to the requesting user', async () => {
+    it('should scope transaction and budget queries to the requesting user', async () => {
       await service.getContext('user-1');
 
-      const aggregateCalls = prismaMock.transaction.aggregate.mock.calls;
+      expect(
+        prismaMock.transaction.aggregate.mock.calls.length,
+      ).toBeGreaterThanOrEqual(2);
 
-      expect(aggregateCalls.length).toBeGreaterThanOrEqual(2);
-
-      for (const [args] of aggregateCalls) {
+      for (const [args] of prismaMock.transaction.aggregate.mock.calls) {
         expect(args.where.userId).toBe('user-1');
         expect(args.where.deletedAt).toBeNull();
         expect(args.where.status).toBe('ACTIVE');
@@ -126,11 +121,11 @@ describe('AIFinancialContextService', () => {
         .mockResolvedValueOnce({
           _sum: { amount: { toString: () => '5000000' } },
           _count: { _all: 3 },
-        })
+        } as never)
         .mockResolvedValueOnce({
           _sum: { amount: { toString: () => '1750000' } },
           _count: { _all: 8 },
-        });
+        } as never);
 
       const result = await service.getContext('user-1');
 
@@ -390,6 +385,139 @@ describe('AIFinancialContextService', () => {
         await service.getContext('user-1');
 
         expect(prismaMock.transaction.aggregate).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    describe('financial amount precision', () => {
+      const decimal = (value: string) => ({
+        toString: () => value,
+      });
+
+      it('should preserve decimal precision in income, expense, and net cash flow', async () => {
+        prismaMock.transaction.aggregate
+          .mockResolvedValueOnce({
+            _sum: { amount: decimal('0.30') },
+            _count: { _all: 2 },
+          } as never)
+          .mockResolvedValueOnce({
+            _sum: { amount: decimal('0.10') },
+            _count: { _all: 2 },
+          } as never);
+
+        const result = await service.getContext('user-1');
+
+        expect(result.summary.totalIncome).toBe('0.30');
+        expect(result.summary.totalExpense).toBe('0.10');
+        expect(result.summary.netCashFlow).toBe('0.20');
+      });
+
+      it('should preserve cents when aggregating expenses by category', async () => {
+        prismaMock.transaction.findMany
+          .mockResolvedValueOnce([
+            {
+              amount: decimal('0.10'),
+              category: { name: 'Makanan' },
+            },
+            {
+              amount: decimal('0.20'),
+              category: { name: 'Makanan' },
+            },
+            {
+              amount: decimal('0.30'),
+              category: { name: 'Transportasi' },
+            },
+          ] as never)
+          .mockResolvedValueOnce([] as never);
+
+        const result = await service.getContext('user-1');
+
+        expect(result.expensesByCategory).toHaveLength(2);
+
+        expect(result.expensesByCategory).toEqual(
+          expect.arrayContaining([
+            {
+              category: 'Makanan',
+              amount: '0.30',
+              transactionCount: 2,
+            },
+            {
+              category: 'Transportasi',
+              amount: '0.30',
+              transactionCount: 1,
+            },
+          ]),
+        );
+      });
+
+      it('should calculate remaining budget accurately with decimal amounts', async () => {
+        prismaMock.budget.findMany.mockResolvedValue([
+          {
+            name: 'Budget Makanan',
+            amount: decimal('1.00'),
+            startDate: new Date('2026-10-01T00:00:00.000Z'),
+            endDate: null,
+            period: 'MONTHLY',
+            categoryId: 'category-1',
+            category: { name: 'Makanan' },
+          },
+        ] as never);
+
+        prismaMock.transaction.aggregate
+          .mockResolvedValueOnce({
+            _sum: { amount: decimal('0.30') },
+            _count: { _all: 1 },
+          } as never)
+          .mockResolvedValueOnce({
+            _sum: { amount: decimal('0.10') },
+            _count: { _all: 1 },
+          } as never)
+          .mockResolvedValueOnce({
+            _sum: { amount: decimal('0.30') },
+            _count: { _all: 2 },
+          } as never);
+
+        const result = await service.getContext('user-1');
+
+        expect(result.budgets).toHaveLength(1);
+
+        expect(result.budgets[0]).toMatchObject({
+          name: 'Budget Makanan',
+          limit: '1.00',
+          spent: '0.30',
+          remaining: '0.70',
+          usagePercentage: 30,
+          currency: 'IDR',
+        });
+      });
+
+      it('should return zero values when aggregate amounts are null', async () => {
+        const result = await service.getContext('user-1');
+
+        expect(result.summary.totalIncome).toBe('0.00');
+        expect(result.summary.totalExpense).toBe('0.00');
+        expect(result.summary.netCashFlow).toBe('0.00');
+      });
+
+      it('should return monetary values as strings with two decimal places', async () => {
+        prismaMock.transaction.aggregate
+          .mockResolvedValueOnce({
+            _sum: { amount: decimal('1234567.89') },
+            _count: { _all: 1 },
+          } as never)
+          .mockResolvedValueOnce({
+            _sum: { amount: decimal('234567.89') },
+            _count: { _all: 1 },
+          } as never);
+
+        const result = await service.getContext('user-1');
+
+        expect(result.summary.totalIncome).toBe('1234567.89');
+        expect(result.summary.totalExpense).toBe('234567.89');
+        expect(result.summary.netCashFlow).toBe('1000000.00');
+
+        expect(typeof result.summary.totalIncome).toBe('string');
+        expect(typeof result.summary.totalExpense).toBe('string');
+        expect(typeof result.summary.netCashFlow).toBe('string');
       });
     });
   });
