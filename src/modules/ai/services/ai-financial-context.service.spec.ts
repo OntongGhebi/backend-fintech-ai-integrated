@@ -520,5 +520,160 @@ describe('AIFinancialContextService', () => {
         expect(typeof result.summary.netCashFlow).toBe('string');
       });
     });
+
+    describe('financial context data integrity', () => {
+      it('should include the correct date boundaries in summary queries', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-10-21T08:00:00.000Z'));
+
+        try {
+          await service.getContext('user-1');
+
+          const incomeCall = prismaMock.transaction.aggregate.mock.calls[0];
+          const expenseCall = prismaMock.transaction.aggregate.mock.calls[1];
+
+          const expectedRange = {
+            gte: new Date('2026-09-30T17:00:00.000Z'),
+            lt: new Date('2026-10-31T17:00:00.000Z'),
+          };
+
+          expect(incomeCall[0].where.transactionDate).toEqual(expectedRange);
+          expect(expenseCall[0].where.transactionDate).toEqual(expectedRange);
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('should group expenses without a category under Tanpa kategori', async () => {
+        prismaMock.transaction.findMany
+          .mockResolvedValueOnce([
+            {
+              amount: { toString: () => '12500.50' },
+              category: null,
+            },
+            {
+              amount: { toString: () => '7500.25' },
+              category: { name: 'Makanan' },
+            },
+          ] as never)
+          .mockResolvedValueOnce([] as never);
+
+        const result = await service.getContext('user-1');
+
+        expect(result.expensesByCategory).toEqual(
+          expect.arrayContaining([
+            {
+              category: 'Tanpa kategori',
+              amount: '12500.50',
+              transactionCount: 1,
+            },
+            {
+              category: 'Makanan',
+              amount: '7500.25',
+              transactionCount: 1,
+            },
+          ]),
+        );
+      });
+
+      it('should preserve null category and description in recent transactions', async () => {
+        prismaMock.transaction.findMany
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([
+            {
+              transactionDate: new Date('2026-10-20T10:00:00.000Z'),
+              type: 'EXPENSE',
+              amount: { toString: () => '25000.00' },
+              currency: 'IDR',
+              description: null,
+              category: null,
+            },
+          ] as never);
+
+        const result = await service.getContext('user-1');
+
+        expect(result.recentTransactions).toHaveLength(1);
+        expect(result.recentTransactions[0]).toEqual({
+          date: '2026-10-20T10:00:00.000Z',
+          type: 'EXPENSE',
+          amount: '25000.00',
+          currency: 'IDR',
+          category: null,
+          description: null,
+        });
+      });
+
+      it('should apply category and currency filters to budget spending', async () => {
+        prismaMock.budget.findMany.mockResolvedValue([
+          {
+            name: 'Budget Makanan',
+            amount: '500000.00',
+            startDate: new Date('2026-10-01T00:00:00.000Z'),
+            endDate: null,
+            period: 'MONTHLY',
+            categoryId: 'category-food',
+            category: { name: 'Makanan' },
+          },
+        ] as never);
+
+        await service.getContext('user-1');
+
+        const budgetAggregateCall =
+          prismaMock.transaction.aggregate.mock.calls[2];
+
+        expect(budgetAggregateCall[0].where).toEqual(
+          expect.objectContaining({
+            userId: 'user-1',
+            deletedAt: null,
+            status: 'ACTIVE',
+            type: 'EXPENSE',
+            currency: 'IDR',
+            categoryId: 'category-food',
+          }),
+        );
+
+        expect(budgetAggregateCall[0].where.transactionDate).toEqual(
+          expect.objectContaining({
+            gte: expect.any(Date),
+            lt: expect.any(Date),
+          }),
+        );
+      });
+
+      it('should not include future transactions in the recent transaction query by date range', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-10-21T08:00:00.000Z'));
+
+        try {
+          await service.getContext('user-1');
+
+          const recentQuery = prismaMock.transaction.findMany.mock.calls.find(
+            ([args]) => args.take === 10,
+          );
+
+          expect(recentQuery).toBeDefined();
+
+          const range = recentQuery?.[0].where.transactionDate;
+
+          expect(range.gte).toEqual(expect.any(Date));
+          expect(range.lt).toEqual(expect.any(Date));
+          expect(range.lt.getTime()).toBeLessThanOrEqual(
+            new Date('2026-11-01T00:00:00.000Z').getTime(),
+          );
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('should propagate failures when loading budget data', async () => {
+        prismaMock.budget.findMany.mockRejectedValueOnce(
+          new Error('Budget query failed'),
+        );
+
+        await expect(service.getContext('user-1')).rejects.toThrow(
+          'Budget query failed',
+        );
+      });
+    });
   });
 });
