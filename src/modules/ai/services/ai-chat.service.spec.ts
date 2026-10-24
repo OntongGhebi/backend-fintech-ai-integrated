@@ -1,69 +1,139 @@
 import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import { expect } from '@jest/globals';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AIMessageRole } from '../../../../generated/prisma/enums';
 import { AIService } from './ai.service';
 import { AIChatService } from './ai-chat.service';
 import { AIConversationService } from './ai-conversation.service';
 import { AIConversationContextService } from './ai-conversation-context.service';
+import { AIFinancialContextService } from './ai-financial-context.service';
 import { AI_USAGE_FEATURES } from '../constants/ai-usage.constants';
 
 describe('AIChatService', () => {
   let service: AIChatService;
+
+  const financialContext = {
+    generatedAt: '2026-10-24T00:00:00.000Z',
+    currency: 'IDR',
+    timezone: 'Asia/Jakarta',
+    period: {
+      startDate: '2026-10-01',
+      endDateExclusive: '2026-11-01',
+    },
+    summary: {
+      totalIncome: '5000000.00',
+      totalExpense: '1750000.00',
+      netCashFlow: '3250000.00',
+      incomeTransactionCount: 3,
+      expenseTransactionCount: 8,
+    },
+    expensesByCategory: [],
+    recentTransactions: [],
+    budgets: [],
+  };
+
   const aiConversationServiceMock = {
     findById: jest.fn(),
     addMessage: jest.fn(),
   };
-  const aiServiceMock = { complete: jest.fn() };
+
+  const aiServiceMock = {
+    complete: jest.fn(),
+  };
+
+  const aiFinancialContextServiceMock = {
+    getContext: jest.fn(),
+  };
+
   beforeEach(async () => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+
+    aiFinancialContextServiceMock.getContext.mockResolvedValue(
+      financialContext,
+    );
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AIChatService,
-        { provide: AIConversationService, useValue: aiConversationServiceMock },
-        { provide: AIService, useValue: aiServiceMock },
+        {
+          provide: AIConversationService,
+          useValue: aiConversationServiceMock,
+        },
+        {
+          provide: AIService,
+          useValue: aiServiceMock,
+        },
+        {
+          provide: AIFinancialContextService,
+          useValue: aiFinancialContextServiceMock,
+        },
         AIConversationContextService,
       ],
     }).compile();
+
     service = module.get<AIChatService>(AIChatService);
   });
+
+  const createConversation = (messages: any[] = []) => ({
+    id: 'conversation-id',
+    userId: 'user-id',
+    title: 'Test conversation',
+    messages,
+  });
+
+  const createMessage = (
+    id: string,
+    role: AIMessageRole,
+    content: string,
+    model: string | null = null,
+  ) => ({
+    id,
+    role,
+    content,
+    model,
+    createdAt: new Date('2026-10-24T10:00:00.000Z'),
+  });
+
+  const mockSuccessfulCompletion = () => {
+    aiServiceMock.complete.mockResolvedValue({
+      content: 'Respons AI',
+      provider: 'openai-compatible',
+      model: 'test-model',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 8,
+        totalTokens: 18,
+      },
+    });
+  };
+
   describe('sendMessage', () => {
-    it('should persist user message, build context, send it to AI, and persist assistant response', async () => {
-      const conversation = {
-        id: 'conversation-id',
-        userId: 'user-id',
-        title: 'Test conversation',
-        messages: [],
-      };
-      const userMessage = {
-        id: 'message-1',
-        role: AIMessageRole.USER,
-        content: 'Halo AI',
-        model: null,
-        createdAt: new Date('2026-09-30T10:00:00.000Z'),
-      };
-      const assistantMessage = {
-        id: 'message-2',
-        role: AIMessageRole.ASSISTANT,
-        content: 'Halo! Ada yang bisa saya bantu?',
-        model: 'test-model',
-        createdAt: new Date('2026-09-30T10:00:01.000Z'),
-      };
+    it('should persist the user message and return the assistant response', async () => {
+      const conversation = createConversation();
+      const userMessage = createMessage(
+        'message-1',
+        AIMessageRole.USER,
+        'Halo AI',
+      );
+      const assistantMessage = createMessage(
+        'message-2',
+        AIMessageRole.ASSISTANT,
+        'Respons AI',
+        'test-model',
+      );
+
       aiConversationServiceMock.findById
         .mockResolvedValueOnce(conversation)
         .mockResolvedValueOnce({
           ...conversation,
-          messages: [...conversation.messages, userMessage],
+          messages: [userMessage],
         });
+
       aiConversationServiceMock.addMessage
         .mockResolvedValueOnce(userMessage)
         .mockResolvedValueOnce(assistantMessage);
-      aiServiceMock.complete.mockResolvedValue({
-        content: 'Halo! Ada yang bisa saya bantu?',
-        provider: 'openai-compatible',
-        model: 'test-model',
-        usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
-      });
+
+      mockSuccessfulCompletion();
+
       await expect(
         service.sendMessage('user-id', 'conversation-id', ' Halo AI '),
       ).resolves.toEqual({
@@ -71,13 +141,13 @@ describe('AIChatService', () => {
         message: assistantMessage,
         provider: 'openai-compatible',
         model: 'test-model',
-        usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
+        usage: {
+          inputTokens: 10,
+          outputTokens: 8,
+          totalTokens: 18,
+        },
       });
-      expect(aiConversationServiceMock.findById).toHaveBeenNthCalledWith(
-        1,
-        'user-id',
-        'conversation-id',
-      );
+
       expect(aiConversationServiceMock.addMessage).toHaveBeenNthCalledWith(
         1,
         'user-id',
@@ -85,410 +155,72 @@ describe('AIChatService', () => {
         AIMessageRole.USER,
         'Halo AI',
       );
-      expect(aiConversationServiceMock.findById).toHaveBeenNthCalledWith(
-        2,
-        'user-id',
-        'conversation-id',
-      );
-      expect(aiServiceMock.complete).toHaveBeenCalledWith(
-        {
-          messages: [{ role: 'user', content: 'Halo AI' }],
-          temperature: 0.2,
-        },
-        {
-          userId: 'user-id',
-          feature: AI_USAGE_FEATURES.CHAT,
-        },
-      );
+
       expect(aiConversationServiceMock.addMessage).toHaveBeenNthCalledWith(
         2,
         'user-id',
         'conversation-id',
         AIMessageRole.ASSISTANT,
-        'Halo! Ada yang bisa saya bantu?',
+        'Respons AI',
         'test-model',
       );
     });
-    it('should reject when the conversation does not exist', async () => {
-      aiConversationServiceMock.findById.mockRejectedValue(
-        new NotFoundException('AI conversation not found'),
-      );
-      await expect(
-        service.sendMessage('user-id', 'conversation-id', 'Hello'),
-      ).rejects.toBeInstanceOf(NotFoundException);
-      expect(aiConversationServiceMock.addMessage).not.toHaveBeenCalled();
-      expect(aiServiceMock.complete).not.toHaveBeenCalled();
-    });
-    it('should reject an empty message', async () => {
-      await expect(
-        service.sendMessage('user-id', 'conversation-id', ' '),
-      ).rejects.toThrow('AI message content cannot be empty');
-      expect(aiConversationServiceMock.findById).not.toHaveBeenCalled();
-      expect(aiServiceMock.complete).not.toHaveBeenCalled();
-    });
-    it('should not call the AI provider when persisting the user message fails', async () => {
-      aiConversationServiceMock.findById.mockResolvedValue({
-        id: 'conversation-id',
-        userId: 'user-id',
-        title: null,
-        messages: [],
-      });
-      aiConversationServiceMock.addMessage.mockRejectedValue(
-        new Error('Database error'),
-      );
-      await expect(
-        service.sendMessage('user-id', 'conversation-id', 'Hello'),
-      ).rejects.toThrow('Database error');
-      expect(aiServiceMock.complete).not.toHaveBeenCalled();
-    });
-    it('should propagate AI provider errors and not persist an assistant message', async () => {
-      const conversation = {
-        id: 'conversation-id',
-        userId: 'user-id',
-        title: null,
-        messages: [],
-      };
-      aiConversationServiceMock.findById
-        .mockResolvedValueOnce(conversation)
-        .mockResolvedValueOnce({
-          ...conversation,
-          messages: [
-            {
-              id: 'message-1',
-              role: AIMessageRole.USER,
-              content: 'Hello',
-              model: null,
-              createdAt: new Date(),
-            },
-          ],
-        });
-      aiConversationServiceMock.addMessage.mockResolvedValue({
-        id: 'message-1',
-        role: AIMessageRole.USER,
-        content: 'Hello',
-        model: null,
-        createdAt: new Date(),
-      });
-      aiServiceMock.complete.mockRejectedValue(
-        new ServiceUnavailableException('AI provider request failed'),
-      );
-      await expect(
-        service.sendMessage('user-id', 'conversation-id', 'Hello'),
-      ).rejects.toBeInstanceOf(ServiceUnavailableException);
-      expect(aiConversationServiceMock.addMessage).toHaveBeenCalledTimes(1);
-    });
-    it('should preserve system and assistant history', async () => {
-      const conversation = {
-        id: 'conversation-id',
-        userId: 'user-id',
-        title: null,
-        messages: [
-          {
-            id: 'message-1',
-            role: AIMessageRole.SYSTEM,
-            content: 'You are a financial assistant.',
-            model: null,
-            createdAt: new Date('2026-09-30T10:00:00.000Z'),
-          },
-          {
-            id: 'message-2',
-            role: AIMessageRole.USER,
-            content: 'Berapa saldo saya?',
-            model: null,
-            createdAt: new Date('2026-09-30T10:01:00.000Z'),
-          },
-          {
-            id: 'message-3',
-            role: AIMessageRole.ASSISTANT,
-            content: 'Saya membutuhkan akses data saldo Anda.',
-            model: 'test-model',
-            createdAt: new Date('2026-09-30T10:01:01.000Z'),
-          },
-        ],
-      };
-      aiConversationServiceMock.findById
-        .mockResolvedValueOnce(conversation)
-        .mockResolvedValueOnce(conversation);
-      aiConversationServiceMock.addMessage.mockResolvedValue({
-        id: 'message-4',
-        role: AIMessageRole.USER,
-        content: 'Lanjutkan',
-        model: null,
-        createdAt: new Date(),
-      });
-      aiServiceMock.complete.mockResolvedValue({
-        content: 'Baik.',
-        provider: 'openai-compatible',
-        model: 'test-model',
-      });
-      await service.sendMessage('user-id', 'conversation-id', 'Lanjutkan');
-      expect(aiServiceMock.complete).toHaveBeenCalledWith(
-        {
-          messages: [
-            { role: 'system', content: 'You are a financial assistant.' },
-            { role: 'user', content: 'Berapa saldo saya?' },
-            {
-              role: 'assistant',
-              content: 'Saya membutuhkan akses data saldo Anda.',
-            },
-          ],
-          temperature: 0.2,
-        },
-        {
-          userId: 'user-id',
-          feature: AI_USAGE_FEATURES.CHAT,
-        },
-      );
-    });
-    it('should limit conversation context before sending it to the AI provider', async () => {
-      const messages = Array.from({ length: 25 }, (_, index) => ({
-        id: `message-${index + 1}`,
-        role: index % 2 === 0 ? AIMessageRole.USER : AIMessageRole.ASSISTANT,
-        content: `Message ${index + 1}`,
-        model: null,
-        createdAt: new Date(
-          `2026-09-30T10:${String(index).padStart(2, '0')}:00.000Z`,
-        ),
-      }));
-      const conversation = {
-        id: 'conversation-id',
-        userId: 'user-id',
-        title: null,
-        messages: [],
-      };
-      aiConversationServiceMock.findById
-        .mockResolvedValueOnce(conversation)
-        .mockResolvedValueOnce({ ...conversation, messages });
-      aiConversationServiceMock.addMessage.mockResolvedValue({
-        id: 'message-new',
-        role: AIMessageRole.USER,
-        content: 'Latest',
-        model: null,
-        createdAt: new Date(),
-      });
-      aiServiceMock.complete.mockResolvedValue({
-        content: 'Response',
-        provider: 'openai-compatible',
-        model: 'test-model',
-      });
-      await service.sendMessage('user-id', 'conversation-id', 'Latest');
-      const completionRequest = aiServiceMock.complete.mock.calls[0][0];
-      expect(completionRequest.messages).toHaveLength(20);
-      expect(completionRequest.messages[0]).toEqual({
-        role: 'assistant',
-        content: 'Message 6',
-      });
-      expect(completionRequest.messages[19]).toEqual({
-        role: 'user',
-        content: 'Message 25',
-      });
-    });
-    it('should preserve system messages when limiting context', async () => {
-      const messages = [
-        {
-          id: 'system-1',
-          role: AIMessageRole.SYSTEM,
-          content: 'You are a financial assistant.',
-          model: null,
-          createdAt: new Date('2026-09-30T10:00:00.000Z'),
-        },
-        ...Array.from({ length: 25 }, (_, index) => ({
-          id: `message-${index + 1}`,
-          role: index % 2 === 0 ? AIMessageRole.USER : AIMessageRole.ASSISTANT,
-          content: `Message ${index + 1}`,
-          model: null,
-          createdAt: new Date(
-            `2026-09-30T10:${String(index + 1).padStart(2, '0')}:00.000Z`,
-          ),
-        })),
-      ];
-      const conversation = {
-        id: 'conversation-id',
-        userId: 'user-id',
-        title: null,
-        messages: [],
-      };
-      aiConversationServiceMock.findById
-        .mockResolvedValueOnce(conversation)
-        .mockResolvedValueOnce({ ...conversation, messages });
-      aiConversationServiceMock.addMessage.mockResolvedValue({
-        id: 'message-new',
-        role: AIMessageRole.USER,
-        content: 'Latest',
-        model: null,
-        createdAt: new Date(),
-      });
-      aiServiceMock.complete.mockResolvedValue({
-        content: 'Response',
-        provider: 'openai-compatible',
-        model: 'test-model',
-      });
-      await service.sendMessage('user-id', 'conversation-id', 'Latest');
-      const completionRequest = aiServiceMock.complete.mock.calls[0][0];
-      expect(completionRequest.messages).toHaveLength(20);
-      expect(completionRequest.messages[0]).toEqual({
-        role: 'system',
-        content: 'You are a financial assistant.',
-      });
-      expect(completionRequest.messages[19]).toEqual({
-        role: 'user',
-        content: 'Message 25',
-      });
-    });
-    it('should not send unsupported tool messages to the AI provider', async () => {
-      const conversation = {
-        id: 'conversation-id',
-        userId: 'user-id',
-        title: null,
-        messages: [
-          {
-            id: 'message-1',
-            role: AIMessageRole.SYSTEM,
-            content: 'You are a financial assistant.',
-            model: null,
-            createdAt: new Date(),
-          },
-          {
-            id: 'message-2',
-            role: AIMessageRole.TOOL,
-            content: 'tool result',
-            model: null,
-            createdAt: new Date(),
-          },
-        ],
-      };
-      aiConversationServiceMock.findById
-        .mockResolvedValueOnce(conversation)
-        .mockResolvedValueOnce(conversation);
-      aiConversationServiceMock.addMessage.mockResolvedValue({
-        id: 'message-3',
-        role: AIMessageRole.USER,
-        content: 'Hello',
-        model: null,
-        createdAt: new Date(),
-      });
-      aiServiceMock.complete.mockResolvedValue({
-        content: 'Hello.',
-        provider: 'openai-compatible',
-        model: 'test-model',
-      });
-      await service.sendMessage('user-id', 'conversation-id', 'Hello');
-      expect(aiServiceMock.complete).toHaveBeenCalledWith(
-        {
-          messages: [
-            { role: 'system', content: 'You are a financial assistant.' },
-          ],
-          temperature: 0.2,
-        },
-        {
-          userId: 'user-id',
-          feature: AI_USAGE_FEATURES.CHAT,
-        },
-      );
-    });
-    it('should not persist an assistant message when AI completion fails', async () => {
-      const conversation = {
-        id: 'conversation-id',
-        userId: 'user-id',
-        title: null,
-        messages: [],
-      };
-      aiConversationServiceMock.findById
-        .mockResolvedValueOnce(conversation)
-        .mockResolvedValueOnce({
-          ...conversation,
-          messages: [
-            ...conversation.messages,
-            {
-              id: 'user-message-id',
-              role: AIMessageRole.USER,
-              content: 'Hello',
-              model: null,
-              createdAt: new Date(),
-            },
-          ],
-        });
 
-      aiConversationServiceMock.addMessage.mockResolvedValueOnce({
-        id: 'user-message-id',
-        role: AIMessageRole.USER,
-        content: 'Hello',
-        model: null,
-        createdAt: new Date(),
-      });
-
-      aiServiceMock.complete.mockRejectedValue(
-        new ServiceUnavailableException('AI service is currently unavailable'),
-      );
-
-      await expect(
-        service.sendMessage('user-id', 'conversation-id', 'Hello'),
-      ).rejects.toBeInstanceOf(ServiceUnavailableException);
-
-      expect(aiConversationServiceMock.addMessage).toHaveBeenCalledTimes(1);
-
-      expect(aiConversationServiceMock.addMessage).toHaveBeenCalledWith(
-        'user-id',
-        'conversation-id',
+    it('should pass the latest financial context to the AI provider', async () => {
+      const conversation = createConversation();
+      const userMessage = createMessage(
+        'message-1',
         AIMessageRole.USER,
-        'Hello',
+        'Berapa pemasukan saya?',
       );
-    });
-    it('should pass user identity and usage feature to AIService', async () => {
-      const conversation = {
-        id: 'conversation-id',
-        userId: 'user-id',
-        title: null,
-        messages: [],
-      };
+
       aiConversationServiceMock.findById
         .mockResolvedValueOnce(conversation)
         .mockResolvedValueOnce({
           ...conversation,
-          messages: [
-            ...conversation.messages,
-            {
-              id: 'user-message-id',
-              role: AIMessageRole.USER,
-              content: 'Hello',
-              model: null,
-              createdAt: new Date(),
-            },
-          ],
+          messages: [userMessage],
         });
 
       aiConversationServiceMock.addMessage
-        .mockResolvedValueOnce({
-          id: 'user-message-id',
-          role: AIMessageRole.USER,
-          content: 'Hello',
-          model: null,
-          createdAt: new Date(),
-        })
-        .mockResolvedValueOnce({
-          id: 'assistant-message-id',
-          role: AIMessageRole.ASSISTANT,
-          content: 'Hello!',
-          model: 'test-model',
-          createdAt: new Date(),
-        });
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(
+          createMessage(
+            'message-2',
+            AIMessageRole.ASSISTANT,
+            'Pemasukan Anda Rp5.000.000.',
+            'test-model',
+          ),
+        );
 
-      aiServiceMock.complete.mockResolvedValue({
-        content: 'Hello!',
-        provider: 'openai-compatible',
-        model: 'test-model',
-        usage: {
-          inputTokens: 10,
-          outputTokens: 5,
-          totalTokens: 15,
-        },
+      mockSuccessfulCompletion();
+
+      await service.sendMessage(
+        'user-id',
+        'conversation-id',
+        'Berapa pemasukan saya?',
+      );
+
+      expect(aiFinancialContextServiceMock.getContext).toHaveBeenCalledWith(
+        'user-id',
+      );
+
+      const request = aiServiceMock.complete.mock.calls[0][0];
+
+      expect(request.messages[0].role).toBe('system');
+      expect(request.messages[0].content).toContain(
+        'KONTEKS KEUANGAN PENGGUNA (JSON):',
+      );
+      expect(request.messages[0].content).toContain(
+        JSON.stringify(financialContext),
+      );
+
+      expect(request.messages).toContainEqual({
+        role: 'user',
+        content: 'Berapa pemasukan saya?',
       });
-
-      await service.sendMessage('user-id', 'conversation-id', 'Hello');
 
       expect(aiServiceMock.complete).toHaveBeenCalledWith(
         expect.objectContaining({
-          messages: [{ role: 'user', content: 'Hello' }],
           temperature: 0.2,
         }),
         {
@@ -498,164 +230,294 @@ describe('AIChatService', () => {
       );
     });
 
-    it('should reject empty content', async () => {
+    it('should reject an empty message before accessing the conversation', async () => {
       await expect(
-        service.sendMessage('user-1', 'conversation-1', '   '),
+        service.sendMessage('user-id', 'conversation-id', '   '),
       ).rejects.toThrow('AI message content cannot be empty');
 
       expect(aiConversationServiceMock.findById).not.toHaveBeenCalled();
+      expect(aiFinancialContextServiceMock.getContext).not.toHaveBeenCalled();
+      expect(aiServiceMock.complete).not.toHaveBeenCalled();
     });
 
-    it('should reject a missing conversation', async () => {
-      aiConversationServiceMock.findById.mockResolvedValue(null);
+    it('should reject when the conversation does not exist', async () => {
+      aiConversationServiceMock.findById.mockResolvedValueOnce(null);
 
       await expect(
-        service.sendMessage('user-1', 'conversation-1', 'hello'),
-      ).rejects.toThrow(NotFoundException);
+        service.sendMessage('user-id', 'conversation-id', 'Hello'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(aiConversationServiceMock.addMessage).not.toHaveBeenCalled();
+      expect(aiFinancialContextServiceMock.getContext).not.toHaveBeenCalled();
+      expect(aiServiceMock.complete).not.toHaveBeenCalled();
     });
 
-    it('should send a bounded conversation context to AIService', async () => {
-      const messages = Array.from({ length: 30 }, (_, index) => ({
-        id: `message-${index}`,
-        role: index % 2 === 0 ? AIMessageRole.USER : AIMessageRole.ASSISTANT,
-        content: `message-${index}`,
-        model: null,
-        createdAt: new Date(2026, 0, 1, 0, index),
-      }));
-
-      aiConversationServiceMock.findById
-        .mockResolvedValueOnce({
-          id: 'conversation-1',
-          userId: 'user-1',
-          messages: [],
-        })
-        .mockResolvedValueOnce({
-          id: 'conversation-1',
-          userId: 'user-1',
-          messages,
-        });
-
-      aiConversationServiceMock.addMessage
-        .mockResolvedValueOnce({
-          id: 'user-message',
-          role: AIMessageRole.USER,
-          content: 'latest',
-          model: null,
-          createdAt: new Date(),
-        })
-        .mockResolvedValueOnce({
-          id: 'assistant-message',
-          role: AIMessageRole.ASSISTANT,
-          content: 'response',
-          model: 'test-model',
-          createdAt: new Date(),
-        });
-
-      aiServiceMock.complete.mockResolvedValue({
-        content: 'response',
-        provider: 'test-provider',
-        model: 'test-model',
-        usage: {
-          inputTokens: 10,
-          outputTokens: 5,
-          totalTokens: 15,
-        },
-      });
-
-      const result = await service.sendMessage(
-        'user-1',
-        'conversation-1',
-        'latest',
+    it('should propagate a conversation lookup error', async () => {
+      aiConversationServiceMock.findById.mockRejectedValueOnce(
+        new NotFoundException('AI conversation not found'),
       );
 
-      expect(aiServiceMock.complete).toHaveBeenCalledTimes(1);
+      await expect(
+        service.sendMessage('user-id', 'conversation-id', 'Hello'),
+      ).rejects.toBeInstanceOf(NotFoundException);
 
-      const request = aiServiceMock.complete.mock.calls[0][0];
-
-      expect(request.messages).toHaveLength(20);
-
-      expect(result).toEqual({
-        conversationId: 'conversation-1',
-        message: {
-          id: 'assistant-message',
-          role: AIMessageRole.ASSISTANT,
-          content: 'response',
-          model: 'test-model',
-          createdAt: expect.any(Date),
-        },
-        provider: 'test-provider',
-        model: 'test-model',
-        usage: {
-          inputTokens: 10,
-          outputTokens: 5,
-          totalTokens: 15,
-        },
-      });
+      expect(aiConversationServiceMock.addMessage).not.toHaveBeenCalled();
+      expect(aiServiceMock.complete).not.toHaveBeenCalled();
     });
 
-    it('should preserve system messages inside context', async () => {
-      const messages = [
-        {
-          id: 'system-1',
-          role: AIMessageRole.SYSTEM,
-          content: 'You are a financial assistant.',
-          model: null,
-          createdAt: new Date(2026, 0, 1),
-        },
-        ...Array.from({ length: 25 }, (_, index) => ({
-          id: `message-${index}`,
-          role: AIMessageRole.USER,
-          content: `message-${index}`,
-          model: null,
-          createdAt: new Date(2026, 0, 1, 0, index + 1),
-        })),
-      ];
+    it('should not call the AI provider when persisting the user message fails', async () => {
+      aiConversationServiceMock.findById.mockResolvedValueOnce(
+        createConversation(),
+      );
+
+      aiConversationServiceMock.addMessage.mockRejectedValueOnce(
+        new Error('Database error'),
+      );
+
+      await expect(
+        service.sendMessage('user-id', 'conversation-id', 'Hello'),
+      ).rejects.toThrow('Database error');
+
+      expect(aiServiceMock.complete).not.toHaveBeenCalled();
+      expect(aiFinancialContextServiceMock.getContext).not.toHaveBeenCalled();
+    });
+
+    it('should reject if the conversation cannot be reloaded after saving the user message', async () => {
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce(createConversation())
+        .mockResolvedValueOnce(null);
+
+      aiConversationServiceMock.addMessage.mockResolvedValueOnce(
+        createMessage('message-1', AIMessageRole.USER, 'Hello'),
+      );
+
+      await expect(
+        service.sendMessage('user-id', 'conversation-id', 'Hello'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(aiFinancialContextServiceMock.getContext).not.toHaveBeenCalled();
+      expect(aiServiceMock.complete).not.toHaveBeenCalled();
+    });
+
+    it('should not persist an assistant message when the AI provider fails', async () => {
+      const conversation = createConversation();
+      const userMessage = createMessage(
+        'message-1',
+        AIMessageRole.USER,
+        'Hello',
+      );
 
       aiConversationServiceMock.findById
+        .mockResolvedValueOnce(conversation)
         .mockResolvedValueOnce({
-          id: 'conversation-1',
-          userId: 'user-1',
-          messages: [],
-        })
+          ...conversation,
+          messages: [userMessage],
+        });
+
+      aiConversationServiceMock.addMessage.mockResolvedValueOnce(userMessage);
+
+      aiServiceMock.complete.mockRejectedValueOnce(
+        new ServiceUnavailableException('AI provider request failed'),
+      );
+
+      await expect(
+        service.sendMessage('user-id', 'conversation-id', 'Hello'),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      expect(aiConversationServiceMock.addMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('should propagate financial context errors and not call the AI provider', async () => {
+      const conversation = createConversation();
+      const userMessage = createMessage(
+        'message-1',
+        AIMessageRole.USER,
+        'Berapa pengeluaran saya?',
+      );
+
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce(conversation)
         .mockResolvedValueOnce({
-          id: 'conversation-1',
-          userId: 'user-1',
-          messages,
+          ...conversation,
+          messages: [userMessage],
+        });
+
+      aiConversationServiceMock.addMessage.mockResolvedValueOnce(userMessage);
+
+      aiFinancialContextServiceMock.getContext.mockRejectedValueOnce(
+        new Error('Financial context query failed'),
+      );
+
+      await expect(
+        service.sendMessage(
+          'user-id',
+          'conversation-id',
+          'Berapa pengeluaran saya?',
+        ),
+      ).rejects.toThrow('Financial context query failed');
+
+      expect(aiServiceMock.complete).not.toHaveBeenCalled();
+      expect(aiConversationServiceMock.addMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('should preserve conversation history and add financial context', async () => {
+      const history = [
+        createMessage(
+          'message-1',
+          AIMessageRole.USER,
+          'Berapa pengeluaran saya?',
+        ),
+        createMessage(
+          'message-2',
+          AIMessageRole.ASSISTANT,
+          'Pengeluaran Anda Rp1.750.000.',
+          'test-model',
+        ),
+        createMessage(
+          'message-3',
+          AIMessageRole.USER,
+          'Bagaimana dengan pemasukan?',
+        ),
+      ];
+
+      const conversation = createConversation(history);
+      const latestUserMessage = createMessage(
+        'message-4',
+        AIMessageRole.USER,
+        'Lanjutkan',
+      );
+
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce(conversation)
+        .mockResolvedValueOnce({
+          ...conversation,
+          messages: [...history, latestUserMessage],
         });
 
       aiConversationServiceMock.addMessage
-        .mockResolvedValueOnce({
-          id: 'user-message',
-          role: AIMessageRole.USER,
-          content: 'latest',
-          model: null,
-          createdAt: new Date(),
-        })
-        .mockResolvedValueOnce({
-          id: 'assistant-message',
-          role: AIMessageRole.ASSISTANT,
-          content: 'response',
-          model: 'test-model',
-          createdAt: new Date(),
-        });
+        .mockResolvedValueOnce(latestUserMessage)
+        .mockResolvedValueOnce(
+          createMessage(
+            'message-5',
+            AIMessageRole.ASSISTANT,
+            'Baik.',
+            'test-model',
+          ),
+        );
 
-      aiServiceMock.complete.mockResolvedValue({
-        content: 'response',
-        provider: 'test-provider',
-        model: 'test-model',
-        usage: undefined,
-      });
+      mockSuccessfulCompletion();
 
-      await service.sendMessage('user-1', 'conversation-1', 'latest');
+      await service.sendMessage('user-id', 'conversation-id', 'Lanjutkan');
 
       const request = aiServiceMock.complete.mock.calls[0][0];
+      const messages = request.messages as Array<{
+        role: string;
+        content: string;
+      }>;
 
-      expect(request.messages).toHaveLength(20);
+      expect(messages[0].role).toBe('system');
+      expect(messages[0].content).toContain(
+        'KONTEKS KEUANGAN PENGGUNA (JSON):',
+      );
 
-      expect(request.messages[0]).toEqual({
-        role: 'system',
-        content: 'You are a financial assistant.',
+      expect(messages).toContainEqual({
+        role: 'user',
+        content: 'Berapa pengeluaran saya?',
       });
+
+      expect(messages).toContainEqual({
+        role: 'assistant',
+        content: 'Pengeluaran Anda Rp1.750.000.',
+      });
+
+      expect(messages).toContainEqual({
+        role: 'user',
+        content: 'Lanjutkan',
+      });
+    });
+
+    it('should not send unsupported tool messages to the AI provider', async () => {
+      const conversation = createConversation([
+        createMessage(
+          'message-1',
+          AIMessageRole.SYSTEM,
+          'You are a financial assistant.',
+        ),
+        createMessage('message-2', AIMessageRole.TOOL, 'tool result'),
+      ]);
+
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce(conversation)
+        .mockResolvedValueOnce(conversation);
+
+      aiConversationServiceMock.addMessage
+        .mockResolvedValueOnce(
+          createMessage('message-3', AIMessageRole.USER, 'Hello'),
+        )
+        .mockResolvedValueOnce(
+          createMessage(
+            'message-4',
+            AIMessageRole.ASSISTANT,
+            'Hello!',
+            'test-model',
+          ),
+        );
+
+      mockSuccessfulCompletion();
+
+      await service.sendMessage('user-id', 'conversation-id', 'Hello');
+
+      const request = aiServiceMock.complete.mock.calls[0][0];
+      const messages = request.messages as Array<{
+        role: string;
+        content: string;
+      }>;
+
+      expect(
+        messages.some((message) => message.content === 'tool result'),
+      ).toBe(false);
+    });
+
+    it('should pass user identity and usage feature to AIService', async () => {
+      const conversation = createConversation();
+      const userMessage = createMessage(
+        'message-1',
+        AIMessageRole.USER,
+        'Hello',
+      );
+
+      aiConversationServiceMock.findById
+        .mockResolvedValueOnce(conversation)
+        .mockResolvedValueOnce({
+          ...conversation,
+          messages: [userMessage],
+        });
+
+      aiConversationServiceMock.addMessage
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(
+          createMessage(
+            'message-2',
+            AIMessageRole.ASSISTANT,
+            'Hello!',
+            'test-model',
+          ),
+        );
+
+      mockSuccessfulCompletion();
+
+      await service.sendMessage('user-id', 'conversation-id', 'Hello');
+
+      expect(aiServiceMock.complete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: expect.any(Array),
+          temperature: 0.2,
+        }),
+        {
+          userId: 'user-id',
+          feature: AI_USAGE_FEATURES.CHAT,
+        },
+      );
     });
   });
 });

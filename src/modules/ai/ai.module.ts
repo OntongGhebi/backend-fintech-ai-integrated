@@ -34,6 +34,7 @@ import { TransactionsModule } from '../transactions/transactions.module';
 import { DatabaseModule } from 'src/database/database.module';
 import { AIPrivacyService } from './services/ai-privacy.service';
 import { AiController } from './ai.controller';
+import { AIFinancialContextService } from './services/ai-financial-context.service';
 
 @Module({
   imports: [DatabaseModule, forwardRef(() => TransactionsModule)],
@@ -56,6 +57,8 @@ import { AiController } from './ai.controller';
     AITransactionPersistenceService,
     AITransactionIntelligenceService,
     AITransactionValidationService,
+
+    AIFinancialContextService,
 
     AIPromptSafetyService,
     AIPromptBuilderService,
@@ -109,6 +112,8 @@ import { AiController } from './ai.controller';
     AITransactionPersistenceService,
     AITransactionIntelligenceService,
     AITransactionValidationService,
+
+    AIFinancialContextService,
 
     AIPromptSafetyService,
     AIPromptBuilderService,
