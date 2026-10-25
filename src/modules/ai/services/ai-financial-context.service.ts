@@ -15,7 +15,6 @@ interface BudgetWithRange {
     id: string;
     name: string;
     amount: Prisma.Decimal | number | string;
-    currency: string;
     period: BudgetPeriod;
     startDate: Date;
     endDate: Date | null;
@@ -148,7 +147,6 @@ export class AIFinancialContextService {
           id: true,
           name: true,
           amount: true,
-          currency: true,
           period: true,
           startDate: true,
           endDate: true,
@@ -158,7 +156,6 @@ export class AIFinancialContextService {
     ]);
 
     const budgetsWithRanges: BudgetWithRange[] = budgets
-      .filter((budget) => budget.currency === options.currency)
       .map((budget) => ({
         budget,
         range: this.getBudgetRange(budget, now, options.timezone),
@@ -241,7 +238,7 @@ export class AIFinancialContextService {
       return {
         id: budget.id,
         name: budget.name,
-        currency: budget.currency,
+        currency: options.currency,
         limit: this.formatMinorUnits(limitMinorUnits),
         spent: this.formatMinorUnits(spentMinorUnits),
         remaining: this.formatMinorUnits(remainingMinorUnits),
