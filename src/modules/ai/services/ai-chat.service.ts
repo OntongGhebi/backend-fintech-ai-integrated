@@ -29,7 +29,7 @@ export interface AIChatResult {
   conversationId: string;
   message: AIChatMessageResult;
   provider: string;
-  model: string;
+  model: string | null;
   usage: AICompletionResponse['usage'];
 }
 
@@ -246,7 +246,11 @@ export class AIChatService {
           content: completion.content,
           model: completion.model,
           provider: completion.provider,
-          usage: completion.usage,
+          usage: completion.usage ?? {
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+          },
         },
       );
     }
