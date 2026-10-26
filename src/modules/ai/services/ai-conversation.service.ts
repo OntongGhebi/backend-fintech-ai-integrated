@@ -61,6 +61,56 @@ export class AIConversationService {
     );
   }
 
+  /**
+   * Ownership is checked before the repository performs the atomic
+   * message insert + idempotency-reference update.
+   */
+  async addIdempotentUserMessage(
+    userId: string,
+    conversationId: string,
+    requestId: string,
+    content: string,
+  ) {
+    const conversation =
+      await this.aiConversationRepository.findConversationByIdAndUserId(
+        conversationId,
+        userId,
+      );
+
+    if (!conversation) {
+      throw new NotFoundException('AI conversation not found');
+    }
+
+    const normalizedContent = content.trim();
+
+    if (!normalizedContent) {
+      throw new Error('AI message content cannot be empty');
+    }
+
+    return this.aiConversationRepository.createIdempotentUserMessage({
+      requestId,
+      conversationId,
+      content: normalizedContent,
+    });
+  }
+
+  async addIdempotentAssistantMessageAndCompleteRequest(input: {
+    requestId: string;
+    conversationId: string;
+    content: string;
+    model: string | null;
+    provider: string;
+    usage: {
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+    };
+  }) {
+    return this.aiConversationRepository.createIdempotentAssistantMessageAndCompleteRequest(
+      input,
+    );
+  }
+
   async updateTitle(
     userId: string,
     conversationId: string,

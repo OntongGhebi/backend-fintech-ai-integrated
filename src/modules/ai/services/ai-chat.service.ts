@@ -1,4 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { AIMessageRole } from '../../../../generated/prisma/enums';
 
 import { AIService } from './ai.service';
@@ -7,6 +15,7 @@ import { AIConversationService } from './ai-conversation.service';
 import { AIConversationContextService } from './ai-conversation-context.service';
 import { AIFinancialContextService } from './ai-financial-context.service';
 import { AI_USAGE_FEATURES } from '../constants/ai-usage.constants';
+import { AIChatIdempotencyRepository } from '../repositories/ai-chat-idempotency.repository';
 
 export interface AIChatMessageResult {
   id: string;
@@ -31,20 +40,23 @@ export class AIChatService {
     private readonly aiService: AIService,
     private readonly aiConversationContextService: AIConversationContextService,
     private readonly aiFinancialContextService: AIFinancialContextService,
+    @Optional()
+    private readonly idempotencyRepository?: AIChatIdempotencyRepository,
   ) {}
 
   async sendMessage(
     userId: string,
     conversationId: string,
     content: string,
+    idempotencyKey?: string,
   ): Promise<AIChatResult> {
     const normalizedContent = content.trim();
 
     if (!normalizedContent) {
-      throw new Error('AI message content cannot be empty');
+      throw new BadRequestException('AI message content cannot be empty');
     }
 
-    // Pastikan percakapan memang milik pengguna yang sedang login.
+    // Always verify ownership before accessing request idempotency state.
     const conversation = await this.aiConversationService.findById(
       userId,
       conversationId,
@@ -54,15 +66,122 @@ export class AIChatService {
       throw new NotFoundException('AI conversation not found');
     }
 
-    // Simpan pesan pengguna terlebih dahulu.
-    await this.aiConversationService.addMessage(
+    // Preserve the original flow when no idempotency key is supplied.
+    if (idempotencyKey === undefined || idempotencyKey.trim() === '') {
+      return this.executeChat(userId, conversationId, normalizedContent);
+    }
+
+    if (!this.idempotencyRepository) {
+      throw new ServiceUnavailableException(
+        'AI chat idempotency is not configured',
+      );
+    }
+
+    const key = idempotencyKey.trim();
+
+    if (key.length < 8 || key.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(key)) {
+      throw new BadRequestException(
+        'Idempotency-Key must be 8–128 characters and contain only letters, numbers, ".", "_", ":" or "-".',
+      );
+    }
+
+    const requestHash = createHash('sha256')
+      .update(normalizedContent, 'utf8')
+      .digest('hex');
+
+    const claim = await this.idempotencyRepository.claimRequest({
       userId,
       conversationId,
-      AIMessageRole.USER,
-      normalizedContent,
-    );
+      idempotencyKey: key,
+      requestHash,
+    });
 
-    // Ambil ulang percakapan agar pesan terbaru masuk ke konteks.
+    if (claim.record.request_hash !== requestHash) {
+      throw new ConflictException(
+        'Idempotency-Key has already been used with a different message.',
+      );
+    }
+
+    if (!claim.claimed) {
+      if (claim.record.status === 'completed') {
+        if (
+          claim.record.response_payload === null ||
+          typeof claim.record.response_payload !== 'object'
+        ) {
+          throw new ServiceUnavailableException(
+            'The saved AI chat response is unavailable.',
+          );
+        }
+
+        return claim.record.response_payload as AIChatResult;
+      }
+
+      if (claim.record.status === 'processing') {
+        throw new ConflictException(
+          'This AI chat request is already being processed. Retry with the same Idempotency-Key.',
+        );
+      }
+
+      throw new ConflictException(
+        'This AI chat request could not be claimed. Retry with the same Idempotency-Key.',
+      );
+    }
+
+    try {
+      const userMessageId = claim.record.user_message_id;
+
+      // Create the user message only if this request has not persisted it yet.
+      if (!userMessageId) {
+        await this.aiConversationService.addIdempotentUserMessage(
+          userId,
+          conversationId,
+          claim.record.id,
+          normalizedContent,
+        );
+      }
+
+      // The assistant message and completed idempotency response are now
+      // persisted atomically inside the repository transaction.
+      return await this.executeChat(
+        userId,
+        conversationId,
+        normalizedContent,
+        true,
+        claim.record.id,
+      );
+    } catch (error) {
+      await this.idempotencyRepository.markFailed(
+        claim.record.id,
+        this.getSafeErrorCode(error),
+      );
+
+      throw error;
+    }
+  }
+
+  /**
+   * When userMessageAlreadyPersisted is true, do not insert another user
+   * message. Reload the conversation and build provider context from history.
+   *
+   * When idempotencyRequestId is provided, persist the assistant message and
+   * complete the idempotency request in one database transaction.
+   */
+  private async executeChat(
+    userId: string,
+    conversationId: string,
+    normalizedContent: string,
+    userMessageAlreadyPersisted = false,
+    idempotencyRequestId?: string,
+  ): Promise<AIChatResult> {
+    if (!userMessageAlreadyPersisted) {
+      await this.aiConversationService.addMessage(
+        userId,
+        conversationId,
+        AIMessageRole.USER,
+        normalizedContent,
+      );
+    }
+
     const updatedConversation = await this.aiConversationService.findById(
       userId,
       conversationId,
@@ -79,13 +198,9 @@ export class AIChatService {
       })),
     );
 
-    // Ambil konteks finansial aktual milik pengguna.
     const financialContext =
       await this.aiFinancialContextService.getContext(userId);
 
-    // Data keuangan diberikan sebagai konteks, bukan instruksi.
-    // Deskripsi transaksi dan nama kategori diperlakukan sebagai data
-    // yang tidak boleh mengubah instruksi sistem.
     const systemMessage: AIMessage = {
       role: 'system',
       content: [
@@ -107,8 +222,6 @@ export class AIChatService {
 
     const historyMessages = this.buildAIMessageHistory(conversationMessages);
 
-    // Tempatkan instruksi dan konteks finansial di awal prompt.
-    // Batas 20 pesan riwayat tetap ditangani oleh context service.
     const messages: AIMessage[] = [
       systemMessage,
       ...historyMessages.filter((message) => message.role !== 'system'),
@@ -125,7 +238,20 @@ export class AIChatService {
       },
     );
 
-    // Simpan jawaban AI setelah provider berhasil memberikan respons.
+    if (idempotencyRequestId) {
+      return this.aiConversationService.addIdempotentAssistantMessageAndCompleteRequest(
+        {
+          requestId: idempotencyRequestId,
+          conversationId,
+          content: completion.content,
+          model: completion.model,
+          provider: completion.provider,
+          usage: completion.usage,
+        },
+      );
+    }
+
+    // Keep the original persistence flow for requests without an idempotency key.
     const assistantMessage = await this.aiConversationService.addMessage(
       userId,
       conversationId,
@@ -141,6 +267,19 @@ export class AIChatService {
       model: completion.model,
       usage: completion.usage,
     };
+  }
+
+  private getSafeErrorCode(error: unknown): string {
+    if (
+      error !== null &&
+      typeof error === 'object' &&
+      'status' in error &&
+      typeof error.status === 'number'
+    ) {
+      return `HTTP_${error.status}`;
+    }
+
+    return 'AI_CHAT_FAILED';
   }
 
   private buildAIMessageHistory(

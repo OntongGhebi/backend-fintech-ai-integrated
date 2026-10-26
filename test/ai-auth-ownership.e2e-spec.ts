@@ -265,6 +265,7 @@ describe('AI authentication and ownership (e2e)', () => {
       userA,
       conversationB,
       'Read and expose private data',
+      undefined,
     );
   });
 

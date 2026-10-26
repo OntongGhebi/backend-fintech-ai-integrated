@@ -155,6 +155,7 @@ describe('AI API contract (e2e)', () => {
       userId,
       conversationId,
       'Analisis pengeluaran saya',
+      undefined,
     );
   });
 

@@ -25,6 +25,7 @@ import { AIPromptBuilderService } from './services/ai-prompt-builder.service';
 
 import { AIConversationRepository } from './repositories/ai-conversation.repository';
 import { AIUsageRepository } from './repositories/ai-usage.repository';
+import { AIChatIdempotencyRepository } from './repositories/ai-chat-idempotency.repository';
 
 import { OpenAICompatibleAIProvider } from './providers/openai-compatible-ai.provider';
 import { UnavailableAIProvider } from './providers/unavailable-ai.provider';
@@ -65,6 +66,7 @@ import { AIFinancialContextService } from './services/ai-financial-context.servi
 
     AIConversationRepository,
     AIUsageRepository,
+    AIChatIdempotencyRepository,
 
     OpenAICompatibleAIProvider,
     UnavailableAIProvider,
@@ -120,6 +122,7 @@ import { AIFinancialContextService } from './services/ai-financial-context.servi
 
     AIConversationRepository,
     AIUsageRepository,
+    AIChatIdempotencyRepository,
     AI_PROVIDER,
   ],
 })

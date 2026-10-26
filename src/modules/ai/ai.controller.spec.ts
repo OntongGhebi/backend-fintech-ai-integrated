@@ -117,6 +117,7 @@ describe('AiController', () => {
       'user-id',
       'conversation-id',
       'Analisis pengeluaran saya',
+      undefined,
     );
   });
 

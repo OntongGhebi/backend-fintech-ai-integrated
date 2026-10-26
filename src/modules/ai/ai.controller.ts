@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -12,6 +13,7 @@ import {
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiHeader,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -75,6 +77,19 @@ export class AiController {
   @Post('conversations/:id/messages')
   @ApiOperation({
     summary: 'Send a message to the AI assistant',
+    description:
+      'Optionally accepts Idempotency-Key to safely retry the same chat request.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description:
+      'Client-generated key, 8–128 characters. Reuse the same key only for retries of the same message.',
+    schema: {
+      type: 'string',
+      minLength: 8,
+      maxLength: 128,
+    },
   })
   @ApiCreatedResponse({
     description: 'AI response generated and persisted successfully',
@@ -83,14 +98,20 @@ export class AiController {
     @CurrentUser('id') userId: string,
     @Param('id', new ParseUUIDPipe()) conversationId: string,
     @Body() dto: SendAIMessageDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.aiChatService.sendMessage(userId, conversationId, dto.content);
+    return this.aiChatService.sendMessage(
+      userId,
+      conversationId,
+      dto.content,
+      idempotencyKey,
+    );
   }
 
   @Patch('conversations/:id')
   @ApiOperation({ summary: 'Update an AI conversation title' })
   @ApiOkResponse({
-    description: 'Conversation title updated successfully',
+    description: 'AI conversation title updated successfully',
   })
   async updateConversation(
     @CurrentUser('id') userId: string,
