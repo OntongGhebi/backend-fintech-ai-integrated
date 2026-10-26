@@ -9,6 +9,8 @@ describe('AIConversationRepository', () => {
   let repository: AIConversationRepository;
 
   const prismaMock = {
+    $transaction: jest.fn(),
+
     aIConversation: {
       create: jest.fn(),
       findFirst: jest.fn(),
@@ -25,6 +27,11 @@ describe('AIConversationRepository', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+
+    prismaMock.$transaction.mockImplementation(
+      async (callback: (tx: typeof prismaMock) => Promise<unknown>) =>
+        callback(prismaMock),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -169,16 +176,19 @@ describe('AIConversationRepository', () => {
   });
 
   describe('createMessage', () => {
-    it('should create a message with the supplied role and model', async () => {
-      const message = {
-        id: 'message-id',
-        conversationId: 'conversation-id',
-        role: AIMessageRole.USER,
-        content: 'Hello',
-        model: null,
-      };
+    const message = {
+      id: 'message-id',
+      conversationId: 'conversation-id',
+      role: AIMessageRole.USER,
+      content: 'Hello',
+      model: null,
+    };
 
+    it('should create a message and update the conversation timestamp atomically', async () => {
       prismaMock.aIMessage.create.mockResolvedValue(message);
+      prismaMock.aIConversation.updateMany.mockResolvedValue({
+        count: 1,
+      });
 
       await expect(
         repository.createMessage(
@@ -188,6 +198,8 @@ describe('AIConversationRepository', () => {
         ),
       ).resolves.toEqual(message);
 
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+
       expect(prismaMock.aIMessage.create).toHaveBeenCalledWith({
         data: {
           conversationId: 'conversation-id',
@@ -196,6 +208,123 @@ describe('AIConversationRepository', () => {
           model: null,
         },
       });
+
+      expect(prismaMock.aIConversation.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 'conversation-id',
+        },
+        data: {
+          updatedAt: expect.any(Date),
+        },
+      });
+
+      expect(
+        prismaMock.aIMessage.create.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        prismaMock.aIConversation.updateMany.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('should normalize the model to null when it is not supplied', async () => {
+      prismaMock.aIMessage.create.mockResolvedValue(message);
+      prismaMock.aIConversation.updateMany.mockResolvedValue({
+        count: 1,
+      });
+
+      await repository.createMessage(
+        'conversation-id',
+        AIMessageRole.USER,
+        'Hello',
+      );
+
+      expect(prismaMock.aIMessage.create).toHaveBeenCalledWith({
+        data: {
+          conversationId: 'conversation-id',
+          role: AIMessageRole.USER,
+          content: 'Hello',
+          model: null,
+        },
+      });
+    });
+
+    it('should preserve the normalized model name', async () => {
+      prismaMock.aIMessage.create.mockResolvedValue({
+        ...message,
+        model: 'test-model',
+      });
+      prismaMock.aIConversation.updateMany.mockResolvedValue({
+        count: 1,
+      });
+
+      await repository.createMessage(
+        'conversation-id',
+        AIMessageRole.ASSISTANT,
+        'Hello',
+        ' test-model ',
+      );
+
+      expect(prismaMock.aIMessage.create).toHaveBeenCalledWith({
+        data: {
+          conversationId: 'conversation-id',
+          role: AIMessageRole.ASSISTANT,
+          content: 'Hello',
+          model: 'test-model',
+        },
+      });
+    });
+
+    it('should reject and roll back if the conversation update affects no rows', async () => {
+      prismaMock.aIMessage.create.mockResolvedValue(message);
+      prismaMock.aIConversation.updateMany.mockResolvedValue({
+        count: 0,
+      });
+
+      await expect(
+        repository.createMessage(
+          'conversation-id',
+          AIMessageRole.USER,
+          'Hello',
+        ),
+      ).rejects.toThrow('AI conversation not found');
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expect(prismaMock.aIMessage.create).toHaveBeenCalledTimes(1);
+      expect(prismaMock.aIConversation.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('should propagate an error if message creation fails', async () => {
+      prismaMock.aIMessage.create.mockRejectedValue(
+        new Error('Message creation failed'),
+      );
+
+      await expect(
+        repository.createMessage(
+          'conversation-id',
+          AIMessageRole.USER,
+          'Hello',
+        ),
+      ).rejects.toThrow('Message creation failed');
+
+      expect(prismaMock.aIConversation.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('should propagate an error if updating the conversation fails', async () => {
+      prismaMock.aIMessage.create.mockResolvedValue(message);
+      prismaMock.aIConversation.updateMany.mockRejectedValue(
+        new Error('Conversation update failed'),
+      );
+
+      await expect(
+        repository.createMessage(
+          'conversation-id',
+          AIMessageRole.USER,
+          'Hello',
+        ),
+      ).rejects.toThrow('Conversation update failed');
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expect(prismaMock.aIMessage.create).toHaveBeenCalledTimes(1);
+      expect(prismaMock.aIConversation.updateMany).toHaveBeenCalledTimes(1);
     });
   });
 

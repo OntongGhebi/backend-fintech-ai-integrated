@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma/prisma.service';
 import { AIMessageRole } from 'generated/prisma/enums';
 import {
@@ -74,19 +74,43 @@ export class AIConversationRepository {
     });
   }
 
+  /**
+   * Creates a message and updates its parent conversation timestamp
+   * atomically.
+   *
+   * This keeps the conversation list ordered by recent activity and avoids
+   * persisting a message if the parent conversation cannot be updated.
+   */
   async createMessage(
     conversationId: string,
     role: AIMessageRole,
     content: string,
     model?: string | null,
   ) {
-    return this.prisma.aIMessage.create({
-      data: {
-        conversationId,
-        role,
-        content,
-        model: model?.trim() || null,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const message = await tx.aIMessage.create({
+        data: {
+          conversationId,
+          role,
+          content,
+          model: model?.trim() || null,
+        },
+      });
+
+      const conversationUpdate = await tx.aIConversation.updateMany({
+        where: {
+          id: conversationId,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      });
+
+      if (conversationUpdate.count !== 1) {
+        throw new NotFoundException('AI conversation not found');
+      }
+
+      return message;
     });
   }
 
@@ -116,12 +140,24 @@ export class AIConversationRepository {
     options: AIConversationContextOptions = {},
   ): Promise<AIConversationContextMessage[]> {
     const limit = Math.max(1, Math.min(options.limit ?? 20, 100));
+
     const messages = await this.prisma.aIMessage.findMany({
-      where: { conversationId, conversation: { userId } },
-      orderBy: { createdAt: 'desc' },
+      where: {
+        conversationId,
+        conversation: {
+          userId,
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
       take: limit,
-      select: { role: true, content: true },
+      select: {
+        role: true,
+        content: true,
+      },
     });
+
     return messages.reverse().map((message) => ({
       role: message.role as AIConversationContextMessage['role'],
       content: message.content,
