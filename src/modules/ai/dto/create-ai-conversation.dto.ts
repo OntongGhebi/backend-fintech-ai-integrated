@@ -1,15 +1,21 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class CreateAIConversationDto {
   @ApiPropertyOptional({
     description: 'Judul awal percakapan AI',
     example: 'Analisis pengeluaran bulanan',
+    minLength: 1,
     maxLength: 255,
     nullable: true,
   })
   @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
+  @MinLength(1)
   @MaxLength(255)
   title?: string | null;
 }
