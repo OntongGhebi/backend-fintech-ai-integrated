@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma/prisma.service';
+import { calculateAccountBalance } from '../account-balance.util';
 
 @Injectable()
 export class AccountsRepository {
@@ -27,6 +28,37 @@ export class AccountsRepository {
         deletedAt: null,
       },
     });
+  }
+
+  async getCurrentBalance(
+    accountId: string,
+    userId: string,
+  ): Promise<string | null> {
+    const account = await this.prisma.account.findFirst({
+      where: { id: accountId, userId, deletedAt: null },
+      select: { openingBalance: true },
+    });
+
+    if (!account) return null;
+
+    const transactions = await this.prisma.transaction.findMany({
+      where: {
+        accountId,
+        userId,
+        status: 'ACTIVE',
+        deletedAt: null,
+      },
+      select: {
+        type: true,
+        amount: true,
+        metadata: true,
+      },
+    });
+
+    return calculateAccountBalance(
+      account.openingBalance,
+      transactions,
+    ).toFixed(4);
   }
 
   async findByNameAndUserId(name: string, userId: string) {

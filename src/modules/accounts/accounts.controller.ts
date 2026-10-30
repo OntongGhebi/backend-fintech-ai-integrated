@@ -71,6 +71,24 @@ export class AccountsController {
     return accounts.map((account) => this.toResponse(account));
   }
 
+  @Get(':id/balance')
+  @ApiOkResponse({
+    description: 'Current account balance calculated from the active ledger.',
+    schema: {
+      example: {
+        accountId: '8f5c4c0d-7d6d-4c8f-9b7d-6a8f4d3e2c1b',
+        balance: '125000.0000',
+        currency: 'IDR',
+      },
+    },
+  })
+  async getBalance(
+    @CurrentUser('id') userId: string,
+    @Param('id') accountId: string,
+  ): Promise<{ accountId: string; balance: string; currency: string }> {
+    return this.accountsService.getCurrentBalance(accountId, userId);
+  }
+
   @Get(':id')
   @ApiOkResponse({
     type: AccountResponseDto,

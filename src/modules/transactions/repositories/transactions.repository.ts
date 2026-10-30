@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
-import { Prisma } from 'generated/prisma/client';
+/* eslint-disable @typescript-eslint/no-base-to-string */
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { Prisma } from '../../../../generated/prisma/client';
 import { PrismaService } from 'src/database/prisma/prisma.service';
 
+import { calculateAccountBalance } from '../../accounts/account-balance.util';
 import { GetTransactionsQueryDto } from '../dto/get-transaction-query.dto';
 
 @Injectable()
@@ -247,6 +249,62 @@ export class TransactionsRepository {
     >[0]['data'],
   ) {
     return this.prisma.$transaction(async (tx) => {
+      // Serialize transfers from the same source account so two concurrent
+      // requests cannot both spend the same available balance.
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id
+        FROM accounts
+        WHERE id = ${String(sourceData.accountId)}::uuid
+          AND "userId" = ${String(sourceData.userId)}::uuid
+          AND "deletedAt" IS NULL
+        FOR UPDATE
+      `;
+
+      const sourceAccount = await tx.account.findFirst({
+        where: {
+          id: sourceData.accountId as string,
+          userId: sourceData.userId as string,
+          deletedAt: null,
+        },
+        select: { openingBalance: true },
+      });
+
+      if (!sourceAccount) {
+        throw new BadRequestException('Source account is not available');
+      }
+
+      const sourceTransactions = await tx.transaction.findMany({
+        where: {
+          accountId: sourceData.accountId as string,
+          userId: sourceData.userId as string,
+          status: 'ACTIVE',
+          deletedAt: null,
+        },
+        select: {
+          type: true,
+          amount: true,
+          metadata: true,
+        },
+      });
+
+      const currentBalance = calculateAccountBalance(
+        sourceAccount.openingBalance,
+        sourceTransactions,
+      );
+      const transferAmount = new Prisma.Decimal(String(sourceData.amount));
+
+      if (currentBalance.lte(0)) {
+        throw new BadRequestException(
+          'Source account has no available balance',
+        );
+      }
+
+      if (transferAmount.gt(currentBalance)) {
+        throw new BadRequestException(
+          `Insufficient source account balance. Available balance: ${currentBalance.toFixed(4)}`,
+        );
+      }
+
       const sourceTransaction = await tx.transaction.create({
         data: sourceData,
         include: {

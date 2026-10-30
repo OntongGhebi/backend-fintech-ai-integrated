@@ -57,6 +57,28 @@ export class AccountsService {
     return this.accountsRepository.findManyByUserId(userId);
   }
 
+  async getCurrentBalance(accountId: string, userId: string) {
+    const account = await this.accountsRepository.findByIdAndUserId(
+      accountId,
+      userId,
+    );
+
+    if (!account) {
+      throw new NotFoundException('Account not found');
+    }
+
+    const balance = await this.accountsRepository.getCurrentBalance(
+      accountId,
+      userId,
+    );
+
+    return {
+      accountId,
+      balance: balance ?? '0.0000',
+      currency: account.currency,
+    };
+  }
+
   async update(accountId: string, userId: string, dto: UpdateAccountDto) {
     const account = await this.accountsRepository.findByIdAndUserId(
       accountId,
