@@ -56,15 +56,39 @@ export class TransactionIntentResolutionService {
       };
     }
 
-    const account = await this.accountsRepository.findByNameAndUserId(
-      transactionIntent.accountHint.trim(),
+    const accountHint = transactionIntent.accountHint.trim();
+
+    // First, retain the existing exact-name lookup behavior.
+    let account = await this.accountsRepository.findByNameAndUserId(
+      accountHint,
       userId,
     );
 
     if (!account) {
+      // If exact matching fails, search the user's own accounts
+      // using complete normalized words.
+      const accounts = await this.accountsRepository.findManyByUserId(userId);
+
+      const matchingAccounts = accounts.filter((candidate) =>
+        this.accountNameMatches(candidate.name, accountHint),
+      );
+
+      if (matchingAccounts.length > 1) {
+        return {
+          status: 'NEEDS_ACCOUNT',
+          message:
+            `More than one account matches "${accountHint}". ` +
+            'Please specify the full account name.',
+        };
+      }
+
+      account = matchingAccounts[0] ?? null;
+    }
+
+    if (!account) {
       return {
         status: 'NOT_FOUND',
-        message: `Account "${transactionIntent.accountHint.trim()}" was not found`,
+        message: `Account "${accountHint}" was not found`,
       };
     }
 
@@ -146,5 +170,39 @@ export class TransactionIntentResolutionService {
       status: 'RESOLVED',
       intent: resolvedIntent,
     };
+  }
+
+  /**
+   * Matches account hints against complete words in account names.
+   *
+   * Examples:
+   * - "bri" matches "BRI Account"
+   * - "bca" matches "BCA Main Account"
+   * - "mandiri" matches "Mandiri Account"
+   *
+   * Matching is restricted to the accounts returned for the
+   * authenticated user by AccountsRepository.
+   */
+  private accountNameMatches(
+    accountName: string,
+    accountHint: string,
+  ): boolean {
+    const normalize = (value: string): string[] =>
+      value
+        .normalize('NFKC')
+        .toLocaleLowerCase('id-ID')
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+
+    const accountWords = new Set(normalize(accountName));
+    const hintWords = normalize(accountHint);
+
+    if (hintWords.length === 0) {
+      return false;
+    }
+
+    return hintWords.every((word) => accountWords.has(word));
   }
 }

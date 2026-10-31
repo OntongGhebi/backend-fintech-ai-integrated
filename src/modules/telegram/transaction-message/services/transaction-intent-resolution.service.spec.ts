@@ -5,6 +5,7 @@ describe('TransactionIntentResolutionService', () => {
 
   let accountsRepository: {
     findByNameAndUserId: jest.Mock;
+    findManyByUserId: jest.Mock;
   };
 
   let categoriesRepository: {
@@ -14,6 +15,7 @@ describe('TransactionIntentResolutionService', () => {
   beforeEach(() => {
     accountsRepository = {
       findByNameAndUserId: jest.fn(),
+      findManyByUserId: jest.fn().mockResolvedValue([]),
     };
 
     categoriesRepository = {
@@ -246,5 +248,105 @@ describe('TransactionIntentResolutionService', () => {
     const result = await service.resolve('user-id', baseIntent);
 
     expect(result.intent?.originalIntent).toEqual(baseIntent);
+  });
+
+  describe('account name matching', () => {
+    it.each([
+      ['bri', 'BRI Account', 'bri-account-id'],
+      ['bca', 'BCA Main Account', 'bca-account-id'],
+      ['mandiri', 'Mandiri Account', 'mandiri-account-id'],
+    ])(
+      'should resolve account hint "%s" to "%s"',
+      async (accountHint, accountName, accountId) => {
+        accountsRepository.findByNameAndUserId.mockResolvedValue(null);
+
+        accountsRepository.findManyByUserId.mockResolvedValue([
+          {
+            id: accountId,
+            name: accountName,
+            currency: 'IDR',
+            isActive: true,
+          },
+        ]);
+
+        const result = await service.resolve('user-id', {
+          ...baseIntent,
+          accountHint,
+        });
+
+        expect(result.status).toBe('RESOLVED');
+        expect(result.intent?.accountId).toBe(accountId);
+
+        expect(accountsRepository.findManyByUserId).toHaveBeenCalledWith(
+          'user-id',
+        );
+      },
+    );
+
+    it('should request clarification when multiple accounts match', async () => {
+      accountsRepository.findByNameAndUserId.mockResolvedValue(null);
+
+      accountsRepository.findManyByUserId.mockResolvedValue([
+        {
+          id: 'bri-account-1',
+          name: 'BRI Account',
+          currency: 'IDR',
+          isActive: true,
+        },
+        {
+          id: 'bri-account-2',
+          name: 'BRI Savings',
+          currency: 'IDR',
+          isActive: true,
+        },
+      ]);
+
+      const result = await service.resolve('user-id', {
+        ...baseIntent,
+        accountHint: 'bri',
+      });
+
+      expect(result.status).toBe('NEEDS_ACCOUNT');
+      expect(result.message).toContain('full account name');
+    });
+
+    it('should not match an account belonging to another user', async () => {
+      accountsRepository.findByNameAndUserId.mockResolvedValue(null);
+
+      // The repository is expected to return only the current
+      // user's accounts.
+      accountsRepository.findManyByUserId.mockResolvedValue([]);
+
+      const result = await service.resolve('user-id', {
+        ...baseIntent,
+        accountHint: 'bri',
+      });
+
+      expect(result.status).toBe('NOT_FOUND');
+      expect(result.message).toContain('bri');
+    });
+
+    it('should still reject an inactive account after alias matching', async () => {
+      accountsRepository.findByNameAndUserId.mockResolvedValue(null);
+
+      accountsRepository.findManyByUserId.mockResolvedValue([
+        {
+          id: 'bri-account-id',
+          name: 'BRI Account',
+          currency: 'IDR',
+          isActive: false,
+        },
+      ]);
+
+      const result = await service.resolve('user-id', {
+        ...baseIntent,
+        accountHint: 'bri',
+      });
+
+      expect(result).toEqual({
+        status: 'INVALID',
+        message: 'The selected account is inactive',
+      });
+    });
   });
 });

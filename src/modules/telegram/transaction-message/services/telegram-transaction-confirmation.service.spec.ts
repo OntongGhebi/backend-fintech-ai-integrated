@@ -348,6 +348,105 @@ describe('TelegramTransactionConfirmationService', () => {
     expect(result.message).toBe('PROCESSING');
   });
 
+  it('should allow a new transaction message after a completed confirmation', async () => {
+    const confirmation = createConfirmation({
+      status: 'COMPLETED',
+      transactionId: 'transaction-id',
+    });
+
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
+      confirmation,
+    );
+    transactionConfirmationService.parseAction.mockReturnValue('UNKNOWN');
+
+    const result = await service.handle(
+      createContext({
+        text: 'di kasih jajan kakak 50000 ke mandiri',
+        sourceMessageId: 'new-message-101',
+      }),
+    );
+
+    expect(result).toEqual({
+      handled: false,
+      action: 'NONE',
+      status: 'NONE',
+      message: 'NO_PENDING',
+    });
+    expect(confirmedTransactionService.create).not.toHaveBeenCalled();
+    expect(transactionConfirmationService.confirm).not.toHaveBeenCalled();
+    expect(transactionConfirmationService.cancel).not.toHaveBeenCalled();
+  });
+
+  it('should allow a new transaction message while an old confirmation is processing', async () => {
+    const confirmation = createConfirmation({
+      status: 'PROCESSING',
+    });
+
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
+      confirmation,
+    );
+    transactionConfirmationService.parseAction.mockReturnValue('UNKNOWN');
+
+    const result = await service.handle(
+      createContext({
+        text: 'beli pulsa pakai mandiri 25000',
+        sourceMessageId: 'new-message-102',
+      }),
+    );
+
+    expect(result.handled).toBe(false);
+    expect(result.status).toBe('NONE');
+    expect(result.message).toBe('NO_PENDING');
+    expect(confirmedTransactionService.create).not.toHaveBeenCalled();
+  });
+
+  it('should allow a new transaction message after an expired confirmation', async () => {
+    const confirmation = createConfirmation({
+      status: 'EXPIRED',
+    });
+
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
+      confirmation,
+    );
+    transactionConfirmationService.parseAction.mockReturnValue('UNKNOWN');
+
+    const result = await service.handle(
+      createContext({
+        text: 'makan siang 30000 dari BCA',
+        sourceMessageId: 'new-message-103',
+      }),
+    );
+
+    expect(result.handled).toBe(false);
+    expect(result.status).toBe('NONE');
+    expect(result.message).toBe('NO_PENDING');
+  });
+
+  it('should still prevent duplicate confirmation after completion', async () => {
+    const confirmation = createConfirmation({
+      status: 'COMPLETED',
+      transactionId: 'transaction-id',
+    });
+
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
+      confirmation,
+    );
+    transactionConfirmationService.parseAction.mockReturnValue('CONFIRM');
+
+    const result = await service.handle(
+      createContext({
+        text: 'YA',
+        sourceMessageId: 'confirmation-retry-101',
+      }),
+    );
+
+    expect(result.handled).toBe(true);
+    expect(result.status).toBe('COMPLETED');
+    expect(result.message).toBe('ALREADY_PROCESSED');
+    expect(result.transactionId).toBe('transaction-id');
+    expect(confirmedTransactionService.create).not.toHaveBeenCalled();
+  });
+
   it('should return already processed for completed confirmation', async () => {
     const confirmation = createConfirmation({
       status: 'COMPLETED',

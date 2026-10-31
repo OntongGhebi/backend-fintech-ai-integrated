@@ -56,8 +56,18 @@ export class TelegramTransactionConfirmationService {
       return this.noPendingResult();
     }
 
+    // Parse the current message before inspecting the previous confirmation.
+    // A terminal confirmation must not consume unrelated new transaction messages.
+    const action = this.transactionConfirmationService.parseAction(
+      context.text,
+    );
+
     switch (latest.status) {
       case 'COMPLETED':
+        if (action === 'UNKNOWN') {
+          return this.noPendingResult();
+        }
+
         return {
           handled: true,
           action: 'NONE',
@@ -68,6 +78,10 @@ export class TelegramTransactionConfirmationService {
         };
 
       case 'PROCESSING':
+        if (action === 'UNKNOWN') {
+          return this.noPendingResult();
+        }
+
         return {
           handled: true,
           action: 'NONE',
@@ -77,6 +91,10 @@ export class TelegramTransactionConfirmationService {
         };
 
       case 'EXPIRED':
+        if (action === 'UNKNOWN') {
+          return this.noPendingResult();
+        }
+
         return {
           handled: true,
           action: 'NONE',
@@ -91,6 +109,10 @@ export class TelegramTransactionConfirmationService {
         break;
 
       case 'CONFIRMED':
+        if (action === 'UNKNOWN') {
+          return this.noPendingResult();
+        }
+
         return {
           handled: true,
           action: 'NONE',
@@ -101,10 +123,6 @@ export class TelegramTransactionConfirmationService {
       default:
         return this.noPendingResult();
     }
-
-    const action = this.transactionConfirmationService.parseAction(
-      context.text,
-    );
 
     if (action === 'UNKNOWN') {
       return {
