@@ -20,6 +20,11 @@ interface ParsedAccount {
   startIndex: number;
 }
 
+interface KnownAccount {
+  alias: string;
+  displayName: string;
+}
+
 @Injectable()
 export class BasicTransactionMessageParser implements TransactionMessageParser {
   private readonly expenseKeywords = [
@@ -52,8 +57,7 @@ export class BasicTransactionMessageParser implements TransactionMessageParser {
   ];
 
   /**
-   * Income phrases are checked separately because some Indonesian
-   * expressions consist of more than one word.
+   * Income phrases consisting of more than one word.
    */
   private readonly incomePhrases = [
     'di kasih',
@@ -70,21 +74,12 @@ export class BasicTransactionMessageParser implements TransactionMessageParser {
   ];
 
   /**
-   * Account aliases supported when the user writes the account name
-   * directly or after a connector.
+   * Known account aliases.
    *
-   * Examples:
-   * - makan 25000 dari BCA
-   * - beli pulsa 25000 pakai Mandiri
-   * - beli pulsa pakai Mandiri 25000
-   * - dapat upah 30000 ke Mandiri
-   *
-   * Custom account names are also supported after an explicit connector.
+   * Connector syntax returns displayName.
+   * End-of-message shorthand returns alias.
    */
-  private readonly knownAccountNames: Array<{
-    alias: string;
-    displayName: string;
-  }> = [
+  private readonly knownAccountNames: KnownAccount[] = [
     { alias: 'bank central asia', displayName: 'Bank Central Asia' },
     { alias: 'bank rakyat indonesia', displayName: 'Bank Rakyat Indonesia' },
     { alias: 'bank negara indonesia', displayName: 'Bank Negara Indonesia' },
@@ -241,6 +236,7 @@ export class BasicTransactionMessageParser implements TransactionMessageParser {
         }
 
         const accountStartIndex = match.index + match[1].length;
+
         const accountEndIndex = accountStartIndex + match[2].length;
 
         const prefix = normalizedText.slice(0, accountStartIndex);
@@ -259,17 +255,32 @@ export class BasicTransactionMessageParser implements TransactionMessageParser {
           };
         }
 
+        /**
+         * Backward-compatible shorthand:
+         * "tadi siang makan 37000 bri"
+         *
+         * Only accept an alias without a connector
+         * when it is at the end of the message.
+         */
         const suffix = normalizedText.slice(accountEndIndex).trim();
 
         if (!suffix) {
           return {
-            accountHint: account.displayName,
+            accountHint: account.alias,
             startIndex: match.index,
           };
         }
       }
     }
 
+    /**
+     * Custom account support:
+     * - makan 25000 dari Dompet Digital
+     * - belanja 50000 pakai Dompet Digital
+     *
+     * The amount is removed from the account expression
+     * when it appears after the account name.
+     */
     const connectorPattern = new RegExp(
       `\\s+(${this.accountConnectors.join('|')})\\s+(.+)$`,
       'i',
@@ -310,7 +321,6 @@ export class BasicTransactionMessageParser implements TransactionMessageParser {
 
     const words = new Set(normalized.split(' '));
 
-    // Check income phrases first, including expressions such as "di kasih".
     if (this.incomePhrases.some((phrase) => normalized.includes(phrase))) {
       return 'INCOME';
     }
