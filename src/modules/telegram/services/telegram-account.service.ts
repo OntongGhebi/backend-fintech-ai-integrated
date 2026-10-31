@@ -46,14 +46,14 @@ export class TelegramAccountService {
   async completeLink(input: LinkTelegramAccountInput, code: string) {
     const token = await this.telegramLinkTokenService.consume(code);
 
-    if (!token) {
+    if (!token?.userId) {
       throw new NotFoundException(
         'Telegram linking code is invalid or expired',
       );
     }
 
-    // The application user must always come from the Redis token.
-    // Never trust a user ID supplied by the Telegram message.
+    // The application user identity must come from the Redis token.
+    // Never trust a userId supplied by the Telegram update.
     const userId = token.userId;
 
     const existingAccount = await this.findByTelegramUserId(

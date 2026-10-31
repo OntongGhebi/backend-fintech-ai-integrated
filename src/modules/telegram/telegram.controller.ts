@@ -32,9 +32,15 @@ import { TelegramWebhookGuard } from './guards/telegram-webhook.guard';
 import { TelegramUpdateDto } from './dto/telegram-update.dto';
 
 import { ParsedTelegramMessage } from './types/telegram-parser.types';
+import { serializeBigInt } from 'src/common/utils/json-serializer.util';
 
 const TELEGRAM_LINK_CODE_PATTERN = /^\d{8}$/;
 
+// Supports:
+// /start
+// /start 12345678
+// /start@BotName
+// /start@BotName 12345678
 const TELEGRAM_START_COMMAND_PATTERN = /^\/start(?:@\w+)?(?:\s+(\d{8}))?\s*$/i;
 
 const TELEGRAM_START_COMMAND_PREFIX = /^\/start(?:@\w+)?(?:\s|$)/i;
@@ -143,27 +149,35 @@ export class TelegramController {
     const match = message.text.trim().match(TELEGRAM_START_COMMAND_PATTERN);
 
     if (!match) {
-      await this.telegramService.sendMessage({
-        chatId: message.chatId,
-        text:
-          'Format perintah linking tidak valid.\n\n' +
+      await this.sendSafeMessage(
+        message,
+        'Format perintah linking tidak valid.\n\n' +
           'Silakan gunakan:\n' +
           '/start KODE_LINKING\n\n' +
           'Dapatkan kode linking melalui aplikasi Fintech AI.',
-      });
+      );
 
       return;
     }
 
     const code = match[1];
 
-    if (!code || !TELEGRAM_LINK_CODE_PATTERN.test(code)) {
-      await this.telegramService.sendMessage({
-        chatId: message.chatId,
-        text:
-          'Halo! Untuk menghubungkan akun Telegram, silakan buat kode linking terlebih dahulu melalui aplikasi Fintech AI, kemudian kirim:\n\n' +
+    // /start without a code.
+    if (!code) {
+      await this.sendSafeMessage(
+        message,
+        'Halo! Untuk menghubungkan akun Telegram, silakan buat kode linking terlebih dahulu melalui aplikasi Fintech AI, kemudian kirim:\n\n' +
           '/start KODE_LINKING',
-      });
+      );
+
+      return;
+    }
+
+    if (!TELEGRAM_LINK_CODE_PATTERN.test(code)) {
+      await this.sendSafeMessage(
+        message,
+        'Kode linking tidak valid. Silakan buat kode baru melalui aplikasi Fintech AI.',
+      );
 
       return;
     }
@@ -183,44 +197,69 @@ export class TelegramController {
         `Telegram account linked successfully: telegramUserId=${message.telegramUserId}, accountId=${linkedAccount.id}`,
       );
 
-      await this.telegramService.sendMessage({
-        chatId: message.chatId,
-        text:
-          '🎉 Akun Telegram berhasil dihubungkan!\n\n' +
+      // The account has already been linked successfully.
+      // A notification failure must not cause webhook HTTP 503.
+      await this.sendSafeMessage(
+        message,
+        '🎉 Akun Telegram berhasil dihubungkan!\n\n' +
           `Nama: ${message.firstName ?? 'Pengguna'}\n` +
-          `Username: ${message.username ? `@${message.username}` : 'Tidak tersedia'}\n\n` +
+          `Username: ${
+            message.username ? `@${message.username}` : 'Tidak tersedia'
+          }\n\n` +
           'Sekarang Anda dapat mengirim pesan transaksi langsung melalui Telegram.\n\n' +
           'Contoh:\n' +
           'makan siang 25000\n' +
           'gaji 5000000\n\n' +
           'Pastikan detail transaksi sudah benar sebelum melakukan konfirmasi.',
-      });
+      );
     } catch (error) {
       if (error instanceof NotFoundException) {
-        await this.telegramService.sendMessage({
-          chatId: message.chatId,
-          text:
-            '❌ Kode linking tidak valid atau sudah kedaluwarsa.\n\n' +
+        await this.sendSafeMessage(
+          message,
+          '❌ Kode linking tidak valid atau sudah kedaluwarsa.\n\n' +
             'Silakan buat kode baru melalui aplikasi Fintech AI dan coba kembali.',
-        });
+        );
 
         return;
       }
 
       if (error instanceof ConflictException) {
-        await this.telegramService.sendMessage({
-          chatId: message.chatId,
-          text:
-            '⚠️ Akun Telegram ini sudah terhubung dengan akun aplikasi lain.\n\n' +
+        await this.sendSafeMessage(
+          message,
+          '⚠️ Akun Telegram ini sudah terhubung dengan akun aplikasi lain.\n\n' +
             'Jika Anda merasa ini adalah kesalahan, silakan periksa akun yang sedang digunakan atau hubungi administrator.',
-        });
+        );
 
         return;
       }
 
-      // Unexpected Redis/database/Telegram errors must propagate
-      // so the webhook can be retried instead of silently discarded.
+      // Unexpected Redis/database errors must propagate.
+      // They must not be silently treated as successful linking.
       throw error;
+    }
+  }
+
+  /**
+   * Send a Telegram notification without allowing a notification
+   * failure to invalidate an already completed operation.
+   *
+   * The original chatId from the parsed Telegram update is preserved.
+   */
+  private async sendSafeMessage(
+    message: ParsedTelegramMessage,
+    text: string,
+  ): Promise<void> {
+    try {
+      await this.telegramService.sendMessage({
+        chatId: message.chatId,
+        text,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to send Telegram notification: chatId=${message.chatId}; ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
@@ -257,7 +296,9 @@ export class TelegramController {
     description: 'Missing or invalid access token',
   })
   async getLinkedAccounts(@CurrentUser() userId: string) {
-    return this.telegramAccountService.findByUserId(userId);
+    const accounts = await this.telegramAccountService.findByUserId(userId);
+
+    return serializeBigInt(accounts);
   }
 
   @Delete('accounts/:telegramAccountId')
