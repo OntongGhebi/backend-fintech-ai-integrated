@@ -6,7 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { RequestWithId } from '../middlewares/request-id.middleware';
 
 interface ErrorResponse {
@@ -22,9 +22,9 @@ interface ErrorResponse {
 @Catch(HttpException)
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
+
   catch(exception: HttpException, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
-
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<RequestWithId>();
 
@@ -37,8 +37,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
       request,
     );
 
+    // Log the actual exception message to help diagnose rejected requests.
+    // Do not log request bodies, authorization headers, or webhook secrets.
     this.logger.warn(
-      `[${request.requestId}] ${request.method} ${request.originalUrl} ${statusCode}`,
+      `[${request.requestId}] ${request.method} ${request.originalUrl} ` +
+        `${statusCode} - ${this.formatExceptionMessage(errorResponse.message)}`,
     );
 
     response.status(statusCode).json(errorResponse);
@@ -66,6 +69,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       if (response.message) {
         message = response.message;
       }
+
       if (response.error) {
         error = response.error;
       }
@@ -80,5 +84,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
       requestId: request.requestId,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  private formatExceptionMessage(message: string | string[]): string {
+    if (Array.isArray(message)) {
+      return message.join('; ');
+    }
+
+    return message;
   }
 }
