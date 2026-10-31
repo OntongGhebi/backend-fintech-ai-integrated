@@ -1,8 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
+  Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   Req,
   UseGuards,
@@ -17,6 +20,12 @@ import { TelegramService } from './services/telegram.service';
 import { TelegramUpdateParserService } from './services/telegram-update-parser.service';
 import { TelegramWebhookGuard } from './guards/telegram-webhook.guard';
 import { TelegramUpdateDto } from './dto/telegram-update.dto';
+
+interface AuthenticatedRequest {
+  user: {
+    sub: string;
+  };
+}
 
 @Controller('telegram')
 export class TelegramController {
@@ -38,7 +47,6 @@ export class TelegramController {
 
     if (!parsedMessage) {
       this.telegramService.handleUpdate(null);
-
       return { ok: true };
     }
 
@@ -47,13 +55,11 @@ export class TelegramController {
 
     if (!persistedMessage) {
       this.telegramService.handleUpdate(parsedMessage);
-
       return { ok: true };
     }
 
     if (!persistedMessage.created) {
       this.telegramService.handleUpdate(parsedMessage);
-
       return { ok: true };
     }
 
@@ -75,14 +81,26 @@ export class TelegramController {
 
   @Post('link')
   @UseGuards(AccessTokenGuard)
-  async createLinkCode(
-    @Req()
-    request: {
-      user: {
-        sub: string;
-      };
-    },
-  ) {
+  async createLinkCode(@Req() request: AuthenticatedRequest) {
     return this.telegramAccountService.createLinkCode(request.user.sub);
+  }
+
+  @Get('accounts')
+  @UseGuards(AccessTokenGuard)
+  async getLinkedAccounts(@Req() request: AuthenticatedRequest) {
+    return this.telegramAccountService.findByUserId(request.user.sub);
+  }
+
+  @Delete('accounts/:telegramAccountId')
+  @UseGuards(AccessTokenGuard)
+  @HttpCode(HttpStatus.OK)
+  async unlinkAccount(
+    @Req() request: AuthenticatedRequest,
+    @Param('telegramAccountId') telegramAccountId: string,
+  ) {
+    return this.telegramAccountService.unlink(
+      request.user.sub,
+      telegramAccountId,
+    );
   }
 }
