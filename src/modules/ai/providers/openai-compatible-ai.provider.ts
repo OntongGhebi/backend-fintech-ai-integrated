@@ -15,6 +15,8 @@ import {
 } from '../types/ai.types';
 
 import { AIPrivacyService } from '../services/ai-privacy.service';
+import { AI_PROVIDER_CONFIG } from '../constants/ai-provider.constants';
+import { AIProviderHttpException } from '../errors/ai-provider-http.exception';
 
 interface OpenAICompatibleMessage {
   role: 'system' | 'user' | 'assistant';
@@ -107,7 +109,10 @@ export class OpenAICompatibleAIProvider implements AIProvider {
           `AI provider request failed: status=${response.status}, body=${sanitizedErrorBody}`,
         );
 
-        throw new ServiceUnavailableException('AI provider request failed');
+        throw new AIProviderHttpException(
+          response.status,
+          this.parseRetryAfter(response.headers.get('retry-after')),
+        );
       }
 
       const data = (await response.json()) as OpenAICompatibleResponse;
@@ -160,7 +165,7 @@ export class OpenAICompatibleAIProvider implements AIProvider {
       if (error instanceof Error && error.name === 'AbortError') {
         this.logger.error(`AI provider request timed out after ${timeoutMs}ms`);
 
-        throw new ServiceUnavailableException('AI provider request timed out');
+        throw new Error('AI provider request timed out');
       }
 
       const safeErrorMessage = this.aiPrivacyService.sanitizeLogMessage(
@@ -170,6 +175,10 @@ export class OpenAICompatibleAIProvider implements AIProvider {
       this.logger.error(
         `AI provider request failed unexpectedly: ${safeErrorMessage}`,
       );
+
+      if (error instanceof TypeError) {
+        throw new Error('AI provider network error');
+      }
 
       throw new ServiceUnavailableException('AI provider request failed');
     } finally {
@@ -191,7 +200,7 @@ export class OpenAICompatibleAIProvider implements AIProvider {
       return [];
     }
 
-    return [
+    const uniqueModels = [
       ...new Set(
         configuredModels
           .filter(
@@ -202,6 +211,28 @@ export class OpenAICompatibleAIProvider implements AIProvider {
           .filter((model) => model !== primaryModel),
       ),
     ];
+
+    return uniqueModels.slice(0, AI_PROVIDER_CONFIG.MAX_FALLBACK_MODELS);
+  }
+
+  private parseRetryAfter(value: string | null): number | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const seconds = Number(value);
+
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.round(seconds * 1_000);
+    }
+
+    const retryAt = Date.parse(value);
+
+    if (Number.isNaN(retryAt)) {
+      return undefined;
+    }
+
+    return Math.max(0, retryAt - Date.now());
   }
 
   private buildCompletionUrl(baseUrl: string): string {
