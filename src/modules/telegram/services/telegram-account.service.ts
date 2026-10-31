@@ -8,7 +8,6 @@ import { TelegramLinkTokenService } from './telegram-link-token.service';
 import { TelegramAccountRepository } from '../repositories/telegram-account.repository';
 
 export interface LinkTelegramAccountInput {
-  userId: string;
   telegramUserId: bigint;
   telegramUsername?: string;
   firstName?: string;
@@ -53,18 +52,16 @@ export class TelegramAccountService {
       );
     }
 
-    if (token.userId !== input.userId) {
-      throw new ConflictException(
-        'Telegram linking code does not belong to this user',
-      );
-    }
+    // The application user must always come from the Redis token.
+    // Never trust a user ID supplied by the Telegram message.
+    const userId = token.userId;
 
     const existingAccount = await this.findByTelegramUserId(
       input.telegramUserId,
     );
 
     if (existingAccount) {
-      if (existingAccount.userId !== input.userId) {
+      if (existingAccount.userId !== userId) {
         throw new ConflictException(
           'Telegram account is already linked to another user',
         );
@@ -75,7 +72,7 @@ export class TelegramAccountService {
       }
 
       return this.telegramAccountRepository.relink(existingAccount.id, {
-        userId: input.userId,
+        userId,
         telegramUsername: input.telegramUsername,
         firstName: input.firstName,
         lastName: input.lastName,
@@ -83,7 +80,7 @@ export class TelegramAccountService {
     }
 
     return this.telegramAccountRepository.create({
-      userId: input.userId,
+      userId,
       telegramUserId: input.telegramUserId,
       telegramUsername: input.telegramUsername,
       firstName: input.firstName,

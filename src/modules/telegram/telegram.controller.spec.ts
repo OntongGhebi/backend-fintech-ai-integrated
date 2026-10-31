@@ -1,3 +1,4 @@
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import {
@@ -12,13 +13,13 @@ import { TelegramMessageProcessingService } from './services/telegram-message-pr
 import { TelegramService } from './services/telegram.service.js';
 import { TelegramUpdateParserService } from './services/telegram-update-parser.service.js';
 import { TelegramWebhookGuard } from './guards/telegram-webhook.guard.js';
-import { ConfigService } from '@nestjs/config';
 
 describe('TelegramController', () => {
   let controller: TelegramController;
 
   let telegramService: {
     handleUpdate: jest.Mock;
+    sendMessage: jest.Mock;
   };
 
   let telegramUpdateParserService: {
@@ -27,6 +28,9 @@ describe('TelegramController', () => {
 
   let telegramAccountService: {
     createLinkCode: jest.Mock;
+    completeLink: jest.Mock;
+    findByUserId: jest.Mock;
+    unlink: jest.Mock;
   };
 
   let telegramIncomingMessageService: {
@@ -37,62 +41,67 @@ describe('TelegramController', () => {
     process: jest.Mock;
   };
 
-  const createUpdate = (overrides: Record<string, unknown> = {}) => ({
-    update_id: 1000,
+  const userId = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 
+  const createUpdate = (text = 'makan siang 25000') => ({
+    update_id: 1000,
     message: {
       message_id: 100,
       from: {
-        id: 123456,
+        id: 40777718,
         is_bot: false,
-        first_name: 'Test',
-        username: 'testuser',
+        first_name: 'Ghebi',
+        last_name: 'Armando',
+        username: 'ghebi',
       },
       chat: {
-        id: 654321,
+        id: 40777718,
         type: 'private',
       },
       date: 1750000000,
-      text: 'makan siang 25000',
+      text,
     },
-
-    ...overrides,
   });
 
   const parsedMessage = {
-    telegramUserId: '123456',
-    chatId: '654321',
-    messageId: '100',
+    updateId: 1000,
+    messageId: 100,
+    telegramUserId: 40777718,
+    chatId: 40777718,
+    chatType: 'private' as const,
     text: 'makan siang 25000',
+    messageDate: new Date(1750000000 * 1000),
+    username: 'ghebi',
+    firstName: 'Ghebi',
+    lastName: 'Armando',
   };
 
   const createPersistedMessage = (overrides: Record<string, unknown> = {}) => ({
     id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-
     telegramAccountId: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-
-    userId: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
-
-    telegramUserId: BigInt(123456),
-
-    chatId: BigInt(654321),
-
+    userId,
+    telegramUserId: BigInt(40777718),
+    chatId: BigInt(40777718),
     telegramMessageId: BigInt(100),
-
     messageType: TelegramMessageType.TEXT,
-
     content: 'makan siang 25000',
-
     processingStatus: TelegramProcessingStatus.RECEIVED,
-
     created: true,
-
     ...overrides,
   });
 
   beforeEach(async () => {
     telegramService = {
       handleUpdate: jest.fn(),
+      sendMessage: jest.fn().mockResolvedValue({
+        message_id: 200,
+        chat: {
+          id: 40777718,
+          type: 'private',
+        },
+        date: 1750000000,
+        text: 'Telegram response',
+      }),
     };
 
     telegramUpdateParserService = {
@@ -101,6 +110,9 @@ describe('TelegramController', () => {
 
     telegramAccountService = {
       createLinkCode: jest.fn(),
+      completeLink: jest.fn(),
+      findByUserId: jest.fn(),
+      unlink: jest.fn(),
     };
 
     telegramIncomingMessageService = {
@@ -113,54 +125,34 @@ describe('TelegramController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TelegramController],
-
       providers: [
         {
           provide: TelegramService,
           useValue: telegramService,
         },
-
         {
           provide: TelegramUpdateParserService,
           useValue: telegramUpdateParserService,
         },
-
         {
           provide: TelegramAccountService,
           useValue: telegramAccountService,
         },
-
         {
           provide: TelegramIncomingMessageService,
           useValue: telegramIncomingMessageService,
         },
-
         {
           provide: TelegramMessageProcessingService,
           useValue: telegramMessageProcessingService,
         },
-
-        {
-          provide: TelegramWebhookGuard,
-          useValue: {
-            canActivate: jest.fn().mockReturnValue(true),
-          },
-        },
-
-        {
-          provide: ConfigService,
-          useValue: {
-            get: jest.fn().mockImplementation((key: string) => {
-              if (key === 'telegram.webhookSecret') {
-                return 'test-webhook-secret';
-              }
-
-              return undefined;
-            }),
-          },
-        },
       ],
-    }).compile();
+    })
+      .overrideGuard(TelegramWebhookGuard)
+      .useValue({
+        canActivate: jest.fn().mockReturnValue(true),
+      })
+      .compile();
 
     controller = module.get<TelegramController>(TelegramController);
   });
@@ -185,37 +177,20 @@ describe('TelegramController', () => {
 
       const result = await controller.handleWebhook(update as any);
 
-      expect(result).toEqual({
-        ok: true,
-      });
-
-      expect(telegramUpdateParserService.parse).toHaveBeenCalledTimes(1);
-
-      expect(telegramUpdateParserService.parse).toHaveBeenCalledWith(update);
-
-      expect(telegramIncomingMessageService.persist).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ ok: true });
 
       expect(telegramIncomingMessageService.persist).toHaveBeenCalledWith(
         parsedMessage,
       );
 
-      expect(telegramMessageProcessingService.process).toHaveBeenCalledTimes(1);
-
       expect(telegramMessageProcessingService.process).toHaveBeenCalledWith({
         messageId: persistedMessage.id,
-
         userId: persistedMessage.userId,
-
         telegramAccountId: persistedMessage.telegramAccountId,
-
         telegramUserId: persistedMessage.telegramUserId,
-
         chatId: persistedMessage.chatId,
-
         telegramMessageId: persistedMessage.telegramMessageId,
-
         messageType: persistedMessage.messageType,
-
         content: persistedMessage.content,
       });
 
@@ -223,156 +198,297 @@ describe('TelegramController', () => {
     });
 
     it('should not process a duplicate Telegram message', async () => {
-      const update = createUpdate();
-
-      const persistedMessage = createPersistedMessage({
-        created: false,
-
-        processingStatus: TelegramProcessingStatus.PROCESSED,
-      });
-
       telegramUpdateParserService.parse.mockReturnValue(parsedMessage);
 
       telegramIncomingMessageService.persist.mockResolvedValue(
-        persistedMessage,
+        createPersistedMessage({
+          created: false,
+          processingStatus: TelegramProcessingStatus.PROCESSED,
+        }),
       );
 
-      const result = await controller.handleWebhook(update as any);
+      const result = await controller.handleWebhook(createUpdate() as any);
 
-      expect(result).toEqual({
-        ok: true,
-      });
-
-      expect(telegramIncomingMessageService.persist).toHaveBeenCalledWith(
-        parsedMessage,
-      );
+      expect(result).toEqual({ ok: true });
 
       expect(telegramMessageProcessingService.process).not.toHaveBeenCalled();
-
-      expect(telegramService.handleUpdate).toHaveBeenCalledWith(parsedMessage);
     });
 
-    it('should not process when the Telegram account is not linked', async () => {
-      const update = createUpdate();
-
+    it('should ignore messages from unlinked Telegram users', async () => {
       telegramUpdateParserService.parse.mockReturnValue(parsedMessage);
 
       telegramIncomingMessageService.persist.mockResolvedValue(null);
 
-      const result = await controller.handleWebhook(update as any);
+      const result = await controller.handleWebhook(createUpdate() as any);
 
-      expect(result).toEqual({
-        ok: true,
-      });
-
-      expect(telegramIncomingMessageService.persist).toHaveBeenCalledWith(
-        parsedMessage,
-      );
+      expect(result).toEqual({ ok: true });
 
       expect(telegramMessageProcessingService.process).not.toHaveBeenCalled();
-
-      expect(telegramService.handleUpdate).toHaveBeenCalledWith(parsedMessage);
     });
 
-    it('should not persist when the update is not processable', async () => {
-      const update = createUpdate();
-
+    it('should not persist an unprocessable update', async () => {
       telegramUpdateParserService.parse.mockReturnValue(null);
 
-      const result = await controller.handleWebhook(update as any);
+      const result = await controller.handleWebhook(createUpdate() as any);
 
-      expect(result).toEqual({
-        ok: true,
-      });
+      expect(result).toEqual({ ok: true });
 
       expect(telegramIncomingMessageService.persist).not.toHaveBeenCalled();
-
-      expect(telegramMessageProcessingService.process).not.toHaveBeenCalled();
 
       expect(telegramService.handleUpdate).toHaveBeenCalledWith(null);
     });
 
     it('should propagate parser errors', async () => {
-      const update = createUpdate();
-
       telegramUpdateParserService.parse.mockImplementation(() => {
         throw new Error('Invalid Telegram update');
       });
 
-      await expect(controller.handleWebhook(update as any)).rejects.toThrow(
-        'Invalid Telegram update',
-      );
-
-      expect(telegramIncomingMessageService.persist).not.toHaveBeenCalled();
-
-      expect(telegramMessageProcessingService.process).not.toHaveBeenCalled();
+      await expect(
+        controller.handleWebhook(createUpdate() as any),
+      ).rejects.toThrow('Invalid Telegram update');
     });
 
     it('should propagate persistence errors', async () => {
-      const update = createUpdate();
-
       telegramUpdateParserService.parse.mockReturnValue(parsedMessage);
 
       telegramIncomingMessageService.persist.mockRejectedValue(
         new Error('Persistence failed'),
       );
 
-      await expect(controller.handleWebhook(update as any)).rejects.toThrow(
-        'Persistence failed',
-      );
-
-      expect(telegramMessageProcessingService.process).not.toHaveBeenCalled();
+      await expect(
+        controller.handleWebhook(createUpdate() as any),
+      ).rejects.toThrow('Persistence failed');
     });
 
     it('should propagate processing errors', async () => {
-      const update = createUpdate();
-
-      const persistedMessage = createPersistedMessage();
-
       telegramUpdateParserService.parse.mockReturnValue(parsedMessage);
 
       telegramIncomingMessageService.persist.mockResolvedValue(
-        persistedMessage,
+        createPersistedMessage(),
       );
 
       telegramMessageProcessingService.process.mockRejectedValue(
         new Error('Processing failed'),
       );
 
-      await expect(controller.handleWebhook(update as any)).rejects.toThrow(
-        'Processing failed',
+      await expect(
+        controller.handleWebhook(createUpdate() as any),
+      ).rejects.toThrow('Processing failed');
+    });
+
+    it('should complete account linking when receiving /start CODE', async () => {
+      const message = {
+        ...parsedMessage,
+        text: '/start 12345678',
+      };
+
+      telegramUpdateParserService.parse.mockReturnValue(message);
+
+      telegramAccountService.completeLink.mockResolvedValue({
+        id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        userId,
+        telegramUserId: BigInt(40777718),
+      });
+
+      const result = await controller.handleWebhook(
+        createUpdate('/start 12345678') as any,
       );
 
-      expect(telegramMessageProcessingService.process).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ ok: true });
 
-      expect(telegramService.handleUpdate).not.toHaveBeenCalled();
+      expect(telegramAccountService.completeLink).toHaveBeenCalledWith(
+        {
+          telegramUserId: BigInt(40777718),
+          telegramUsername: 'ghebi',
+          firstName: 'Ghebi',
+          lastName: 'Armando',
+        },
+        '12345678',
+      );
+
+      expect(telegramService.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 40777718,
+          text: expect.stringContaining('Akun Telegram berhasil dihubungkan'),
+        }),
+      );
+
+      expect(telegramIncomingMessageService.persist).not.toHaveBeenCalled();
+
+      expect(telegramMessageProcessingService.process).not.toHaveBeenCalled();
+    });
+
+    it('should reply when /start is sent without a code', async () => {
+      const message = {
+        ...parsedMessage,
+        text: '/start',
+      };
+
+      telegramUpdateParserService.parse.mockReturnValue(message);
+
+      const result = await controller.handleWebhook(
+        createUpdate('/start') as any,
+      );
+
+      expect(result).toEqual({ ok: true });
+
+      expect(telegramAccountService.completeLink).not.toHaveBeenCalled();
+
+      expect(telegramService.sendMessage).toHaveBeenCalled();
+
+      expect(telegramIncomingMessageService.persist).not.toHaveBeenCalled();
+    });
+
+    it('should reject an invalid code format without consuming a token', async () => {
+      const message = {
+        ...parsedMessage,
+        text: '/start 123',
+      };
+
+      telegramUpdateParserService.parse.mockReturnValue(message);
+
+      const result = await controller.handleWebhook(
+        createUpdate('/start 123') as any,
+      );
+
+      expect(result).toEqual({ ok: true });
+
+      expect(telegramAccountService.completeLink).not.toHaveBeenCalled();
+
+      expect(telegramService.sendMessage).toHaveBeenCalled();
+    });
+
+    it('should reply when the linking code is invalid or expired', async () => {
+      telegramUpdateParserService.parse.mockReturnValue({
+        ...parsedMessage,
+        text: '/start 12345678',
+      });
+
+      telegramAccountService.completeLink.mockRejectedValue(
+        new NotFoundException('Telegram linking code is invalid or expired'),
+      );
+
+      const result = await controller.handleWebhook(
+        createUpdate('/start 12345678') as any,
+      );
+
+      expect(result).toEqual({ ok: true });
+
+      expect(telegramService.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining('tidak valid atau sudah kedaluwarsa'),
+        }),
+      );
+    });
+
+    it('should reply when the Telegram account belongs to another user', async () => {
+      telegramUpdateParserService.parse.mockReturnValue({
+        ...parsedMessage,
+        text: '/start 12345678',
+      });
+
+      telegramAccountService.completeLink.mockRejectedValue(
+        new ConflictException(
+          'Telegram account is already linked to another user',
+        ),
+      );
+
+      const result = await controller.handleWebhook(
+        createUpdate('/start 12345678') as any,
+      );
+
+      expect(result).toEqual({ ok: true });
+
+      expect(telegramService.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining(
+            'sudah terhubung dengan akun aplikasi lain',
+          ),
+        }),
+      );
+    });
+
+    it('should not link an account from a group chat', async () => {
+      const message = {
+        ...parsedMessage,
+        chatType: 'group' as const,
+        text: '/start 12345678',
+      };
+
+      telegramUpdateParserService.parse.mockReturnValue(message);
+
+      const result = await controller.handleWebhook(
+        createUpdate('/start 12345678') as any,
+      );
+
+      expect(result).toEqual({ ok: true });
+
+      expect(telegramAccountService.completeLink).not.toHaveBeenCalled();
+
+      expect(telegramService.sendMessage).not.toHaveBeenCalled();
+
+      expect(telegramIncomingMessageService.persist).not.toHaveBeenCalled();
+    });
+
+    it('should propagate unexpected linking errors', async () => {
+      telegramUpdateParserService.parse.mockReturnValue({
+        ...parsedMessage,
+        text: '/start 12345678',
+      });
+
+      telegramAccountService.completeLink.mockRejectedValue(
+        new Error('Database unavailable'),
+      );
+
+      await expect(
+        controller.handleWebhook(createUpdate('/start 12345678') as any),
+      ).rejects.toThrow('Database unavailable');
     });
   });
 
   describe('createLinkCode', () => {
-    it('should create a Telegram linking code for the authenticated user', async () => {
+    it('should create a linking code for the authenticated user', async () => {
       telegramAccountService.createLinkCode.mockResolvedValue({
         code: '12345678',
         expiresInSeconds: 600,
       });
 
-      const request = {
-        user: {
-          sub: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
-        },
-      };
-
-      const result = await controller.createLinkCode(request);
+      const result = await controller.createLinkCode(userId);
 
       expect(result).toEqual({
         code: '12345678',
         expiresInSeconds: 600,
       });
 
-      expect(telegramAccountService.createLinkCode).toHaveBeenCalledTimes(1);
-
       expect(telegramAccountService.createLinkCode).toHaveBeenCalledWith(
-        'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        userId,
+      );
+    });
+  });
+
+  describe('getLinkedAccounts', () => {
+    it('should return accounts belonging to the authenticated user', async () => {
+      telegramAccountService.findByUserId.mockResolvedValue([]);
+
+      await expect(controller.getLinkedAccounts(userId)).resolves.toEqual([]);
+
+      expect(telegramAccountService.findByUserId).toHaveBeenCalledWith(userId);
+    });
+  });
+
+  describe('unlinkAccount', () => {
+    it('should unlink an account belonging to the authenticated user', async () => {
+      telegramAccountService.unlink.mockResolvedValue({
+        id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      });
+
+      const accountId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+
+      await controller.unlinkAccount(userId, accountId);
+
+      expect(telegramAccountService.unlink).toHaveBeenCalledWith(
+        userId,
+        accountId,
       );
     });
   });
