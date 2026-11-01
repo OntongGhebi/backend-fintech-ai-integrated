@@ -12,7 +12,18 @@ export interface ResolvedTransactionIntent {
   transactionType?: TelegramTransactionType;
   amount?: number;
   description?: string;
+
+  /**
+   * Account for a regular INCOME or EXPENSE transaction.
+   */
   accountId?: string;
+
+  /**
+   * Accounts for a TRANSFER intent.
+   */
+  sourceAccountId?: string;
+  destinationAccountId?: string;
+
   categoryId?: string;
   transactionDate?: Date;
   confidence?: number;

@@ -6,11 +6,28 @@ import { PendingTransactionConfirmation } from '../types/transaction-confirmatio
 export class TransactionConfirmationMessageService {
   format(confirmation: PendingTransactionConfirmation): string {
     const { intent } = confirmation;
+    const amount = this.formatAmount(intent.amount ?? 0);
+
+    if (intent.intent === 'TRANSFER') {
+      const lines = [
+        '🔎 Konfirmasi transfer antar rekening',
+        '',
+        `💵 Nominal: ${amount}`,
+        `🏦 Dari rekening: ${intent.sourceAccountId ?? 'Belum ditentukan'}`,
+        `🏦 Ke rekening: ${intent.destinationAccountId ?? 'Belum ditentukan'}`,
+        `📝 Keterangan: ${intent.description ?? 'Transfer antar rekening'}`,
+        '',
+        'Apakah transfer ini benar?',
+        '',
+        'Balas YA untuk memproses transfer.',
+        'Balas BATAL untuk membatalkan.',
+      ];
+
+      return lines.join('\n');
+    }
 
     const transactionType =
       intent.transactionType === 'INCOME' ? '💰 Pemasukan' : '💸 Pengeluaran';
-
-    const amount = this.formatAmount(intent.amount ?? 0);
 
     const account = intent.accountId
       ? `🏦 Account ID: ${intent.accountId}`
@@ -144,6 +161,22 @@ export class TransactionConfirmationMessageService {
       type,
       `💵 ${amount}`,
       `📝 ${transaction.description ?? '-'}`,
+    ].join('\n');
+  }
+
+  formatTransferCreated(transfer: {
+    amount: number;
+    description?: string | null;
+    sourceAccountName?: string;
+    destinationAccountName?: string;
+  }): string {
+    return [
+      '✅ Transfer berhasil diproses.',
+      '',
+      `💵 Nominal: ${this.formatAmount(transfer.amount)}`,
+      `🏦 Dari rekening: ${transfer.sourceAccountName ?? '-'}`,
+      `🏦 Ke rekening: ${transfer.destinationAccountName ?? '-'}`,
+      `📝 Keterangan: ${transfer.description ?? 'Transfer antar rekening'}`,
     ].join('\n');
   }
 

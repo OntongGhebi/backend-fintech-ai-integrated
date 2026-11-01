@@ -1,5 +1,5 @@
 export type TelegramTransactionIntentType =
-  'CREATE_TRANSACTION' | 'QUERY_FINANCIAL_DATA' | 'UNKNOWN';
+  'CREATE_TRANSACTION' | 'TRANSFER' | 'QUERY_FINANCIAL_DATA' | 'UNKNOWN';
 
 export type TelegramTransactionType = 'INCOME' | 'EXPENSE';
 
@@ -10,8 +10,16 @@ export interface TransactionIntent {
   transactionType?: TelegramTransactionType;
   amount?: number;
   description?: string;
+
   categoryHint?: string;
   accountHint?: string;
+
+  /**
+   * Used only for TRANSFER intents.
+   */
+  sourceAccountHint?: string;
+  destinationAccountHint?: string;
+
   transactionDate?: Date;
   confidence?: number;
   source: TelegramTransactionIntentSource;
