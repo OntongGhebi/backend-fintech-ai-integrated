@@ -35,6 +35,7 @@ describe('TelegramTransactionConfirmationService', () => {
     formatAlreadyProcessed: jest.fn().mockReturnValue('ALREADY_PROCESSED'),
     formatProcessing: jest.fn().mockReturnValue('PROCESSING'),
     formatTransactionCreated: jest.fn().mockReturnValue('TRANSACTION_CREATED'),
+    formatTransferCreated: jest.fn().mockReturnValue('TRANSFER_CREATED'),
   };
 
   const confirmedTransactionService = {
@@ -600,5 +601,78 @@ describe('TelegramTransactionConfirmationService', () => {
     ).not.toHaveBeenCalled();
 
     expect(confirmedTransactionService.create).not.toHaveBeenCalled();
+  });
+
+  it('completes a transfer using transferGroupId and returns transfer details', async () => {
+    const transferConfirmation = createConfirmation({
+      intent: {
+        ...baseIntent,
+        intent: 'TRANSFER',
+        transactionType: undefined,
+        accountId: undefined,
+        categoryId: undefined,
+        sourceAccountId: 'source-account-id',
+        destinationAccountId: 'destination-account-id',
+        sourceAccountName: 'BCA Main Account',
+        destinationAccountName: 'Mandiri Account',
+        description: 'Transfer tabungan',
+      },
+    });
+    const transfer = {
+      transferGroupId: 'transfer-group-id',
+      transactions: [
+        {
+          id: 'debit-id',
+          amount: 200000,
+          description: 'Transfer tabungan',
+        },
+        {
+          id: 'credit-id',
+          amount: 200000,
+          description: 'Transfer tabungan',
+        },
+      ],
+    };
+
+    transactionConfirmationService.findLatestByChatId.mockResolvedValue(
+      transferConfirmation,
+    );
+    transactionConfirmationService.parseAction.mockReturnValue('CONFIRM');
+    transactionConfirmationService.confirm.mockResolvedValue({
+      ...transferConfirmation,
+      status: 'CONFIRMED',
+    });
+    transactionConfirmationService.markProcessing.mockResolvedValue({
+      ...transferConfirmation,
+      status: 'PROCESSING',
+    });
+    confirmedTransactionService.create.mockResolvedValue(transfer);
+    transactionConfirmationService.markCompleted.mockResolvedValue({
+      ...transferConfirmation,
+      status: 'COMPLETED',
+      transactionId: 'transfer-group-id',
+    });
+
+    const result = await service.handle(createContext({ text: 'YA' }));
+
+    expect(transactionConfirmationService.markCompleted).toHaveBeenCalledWith(
+      'confirmation-id',
+      'transfer-group-id',
+    );
+    expect(
+      transactionConfirmationMessageService.formatTransferCreated,
+    ).toHaveBeenCalledWith({
+      amount: 200000,
+      description: 'Transfer tabungan',
+      sourceAccountName: 'BCA Main Account',
+      destinationAccountName: 'Mandiri Account',
+    });
+    expect(result).toMatchObject({
+      handled: true,
+      action: 'CONFIRM',
+      status: 'COMPLETED',
+      message: 'TRANSFER_CREATED',
+      transactionId: 'transfer-group-id',
+    });
   });
 });

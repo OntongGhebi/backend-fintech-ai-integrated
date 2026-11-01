@@ -301,7 +301,7 @@ export class TelegramTransactionConfirmationRepository {
    */
   async markCompleted(
     confirmationId: string,
-    transactionId: string,
+    _transactionReference: string,
   ): Promise<PendingTransactionConfirmation | undefined> {
     await this.prisma.$transaction(async (tx) => {
       const transactionClient = tx as unknown as {
@@ -319,10 +319,10 @@ export class TelegramTransactionConfirmationRepository {
           }) => Promise<unknown>;
         };
         transaction: {
-          update: (args: {
-            where: { id: string };
-            data: { telegramConfirmationId: string };
-          }) => Promise<unknown>;
+          findUnique: (args: {
+            where: { telegramConfirmationId: string };
+            select: { id: true };
+          }) => Promise<{ id: string } | null>;
         };
       };
 
@@ -350,10 +350,19 @@ export class TelegramTransactionConfirmationRepository {
         return;
       }
 
-      await transactionClient.transaction.update({
-        where: { id: transactionId },
-        data: { telegramConfirmationId: confirmationId },
+      // The transaction (or transfer source transaction) must already be
+      // linked by the creation service. Never treat transferGroupId as a
+      // transaction primary key: a transfer group contains two transactions.
+      const linkedTransaction = await transactionClient.transaction.findUnique({
+        where: { telegramConfirmationId: confirmationId },
+        select: { id: true },
       });
+
+      if (!linkedTransaction) {
+        throw new Error(
+          `Cannot complete Telegram confirmation ${confirmationId}: no linked transaction exists.`,
+        );
+      }
 
       await transactionClient.telegramTransactionConfirmation.update({
         where: { id: confirmationId },

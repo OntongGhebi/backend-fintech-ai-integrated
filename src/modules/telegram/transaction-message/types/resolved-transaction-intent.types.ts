@@ -23,6 +23,8 @@ export interface ResolvedTransactionIntent {
    */
   sourceAccountId?: string;
   destinationAccountId?: string;
+  sourceAccountName?: string;
+  destinationAccountName?: string;
 
   categoryId?: string;
   transactionDate?: Date;

@@ -14,6 +14,8 @@ describe('TransactionsRepository transfer balance validation', () => {
     account: { findFirst: jest.Mock };
     transaction: {
       findMany: jest.Mock;
+      findUnique: jest.Mock;
+      findFirst: jest.Mock;
       create: jest.Mock;
     };
   };
@@ -42,6 +44,8 @@ describe('TransactionsRepository transfer balance validation', () => {
       },
       transaction: {
         findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'transaction-id' }),
       },
     };
@@ -121,6 +125,39 @@ describe('TransactionsRepository transfer balance validation', () => {
       ),
     );
 
+    expect(transactionClient.transaction.create).not.toHaveBeenCalled();
+  });
+
+  it('returns an existing Telegram transfer when the confirmation is retried', async () => {
+    const existingSource = {
+      id: 'source-transaction-id',
+      transferGroupId: 'confirmation-id',
+    };
+    const existingDestination = {
+      id: 'destination-transaction-id',
+      transferGroupId: 'confirmation-id',
+    };
+    transactionClient.transaction.findUnique.mockResolvedValue(existingSource);
+    transactionClient.transaction.findFirst.mockResolvedValue(
+      existingDestination,
+    );
+
+    const result = await repository.createTransfer(
+      {
+        ...sourceData,
+        transferGroupId: 'confirmation-id',
+        telegramConfirmationId: 'confirmation-id',
+      } as never,
+      {
+        ...destinationData,
+        transferGroupId: 'confirmation-id',
+      } as never,
+    );
+
+    expect(result).toEqual({
+      sourceTransaction: existingSource,
+      destinationTransaction: existingDestination,
+    });
     expect(transactionClient.transaction.create).not.toHaveBeenCalled();
   });
 });

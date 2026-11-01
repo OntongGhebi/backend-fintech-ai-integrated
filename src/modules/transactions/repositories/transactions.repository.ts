@@ -260,6 +260,41 @@ export class TransactionsRepository {
         FOR UPDATE
       `;
 
+      // Telegram transfers use the confirmation UUID as an idempotency key.
+      // The source account row lock serializes retries for the same source account.
+      const telegramConfirmationId =
+        typeof sourceData.telegramConfirmationId === 'string'
+          ? sourceData.telegramConfirmationId
+          : undefined;
+
+      if (telegramConfirmationId) {
+        const existingSource = await tx.transaction.findUnique({
+          where: { telegramConfirmationId },
+          include: { account: true, category: true },
+        });
+
+        if (existingSource) {
+          const existingDestination = await tx.transaction.findFirst({
+            where: {
+              userId: sourceData.userId as string,
+              transferGroupId: existingSource.transferGroupId,
+              id: { not: existingSource.id },
+              deletedAt: null,
+            },
+            include: { account: true, category: true },
+          });
+
+          if (!existingDestination) {
+            throw new Error('TELEGRAM_TRANSFER_INCOMPLETE');
+          }
+
+          return {
+            sourceTransaction: existingSource,
+            destinationTransaction: existingDestination,
+          };
+        }
+      }
+
       const sourceAccount = await tx.account.findFirst({
         where: {
           id: sourceData.accountId as string,

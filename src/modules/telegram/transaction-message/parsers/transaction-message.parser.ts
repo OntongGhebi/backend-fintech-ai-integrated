@@ -125,6 +125,12 @@ export class BasicTransactionMessageParser implements TransactionMessageParser {
       };
     }
 
+    const transferResult = this.parseTransfer(input.text, text);
+
+    if (transferResult) {
+      return transferResult;
+    }
+
     const parsedAmount = this.extractAmount(text);
 
     if (!parsedAmount) {
@@ -169,6 +175,56 @@ export class BasicTransactionMessageParser implements TransactionMessageParser {
         ...(parsedAccount.accountHint
           ? { accountHint: parsedAccount.accountHint }
           : {}),
+        source: 'DETERMINISTIC',
+        confidence: 1,
+      },
+    };
+  }
+
+  private parseTransfer(
+    rawText: string,
+    text: string,
+  ): ParsedTransactionMessage | null {
+    if (!/^transfer\b/i.test(text)) {
+      return null;
+    }
+
+    const match = text.match(
+      /^transfer\s+(?:rp\.?\s*|idr\s*)?([\d]+(?:[.,][\d]{3})*)\s+dari\s+(.+?)\s+ke\s+(.+?)\s*$/i,
+    );
+
+    if (!match) {
+      return {
+        status: 'INVALID',
+        rawText,
+      };
+    }
+
+    const amount = this.normalizeAmount(match[1]);
+    const sourceAccountHint = match[2].trim();
+    const destinationAccountHint = match[3].trim();
+
+    if (
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      !sourceAccountHint ||
+      !destinationAccountHint
+    ) {
+      return {
+        status: 'INVALID',
+        rawText,
+      };
+    }
+
+    return {
+      status: 'PARSED',
+      rawText,
+      intent: {
+        intent: 'TRANSFER',
+        amount,
+        description: 'Transfer antar rekening',
+        sourceAccountHint,
+        destinationAccountHint,
         source: 'DETERMINISTIC',
         confidence: 1,
       },

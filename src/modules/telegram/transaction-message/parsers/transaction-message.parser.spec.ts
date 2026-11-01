@@ -270,4 +270,67 @@ describe('BasicTransactionMessageParser', () => {
       expect(result.intent?.accountHint).toBe('bca');
     });
   });
+
+  describe('transfer parsing', () => {
+    it('parses a transfer between bank accounts', async () => {
+      const result = await parser.parse(
+        createInput({ text: 'transfer 200000 dari BCA ke Mandiri' }),
+      );
+
+      expect(result.status).toBe('PARSED');
+      expect(result.intent).toMatchObject({
+        intent: 'TRANSFER',
+        amount: 200000,
+        sourceAccountHint: 'BCA',
+        destinationAccountHint: 'Mandiri',
+        source: 'DETERMINISTIC',
+        confidence: 1,
+      });
+    });
+
+    it('parses transfer amounts with thousands separators and currency prefix', async () => {
+      const result = await parser.parse(
+        createInput({
+          text: 'transfer Rp1.500.000 dari BRI ke Dompet Digital',
+        }),
+      );
+
+      expect(result.status).toBe('PARSED');
+      expect(result.intent).toMatchObject({
+        intent: 'TRANSFER',
+        amount: 1500000,
+        sourceAccountHint: 'BRI',
+        destinationAccountHint: 'Dompet Digital',
+      });
+    });
+
+    it('rejects malformed transfer messages', async () => {
+      const result = await parser.parse(
+        createInput({ text: 'transfer 200000 BCA Mandiri' }),
+      );
+
+      expect(result.status).toBe('INVALID');
+    });
+
+    it('does not change ordinary income and expense parsing', async () => {
+      const expense = await parser.parse(
+        createInput({ text: 'beli makan 25000 dari BCA' }),
+      );
+      const income = await parser.parse(
+        createInput({ text: 'di kasih jajan kakak 50000 ke mandiri' }),
+      );
+
+      expect(expense.intent).toMatchObject({
+        intent: 'CREATE_TRANSACTION',
+        transactionType: 'EXPENSE',
+        amount: 25000,
+        accountHint: 'BCA',
+      });
+      expect(income.intent).toMatchObject({
+        intent: 'CREATE_TRANSACTION',
+        transactionType: 'INCOME',
+        amount: 50000,
+      });
+    });
+  });
 });

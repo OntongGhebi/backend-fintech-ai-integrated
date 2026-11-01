@@ -241,8 +241,56 @@ export class TelegramTransactionConfirmationService {
     }
 
     try {
-      const transaction =
-        await this.confirmedTransactionService.create(processing);
+      const result = await this.confirmedTransactionService.create(processing);
+
+      if (processing.intent.intent === 'TRANSFER') {
+        const transfer = result as unknown as {
+          transferGroupId: string;
+          transactions: Array<{
+            id: string;
+            amount: number | string;
+            description?: string | null;
+          }>;
+        };
+
+        if (
+          !transfer?.transferGroupId ||
+          !Array.isArray(transfer.transactions) ||
+          transfer.transactions.length !== 2
+        ) {
+          throw new Error('Invalid Telegram transfer result');
+        }
+
+        await this.transactionConfirmationService.markCompleted(
+          processing.id,
+          transfer.transferGroupId,
+        );
+
+        return {
+          handled: true,
+          action: 'CONFIRM',
+          status: 'COMPLETED',
+          message:
+            this.transactionConfirmationMessageService.formatTransferCreated({
+              amount: Number(transfer.transactions[0].amount),
+              description: transfer.transactions[0].description,
+              sourceAccountName: processing.intent.sourceAccountName,
+              destinationAccountName: processing.intent.destinationAccountName,
+            }),
+          transactionId: transfer.transferGroupId,
+        };
+      }
+
+      const transaction = result as {
+        id: string;
+        type: string;
+        amount: unknown;
+        description?: string | null;
+      };
+
+      if (!transaction?.id) {
+        throw new Error('Invalid Telegram transaction result');
+      }
 
       await this.transactionConfirmationService.markCompleted(
         processing.id,

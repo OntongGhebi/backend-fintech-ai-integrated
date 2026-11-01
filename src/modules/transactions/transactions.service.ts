@@ -458,6 +458,7 @@ export class TransactionsService {
     userId: string,
     dto: CreateTransferDto,
     source: TransactionSource = TransactionSource.MANUAL,
+    idempotencyKey?: string,
   ) {
     if (dto.sourceAccountId === dto.destinationAccountId) {
       throw new BadRequestException(
@@ -499,7 +500,7 @@ export class TransactionsService {
       throw new BadRequestException('Destination account currency must be IDR');
     }
 
-    const transferGroupId = crypto.randomUUID();
+    const transferGroupId = idempotencyKey ?? crypto.randomUUID();
 
     const transactionDate = new Date(dto.transactionDate);
 
@@ -518,6 +519,7 @@ export class TransactionsService {
         source,
         status: 'ACTIVE',
         transferGroupId,
+        ...(idempotencyKey ? { telegramConfirmationId: idempotencyKey } : {}),
         metadata: {
           direction: 'OUT',
         },

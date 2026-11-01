@@ -222,7 +222,7 @@ describe('TransactionIntentResolutionService', () => {
 
     expect(result).toEqual({
       status: 'INVALID',
-      message: 'The selected category is not an expense category',
+      message: 'The selected category is not a expense category',
     });
   });
 
@@ -347,6 +347,72 @@ describe('TransactionIntentResolutionService', () => {
         status: 'INVALID',
         message: 'The selected account is inactive',
       });
+    });
+  });
+
+  it('resolves both transfer accounts and preserves their display names', async () => {
+    accountsRepository.findByNameAndUserId.mockImplementation(
+      async (name: string) => {
+        if (name === 'BCA') {
+          return {
+            id: 'source-id',
+            name: 'BCA Main Account',
+            currency: 'IDR',
+            isActive: true,
+          };
+        }
+        if (name === 'Mandiri') {
+          return {
+            id: 'destination-id',
+            name: 'Mandiri Account',
+            currency: 'IDR',
+            isActive: true,
+          };
+        }
+        return null;
+      },
+    );
+
+    const result = await service.resolve('user-id', {
+      intent: 'TRANSFER',
+      amount: 200000,
+      description: 'Transfer antar rekening',
+      sourceAccountHint: 'BCA',
+      destinationAccountHint: 'Mandiri',
+      source: 'DETERMINISTIC',
+      confidence: 1,
+    });
+
+    expect(result.status).toBe('RESOLVED');
+    expect(result.intent).toMatchObject({
+      intent: 'TRANSFER',
+      amount: 200000,
+      sourceAccountId: 'source-id',
+      destinationAccountId: 'destination-id',
+      sourceAccountName: 'BCA Main Account',
+      destinationAccountName: 'Mandiri Account',
+    });
+  });
+
+  it('rejects a transfer between the same resolved account', async () => {
+    accountsRepository.findByNameAndUserId.mockResolvedValue({
+      id: 'same-account-id',
+      name: 'BCA Main Account',
+      currency: 'IDR',
+      isActive: true,
+    });
+
+    const result = await service.resolve('user-id', {
+      intent: 'TRANSFER',
+      amount: 200000,
+      sourceAccountHint: 'BCA',
+      destinationAccountHint: 'BCA Main',
+      source: 'DETERMINISTIC',
+    });
+
+    expect(result).toEqual({
+      status: 'INVALID',
+      message: 'Source and destination accounts must be different',
     });
   });
 });

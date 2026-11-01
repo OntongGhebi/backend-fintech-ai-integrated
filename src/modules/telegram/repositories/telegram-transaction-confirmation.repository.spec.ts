@@ -20,7 +20,7 @@ describe('TelegramTransactionConfirmationRepository', () => {
     };
     $transaction: jest.Mock;
     transaction: {
-      update: jest.Mock;
+      findUnique: jest.Mock;
     };
   };
 
@@ -72,7 +72,7 @@ describe('TelegramTransactionConfirmationRepository', () => {
       },
       $transaction: jest.fn(),
       transaction: {
-        update: jest.fn(),
+        findUnique: jest.fn(),
       },
     };
 
@@ -344,7 +344,7 @@ describe('TelegramTransactionConfirmationRepository', () => {
     expect(result?.status).toBe('CONFIRMED');
   });
 
-  it('links the transaction and marks confirmation completed in one database transaction', async () => {
+  it('marks a linked transaction confirmation completed atomically', async () => {
     const tx = {
       telegramTransactionConfirmation: {
         findUnique: jest.fn().mockResolvedValue({
@@ -356,10 +356,9 @@ describe('TelegramTransactionConfirmationRepository', () => {
           .mockResolvedValue(record({ status: Status.COMPLETED })),
       },
       transaction: {
-        update: jest.fn().mockResolvedValue({
-          id: 'transaction-id',
-          telegramConfirmationId: 'confirmation-id',
-        }),
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'source-transaction-id' }),
       },
     };
 
@@ -371,26 +370,89 @@ describe('TelegramTransactionConfirmationRepository', () => {
     prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
       record({
         status: Status.COMPLETED,
-        transaction: { id: 'transaction-id' },
+        transaction: { id: 'source-transaction-id' },
       }),
     );
 
     const result = await repository.markCompleted(
       'confirmation-id',
-      'transaction-id',
+      'transfer-group-id',
     );
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(tx.transaction.update).toHaveBeenCalledWith({
-      where: { id: 'transaction-id' },
-      data: { telegramConfirmationId: 'confirmation-id' },
+    expect(tx.transaction.findUnique).toHaveBeenCalledWith({
+      where: { telegramConfirmationId: 'confirmation-id' },
+      select: { id: true },
     });
     expect(tx.telegramTransactionConfirmation.update).toHaveBeenCalledWith({
       where: { id: 'confirmation-id' },
       data: { status: Status.COMPLETED },
     });
     expect(result?.status).toBe('COMPLETED');
-    expect(result?.transactionId).toBe('transaction-id');
+    expect(result?.transactionId).toBe('source-transaction-id');
+  });
+
+  it('does not complete a confirmation when no linked transaction exists', async () => {
+    const tx = {
+      telegramTransactionConfirmation: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'confirmation-id',
+          status: Status.PROCESSING,
+        }),
+        update: jest.fn(),
+      },
+      transaction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+    };
+
+    prisma.$transaction.mockImplementation(
+      async (callback: (transactionClient: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+    );
+
+    await expect(
+      repository.markCompleted('confirmation-id', 'missing-transfer-group-id'),
+    ).rejects.toThrow(
+      'Cannot complete Telegram confirmation confirmation-id: no linked transaction exists.',
+    );
+
+    expect(tx.telegramTransactionConfirmation.update).not.toHaveBeenCalled();
+  });
+
+  it('does not rewrite transaction linkage when confirmation is already completed', async () => {
+    const tx = {
+      telegramTransactionConfirmation: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'confirmation-id',
+          status: Status.COMPLETED,
+        }),
+        update: jest.fn(),
+      },
+      transaction: {
+        findUnique: jest.fn(),
+      },
+    };
+
+    prisma.$transaction.mockImplementation(
+      async (callback: (transactionClient: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+    );
+    prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
+      record({
+        status: Status.COMPLETED,
+        transaction: { id: 'source-transaction-id' },
+      }),
+    );
+
+    const result = await repository.markCompleted(
+      'confirmation-id',
+      'transfer-group-id',
+    );
+
+    expect(tx.transaction.findUnique).not.toHaveBeenCalled();
+    expect(tx.telegramTransactionConfirmation.update).not.toHaveBeenCalled();
+    expect(result?.status).toBe('COMPLETED');
   });
 
   it('parses confirmation and cancellation actions', () => {

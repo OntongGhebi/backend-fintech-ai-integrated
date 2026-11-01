@@ -59,6 +59,7 @@ export class ConfirmedTransactionService {
         confirmation.userId,
         dto,
         TransactionSource.TELEGRAM,
+        confirmation.id,
       );
     }
 

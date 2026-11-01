@@ -8,6 +8,7 @@ describe('ConfirmedTransactionService', () => {
 
   let transactionsService: {
     createTelegramConfirmedTransaction: jest.Mock;
+    createTransfer: jest.Mock;
   };
 
   const transactionDate = new Date('2026-09-26T10:00:00.000Z');
@@ -64,6 +65,7 @@ describe('ConfirmedTransactionService', () => {
   beforeEach(() => {
     transactionsService = {
       createTelegramConfirmedTransaction: jest.fn(),
+      createTransfer: jest.fn(),
     };
 
     service = new ConfirmedTransactionService(transactionsService as never);
@@ -287,5 +289,48 @@ describe('ConfirmedTransactionService', () => {
     );
 
     await expect(service.create(confirmedConfirmation)).rejects.toBe(error);
+  });
+
+  it('creates a transfer with the confirmation ID as its idempotency key', async () => {
+    const transferConfirmation = {
+      ...confirmedConfirmation,
+      status: 'CONFIRMED' as const,
+      intent: {
+        ...confirmedConfirmation.intent,
+        intent: 'TRANSFER' as const,
+        transactionType: undefined,
+        accountId: undefined,
+        categoryId: undefined,
+        sourceAccountId: 'source-account-id',
+        destinationAccountId: 'destination-account-id',
+        description: 'Transfer tabungan',
+      },
+    };
+    const transferResult = {
+      transferGroupId: 'confirmation-id',
+      transactions: [
+        { id: 'debit-id', amount: 200000 },
+        { id: 'credit-id', amount: 200000 },
+      ],
+    };
+    transactionsService.createTransfer.mockResolvedValue(transferResult);
+
+    const result = await service.create(transferConfirmation);
+
+    expect(result).toEqual(transferResult);
+    expect(transactionsService.createTransfer).toHaveBeenCalledWith(
+      'user-id',
+      expect.objectContaining({
+        sourceAccountId: 'source-account-id',
+        destinationAccountId: 'destination-account-id',
+        amount: 25000,
+        description: 'Transfer tabungan',
+      }),
+      'TELEGRAM',
+      'confirmation-id',
+    );
+    expect(
+      transactionsService.createTelegramConfirmedTransaction,
+    ).not.toHaveBeenCalled();
   });
 });

@@ -210,6 +210,8 @@ export class TransactionIntentResolutionService {
       intent: this.baseResolved(input, {
         sourceAccountId: source.id,
         destinationAccountId: destination.id,
+        sourceAccountName: source.name,
+        destinationAccountName: destination.name,
       }),
     };
   }
