@@ -63,6 +63,13 @@ enum BudgetStatus {
   COMPLETED
 }
 
+enum BudgetAllocationSource {
+  MANUAL
+  LEGACY_MIGRATION
+  RECOMMENDATION
+  ACCEPTED_RECOMMENDATION
+}
+
 enum NotificationChannel {
   IN_APP
   EMAIL
@@ -428,12 +435,32 @@ model Budget {
   // Relations
   user     User          @relation(fields: [userId], references: [id], onDelete: Restrict)
   category Category?     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  alerts   BudgetAlert[]
+  alerts      BudgetAlert[]
+  allocations BudgetAllocation[]
 
   @@index([userId])
   @@index([userId, status])
   @@index([userId, startDate, endDate])
   @@map("budgets")
+}
+
+model BudgetAllocation {
+  id         String @id @default(uuid()) @db.Uuid
+  budgetId   String @db.Uuid
+  periodStart DateTime @db.Date
+  amount     Decimal @db.Decimal(19, 4)
+  source     BudgetAllocationSource @default(MANUAL)
+  previousAmount Decimal? @db.Decimal(19, 4)
+  recommendationId String? @db.Uuid
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetId, periodStart], map: "budget_allocations_budget_period_unique")
+  @@index([budgetId, periodStart(sort: Desc)], map: "budget_allocations_budget_period_idx")
+  @@map("budget_allocations")
 }
 
 // ============================================================
