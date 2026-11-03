@@ -5,10 +5,54 @@ import type {
   DashboardQueryOptions,
 } from '../types/dashboard.types';
 import { Prisma } from '../../../../generated/prisma/client';
+import { calculateAccountBalance } from '../../accounts/account-balance.util';
 
 @Injectable()
 export class DashboardRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Calculates the current balance across active, non-deleted IDR accounts.
+   * Uses the same ledger calculation as the account balance endpoint so
+   * transfer IN/OUT, VOIDED and soft-deleted transactions stay consistent.
+   */
+  async getTotalCurrentBalance(userId: string): Promise<string> {
+    const accounts = await this.prisma.account.findMany({
+      where: { userId, isActive: true, deletedAt: null, currency: 'IDR' },
+      select: { id: true, openingBalance: true },
+    });
+
+    if (accounts.length === 0) return '0.0000';
+
+    const transactions = await this.prisma.transaction.findMany({
+      where: {
+        userId,
+        accountId: { in: accounts.map((account) => account.id) },
+        status: 'ACTIVE',
+        deletedAt: null,
+        currency: 'IDR',
+      },
+      select: { accountId: true, type: true, amount: true, metadata: true },
+    });
+
+    const transactionsByAccount = new Map<string, typeof transactions>();
+    for (const transaction of transactions) {
+      if (!transaction.accountId) continue;
+      const current = transactionsByAccount.get(transaction.accountId) ?? [];
+      current.push(transaction);
+      transactionsByAccount.set(transaction.accountId, current);
+    }
+
+    const total = accounts.reduce((sum, account) => {
+      const balance = calculateAccountBalance(
+        account.openingBalance,
+        transactionsByAccount.get(account.id) ?? [],
+      );
+      return sum.plus(balance);
+    }, new Prisma.Decimal(0));
+
+    return total.toFixed(4);
+  }
 
   async getFinancialSummary(
     userId: string,

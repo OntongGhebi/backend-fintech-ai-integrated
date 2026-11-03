@@ -711,6 +711,7 @@ export class DashboardService {
 
     const [
       incomeExpenseBase,
+      totalCurrentBalance,
       categoryAnalytics,
       accountAnalytics,
       budgetPerformance,
@@ -721,6 +722,8 @@ export class DashboardService {
         userId,
         aggregationOptions,
       ),
+
+      this.dashboardRepository.getTotalCurrentBalance(userId),
 
       this.getCategoryAnalytics(
         userId,
@@ -755,6 +758,7 @@ export class DashboardService {
 
     return {
       currency: DASHBOARD_DEFAULT_CURRENCY,
+      totalCurrentBalance,
       summary,
       income,
       expense,

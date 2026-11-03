@@ -53,6 +53,38 @@ describe('DashboardRepository', () => {
     repository = new DashboardRepository(prisma as never);
   });
 
+
+  describe('getTotalCurrentBalance', () => {
+    it('should sum current balances of active non-deleted IDR accounts using ledger transfer directions', async () => {
+      prisma.account.findMany.mockResolvedValue([
+        { id: 'account-1', openingBalance: new Prisma.Decimal('1000') },
+        { id: 'account-2', openingBalance: new Prisma.Decimal('500') },
+      ]);
+      prisma.transaction.findMany.mockResolvedValue([
+        { accountId: 'account-1', type: 'INCOME', amount: new Prisma.Decimal('200'), metadata: null },
+        { accountId: 'account-1', type: 'TRANSFER', amount: new Prisma.Decimal('300'), metadata: { direction: 'OUT' } },
+        { accountId: 'account-2', type: 'TRANSFER', amount: new Prisma.Decimal('300'), metadata: { direction: 'IN' } },
+        { accountId: 'account-2', type: 'EXPENSE', amount: new Prisma.Decimal('800'), metadata: null },
+      ] as never);
+
+      await expect(repository.getTotalCurrentBalance(userId)).resolves.toBe('900.0000');
+      expect(prisma.account.findMany).toHaveBeenCalledWith({
+        where: { userId, isActive: true, deletedAt: null, currency: 'IDR' },
+        select: { id: true, openingBalance: true },
+      });
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: { userId, accountId: { in: ['account-1', 'account-2'] }, status: 'ACTIVE', deletedAt: null, currency: 'IDR' },
+        select: { accountId: true, type: true, amount: true, metadata: true },
+      });
+    });
+
+    it('should return zero without querying transactions when there are no active accounts', async () => {
+      prisma.account.findMany.mockResolvedValue([]);
+      await expect(repository.getTotalCurrentBalance(userId)).resolves.toBe('0.0000');
+      expect(prisma.transaction.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getFinancialSummary', () => {
     it('should aggregate active IDR transactions for the user', async () => {
       const groupedTransactions = [

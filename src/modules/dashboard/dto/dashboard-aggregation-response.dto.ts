@@ -14,6 +14,13 @@ export class DashboardAggregationResponseDto {
   @ApiProperty({ example: 'IDR' })
   currency!: string;
 
+  @ApiProperty({
+    example: '8000000.0000',
+    description:
+      'Current total balance across all active IDR accounts; independent of the analytics date range.',
+  })
+  totalCurrentBalance!: string;
+
   @ApiProperty({ type: DashboardSummaryResponseDto })
   summary!: DashboardSummaryResponseDto;
 

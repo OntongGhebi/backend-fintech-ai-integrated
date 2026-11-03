@@ -171,6 +171,7 @@ export interface DashboardMonthlyFinancialSummary {
 
 export interface DashboardAggregation {
   currency: string;
+  totalCurrentBalance: string;
   summary: DashboardSummary;
   income: DashboardIncomeAnalytics;
   expense: DashboardExpenseAnalytics;

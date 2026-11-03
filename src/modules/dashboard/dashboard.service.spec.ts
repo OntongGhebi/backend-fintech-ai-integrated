@@ -19,6 +19,7 @@ describe('DashboardService', () => {
     getCashFlow: jest.Mock;
     getMonthlyFinancialSummary: jest.Mock;
     getIncomeExpenseAnalyticsBase: jest.Mock;
+    getTotalCurrentBalance: jest.Mock;
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -35,7 +36,10 @@ describe('DashboardService', () => {
       getCashFlow: jest.fn(),
       getMonthlyFinancialSummary: jest.fn(),
       getIncomeExpenseAnalyticsBase: jest.fn(),
+      getTotalCurrentBalance: jest.fn(),
     };
+
+    dashboardRepository.getTotalCurrentBalance.mockResolvedValue('0.0000');
 
     service = new DashboardService(
       dashboardRepository as unknown as DashboardRepository,
@@ -1758,6 +1762,8 @@ describe('DashboardService', () => {
         endDate: new Date('2026-09-30T23:59:59.999Z'),
       });
 
+      expect(result.totalCurrentBalance).toBe('0.0000');
+
       expect(result.summary).toEqual({
         currency: 'IDR',
         totalIncome: '5000000',
@@ -2048,6 +2054,5 @@ describe('DashboardService', () => {
 
       expect(result.accountAnalytics).toBeDefined();
     });
-
   });
 });
