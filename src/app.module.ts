@@ -39,6 +39,7 @@ import { PlansModule } from './modules/plans/plans.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PaymentCheckoutModule } from './modules/payments/payment-checkout.module';
+import { FinancialAnalysisModule } from './modules/financial-analysis/financial-analysis.module';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { PaymentCheckoutModule } from './modules/payments/payment-checkout.modul
     DashboardModule,
     ReportsModule,
     NotificationsModule,
+    FinancialAnalysisModule,
     PlansModule,
     SubscriptionsModule,
     PaymentsModule,
