@@ -1,4 +1,5 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -11,6 +12,7 @@ import { CurrentUser } from '../auth/decorators/current-user-decorator';
 import { GetDashboardSummaryQueryDto } from '../dashboard/dto/get-dashboard-summary-query.dto';
 
 import { FinancialAnalysisService } from './financial-analysis.service';
+import { FinancialInsightsService } from './financial-insights.service';
 
 @Controller('financial-analysis')
 @ApiTags('Financial Analysis')
@@ -19,6 +21,7 @@ import { FinancialAnalysisService } from './financial-analysis.service';
 export class FinancialAnalysisController {
   constructor(
     private readonly financialAnalysisService: FinancialAnalysisService,
+    private readonly financialInsightsService: FinancialInsightsService,
   ) {}
 
   @Get('overview')
@@ -35,6 +38,26 @@ export class FinancialAnalysisController {
     @Query() query: GetDashboardSummaryQueryDto,
   ) {
     return this.financialAnalysisService.getOverview(userId, {
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
+    });
+  }
+
+  @Post('insights/generate')
+  @ApiOperation({
+    summary: 'Generate AI financial insights',
+    description:
+      'Generates qualitative financial insights from deterministic backend analysis. Financial evidence is attached from backend-calculated metrics.',
+  })
+  @ApiOkResponse({
+    description:
+      'AI financial insights generated or an availability status returned.',
+  })
+  async generateInsights(
+    @CurrentUser('id') userId: string,
+    @Query() query: GetDashboardSummaryQueryDto,
+  ) {
+    return this.financialInsightsService.generate(userId, {
       startDate: query.startDate ? new Date(query.startDate) : undefined,
       endDate: query.endDate ? new Date(query.endDate) : undefined,
     });

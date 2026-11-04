@@ -23,10 +23,17 @@ interface OpenAICompatibleMessage {
   content?: string | null;
 }
 
+interface OpenAICompatibleContentPart {
+  type?: string;
+  text?: string;
+}
+
 interface OpenAICompatibleResponse {
   choices?: Array<{
+    finish_reason?: string | null;
     message?: {
-      content?: string | null;
+      content?: string | OpenAICompatibleContentPart[] | null;
+      refusal?: string | null;
     };
   }>;
   usage?: {
@@ -89,12 +96,13 @@ export class OpenAICompatibleAIProvider implements AIProvider {
           messages: request.messages as OpenAICompatibleMessage[],
           temperature: request.temperature ?? 0,
           max_tokens: request.maxTokens,
-          response_format:
-            request.responseFormat === 'json'
-              ? {
+          ...(request.responseFormat === 'json'
+            ? {
+                response_format: {
                   type: 'json_object',
-                }
-              : undefined,
+                },
+              }
+            : {}),
         }),
         signal: controller.signal,
       });
@@ -116,12 +124,25 @@ export class OpenAICompatibleAIProvider implements AIProvider {
       }
 
       const data = (await response.json()) as OpenAICompatibleResponse;
-      const rawContent = data.choices?.[0]?.message?.content;
+      const choice = data.choices?.[0];
 
-      if (typeof rawContent !== 'string') {
-        throw new ServiceUnavailableException(
-          'AI provider returned an empty response',
+      const rawContent = this.extractContent(choice?.message?.content);
+
+      if (!rawContent.trim()) {
+        this.logger.warn(
+          [
+            'AI provider returned an empty completion.',
+            `model=${data.model ?? model},`,
+            `finish_reason=${choice?.finish_reason ?? 'unknown'},`,
+            `has_refusal=${Boolean(choice?.message?.refusal)},`,
+            `output_tokens=${data.usage?.completion_tokens ?? 'unknown'}`,
+          ].join(' '),
         );
+
+        // Upstream berhasil merespons HTTP, tetapi tidak menghasilkan
+        // completion yang dapat digunakan. Perlakukan sebagai upstream
+        // failure agar AIRetryService dapat mencoba kembali.
+        throw new AIProviderHttpException(502);
       }
 
       let content: string;
@@ -139,7 +160,7 @@ export class OpenAICompatibleAIProvider implements AIProvider {
         }
 
         throw new ServiceUnavailableException(
-          'AI provider returned an empty response',
+          'AI provider returned an invalid response',
         );
       }
 
@@ -184,6 +205,27 @@ export class OpenAICompatibleAIProvider implements AIProvider {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private extractContent(
+    content: string | OpenAICompatibleContentPart[] | null | undefined,
+  ): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    if (!Array.isArray(content)) {
+      return '';
+    }
+
+    return content
+      .filter(
+        (part) =>
+          part && typeof part === 'object' && typeof part.text === 'string',
+      )
+      .map((part) => part.text ?? '')
+      .join('\n')
+      .trim();
   }
 
   private getModel(): string {

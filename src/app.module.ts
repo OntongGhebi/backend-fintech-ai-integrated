@@ -7,20 +7,24 @@ import {
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
-// import { DatabaseModule } from './database/database.module';
+
 import { validateEnvironment } from './config/env.validation';
 import appConfig from './config/app.config';
 import aiConfig from './config/ai.config';
 import jwtConfig from './config/jwt.config';
 import redisConfig from './config/redis.config';
 import databaseConfig from './config/database.config';
+import bullmqConfig from './config/bullmq.config';
+import { telegramConfig } from './config/telegram.config';
+
 import { RequestMiddleware } from './common/middlewares/request-id.middleware';
 import { RequestLoggerMiddleware } from './common/middlewares/request-logger.middleware';
+
 import { RedisModule } from '../docker/redis/redis.module';
-import bullmqConfig from './config/bullmq.config';
 import { QueueModule } from './queue/queue.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
+
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { AccountsModule } from './modules/accounts/accounts.module';
@@ -29,7 +33,6 @@ import { CategoriesModule } from './modules/categories/categories.module';
 import { BudgetsModule } from './modules/budgets/budgets.module';
 import { BudgetAlertsModule } from './modules/budget-alerts/budget-alerts.module';
 import { RecurringTransactionsModule } from './modules/recurring-transactions/recurring-transactions.module';
-import { telegramConfig } from './config/telegram.config';
 import { telegramModule } from './modules/telegram/telegram.module';
 import { AIModule } from './modules/ai/ai.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
@@ -57,6 +60,7 @@ import { FinancialAnalysisModule } from './modules/financial-analysis/financial-
         telegramConfig,
       ],
     }),
+
     ThrottlerModule.forRoot([
       {
         name: 'default',
@@ -69,6 +73,7 @@ import { FinancialAnalysisModule } from './modules/financial-analysis/financial-
     RedisModule,
     QueueModule,
     HealthModule,
+
     AuthModule,
     UsersModule,
     AccountsModule,
@@ -78,11 +83,14 @@ import { FinancialAnalysisModule } from './modules/financial-analysis/financial-
     BudgetAlertsModule,
     RecurringTransactionsModule,
     telegramModule,
+
     AIModule,
     DashboardModule,
     ReportsModule,
     NotificationsModule,
+
     FinancialAnalysisModule,
+
     PlansModule,
     SubscriptionsModule,
     PaymentsModule,

@@ -1,5 +1,6 @@
 export const AI_USAGE_FEATURES = {
   CHAT: 'CHAT',
+  FINANCIAL_INSIGHTS: 'FINANCIAL_INSIGHTS',
 } as const;
 
 export type AIUsageFeature =

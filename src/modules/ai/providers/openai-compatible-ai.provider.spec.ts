@@ -1,6 +1,7 @@
 import { ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { AIProviderHttpException } from '../errors/ai-provider-http.exception';
 import { OpenAICompatibleAIProvider } from './openai-compatible-ai.provider';
 import { AIPrivacyService } from '../services/ai-privacy.service';
 
@@ -412,6 +413,96 @@ describe('OpenAICompatibleAIProvider', () => {
 
       await expect(provider.complete(request)).rejects.toThrow(
         'AI provider response exceeds the maximum allowed length',
+      );
+
+      fetchMock.mockRestore();
+    });
+
+    it('should extract text from array-based message content', async () => {
+      configServiceMock.get.mockImplementation(
+        (key: string, fallback: string) => {
+          if (key === 'ai.apiKey') return 'test-api-key';
+          if (key === 'ai.baseUrl') return 'https://example.com/v1';
+          if (key === 'ai.model') return 'test-model';
+          if (key === 'ai.timeoutMs') return 30_000;
+
+          return fallback;
+        },
+      );
+
+      const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            model: 'test-model',
+            choices: [
+              {
+                message: {
+                  content: [
+                    {
+                      type: 'text',
+                      text: '{"insights":[]}',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        ),
+      );
+
+      await expect(provider.complete(request)).resolves.toEqual(
+        expect.objectContaining({
+          content: '{"insights":[]}',
+          provider: 'openai-compatible',
+          model: 'test-model',
+        }),
+      );
+
+      fetchMock.mockRestore();
+    });
+
+    it('should classify empty completion as retryable upstream failure', async () => {
+      configServiceMock.get.mockImplementation(
+        (key: string, fallback: string) => {
+          if (key === 'ai.apiKey') return 'test-api-key';
+          if (key === 'ai.baseUrl') return 'https://example.com/v1';
+          if (key === 'ai.model') return 'test-model';
+          if (key === 'ai.timeoutMs') return 30_000;
+
+          return fallback;
+        },
+      );
+
+      const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            model: 'test-model',
+            choices: [
+              {
+                finish_reason: 'length',
+                message: {
+                  content: null,
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        ),
+      );
+
+      await expect(provider.complete(request)).rejects.toBeInstanceOf(
+        AIProviderHttpException,
       );
 
       fetchMock.mockRestore();
