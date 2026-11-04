@@ -6,6 +6,7 @@ import type {
 } from '../types/dashboard.types';
 import { Prisma } from '../../../../generated/prisma/client';
 import { calculateAccountBalance } from '../../accounts/account-balance.util';
+import { getBudgetMonthRanges } from '../../budgets/utils/budget-month.util';
 
 @Injectable()
 export class DashboardRepository {
@@ -276,50 +277,64 @@ export class DashboardRepository {
     userId: string,
     options: DashboardQueryOptions = {},
   ) {
+    // A dashboard/report range can span multiple months. Sum the monthly
+    // allocations touched by the range instead of falling back to Budget.amount.
+    const preference = await this.prisma.userPreference.findUnique({
+      where: { userId },
+      select: { timezone: true },
+    });
+    const months = getBudgetMonthRanges(
+      options.startDate,
+      options.endDate,
+      preference?.timezone ?? 'Asia/Jakarta',
+    );
+    const firstMonth = months[0];
+    const lastMonth = months[months.length - 1];
+    const periodStarts = months.map((month) => month.periodStart);
+
     const budgetWhere = {
       userId,
       deletedAt: null,
-      ...(options.startDate || options.endDate
-        ? {
-            OR: [
-              ...(options.startDate
-                ? [
-                    {
-                      startDate: {
-                        gte: options.startDate,
-                      },
-                    },
-                  ]
-                : []),
-              ...(options.endDate
-                ? [
-                    {
-                      endDate: {
-                        lte: options.endDate,
-                      },
-                    },
-                  ]
-                : []),
-            ],
-          }
-        : {}),
+      startDate: { lte: lastMonth.periodEndDate },
+      OR: [{ endDate: null }, { endDate: { gte: firstMonth.periodStart } }],
     };
 
-    const budgets = await this.prisma.budget.findMany({
+    const rawBudgets = await this.prisma.budget.findMany({
       where: budgetWhere,
       include: {
         category: true,
+        allocations: {
+          where: { periodStart: { in: periodStarts } },
+          orderBy: { periodStart: 'asc' },
+        },
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // A budget without an allocation for this month is intentionally omitted.
+    // Budget.amount is a legacy compatibility snapshot and is never consulted.
+    const budgets = rawBudgets.flatMap((budget) => {
+      if (budget.allocations.length === 0) return [];
+
+      const allocationTotal = budget.allocations.reduce(
+        (total, allocation) => total.plus(allocation.amount),
+        new Prisma.Decimal(0),
+      );
+
+      return [
+        {
+          id: budget.id,
+          name: budget.name,
+          categoryId: budget.categoryId,
+          category: budget.category,
+          amount: allocationTotal,
+          periodStart: firstMonth.periodStart,
+        },
+      ];
     });
 
     if (budgets.length === 0) {
-      return {
-        budgets: [],
-        transactions: [],
-      };
+      return { budgets: [], transactions: [] };
     }
 
     const categoryIds = budgets
@@ -327,54 +342,42 @@ export class DashboardRepository {
       .filter((categoryId): categoryId is string => categoryId !== null);
 
     if (categoryIds.length === 0) {
-      return {
-        budgets,
-        transactions: [],
-      };
+      return { budgets, transactions: [] };
     }
 
-    const transactionWhere = {
-      userId,
-      deletedAt: null,
-      status: 'ACTIVE' as const,
-      currency: 'IDR',
-      type: 'EXPENSE' as const,
-      categoryId: {
-        in: categoryIds,
-      },
-      ...(options.startDate || options.endDate
-        ? {
-            transactionDate: {
-              ...(options.startDate
-                ? {
-                    gte: options.startDate,
-                  }
-                : {}),
-              ...(options.endDate
-                ? {
-                    lte: options.endDate,
-                  }
-                : {}),
-            },
-          }
-        : {}),
-    };
+    const transactionStart =
+      options.startDate && options.startDate > firstMonth.start
+        ? options.startDate
+        : firstMonth.start;
+    const finalMonthEnd = new Date(lastMonth.end.getTime() - 1);
+    const transactionEnd =
+      options.endDate && options.endDate < finalMonthEnd
+        ? options.endDate
+        : finalMonthEnd;
+
+    if (transactionStart > transactionEnd) {
+      return { budgets, transactions: [] };
+    }
 
     const transactions = await this.prisma.transaction.groupBy({
       by: ['categoryId'],
-      where: transactionWhere,
-      _sum: {
-        amount: true,
+      where: {
+        userId,
+        deletedAt: null,
+        status: 'ACTIVE',
+        currency: 'IDR',
+        type: 'EXPENSE',
+        categoryId: { in: categoryIds },
+        transactionDate: {
+          gte: transactionStart,
+          lte: transactionEnd,
+        },
       },
-      _count: {
-        _all: true,
-      },
+      _sum: { amount: true },
+      _count: { _all: true },
     });
 
-    return {
-      budgets,
-      transactions,
-    };
+    return { budgets, transactions };
   }
 
   async getRecurringPerformance(

@@ -1,6 +1,10 @@
 import { expect } from '@jest/globals';
 import { DashboardRepository } from './dashboard.repository';
 import { Prisma } from '../../../../generated/prisma/client';
+import {
+  getBudgetMonthRange,
+  getBudgetMonthRanges,
+} from '../../budgets/utils/budget-month.util';
 
 describe('DashboardRepository', () => {
   let repository: DashboardRepository;
@@ -21,6 +25,7 @@ describe('DashboardRepository', () => {
     budget: {
       findMany: jest.Mock;
     };
+    userPreference: { findUnique: jest.Mock };
     recurringTransaction: {
       findMany: jest.Mock;
     };
@@ -45,6 +50,9 @@ describe('DashboardRepository', () => {
       budget: {
         findMany: jest.fn(),
       },
+      userPreference: {
+        findUnique: jest.fn().mockResolvedValue({ timezone: 'Asia/Jakarta' }),
+      },
       recurringTransaction: {
         findMany: jest.fn(),
       },
@@ -53,7 +61,6 @@ describe('DashboardRepository', () => {
     repository = new DashboardRepository(prisma as never);
   });
 
-
   describe('getTotalCurrentBalance', () => {
     it('should sum current balances of active non-deleted IDR accounts using ledger transfer directions', async () => {
       prisma.account.findMany.mockResolvedValue([
@@ -61,26 +68,56 @@ describe('DashboardRepository', () => {
         { id: 'account-2', openingBalance: new Prisma.Decimal('500') },
       ]);
       prisma.transaction.findMany.mockResolvedValue([
-        { accountId: 'account-1', type: 'INCOME', amount: new Prisma.Decimal('200'), metadata: null },
-        { accountId: 'account-1', type: 'TRANSFER', amount: new Prisma.Decimal('300'), metadata: { direction: 'OUT' } },
-        { accountId: 'account-2', type: 'TRANSFER', amount: new Prisma.Decimal('300'), metadata: { direction: 'IN' } },
-        { accountId: 'account-2', type: 'EXPENSE', amount: new Prisma.Decimal('800'), metadata: null },
+        {
+          accountId: 'account-1',
+          type: 'INCOME',
+          amount: new Prisma.Decimal('200'),
+          metadata: null,
+        },
+        {
+          accountId: 'account-1',
+          type: 'TRANSFER',
+          amount: new Prisma.Decimal('300'),
+          metadata: { direction: 'OUT' },
+        },
+        {
+          accountId: 'account-2',
+          type: 'TRANSFER',
+          amount: new Prisma.Decimal('300'),
+          metadata: { direction: 'IN' },
+        },
+        {
+          accountId: 'account-2',
+          type: 'EXPENSE',
+          amount: new Prisma.Decimal('800'),
+          metadata: null,
+        },
       ] as never);
 
-      await expect(repository.getTotalCurrentBalance(userId)).resolves.toBe('900.0000');
+      await expect(repository.getTotalCurrentBalance(userId)).resolves.toBe(
+        '900.0000',
+      );
       expect(prisma.account.findMany).toHaveBeenCalledWith({
         where: { userId, isActive: true, deletedAt: null, currency: 'IDR' },
         select: { id: true, openingBalance: true },
       });
       expect(prisma.transaction.findMany).toHaveBeenCalledWith({
-        where: { userId, accountId: { in: ['account-1', 'account-2'] }, status: 'ACTIVE', deletedAt: null, currency: 'IDR' },
+        where: {
+          userId,
+          accountId: { in: ['account-1', 'account-2'] },
+          status: 'ACTIVE',
+          deletedAt: null,
+          currency: 'IDR',
+        },
         select: { accountId: true, type: true, amount: true, metadata: true },
       });
     });
 
     it('should return zero without querying transactions when there are no active accounts', async () => {
       prisma.account.findMany.mockResolvedValue([]);
-      await expect(repository.getTotalCurrentBalance(userId)).resolves.toBe('0.0000');
+      await expect(repository.getTotalCurrentBalance(userId)).resolves.toBe(
+        '0.0000',
+      );
       expect(prisma.transaction.findMany).not.toHaveBeenCalled();
     });
   });
@@ -1030,96 +1067,120 @@ describe('DashboardRepository', () => {
   });
 
   describe('getBudgetPerformance', () => {
-    it('should load budgets and aggregate actual expenses', async () => {
+    it('should load the selected monthly allocation and aggregate expenses in that month', async () => {
       const categoryId = '11111111-1111-4111-8111-111111111111';
-
       const budgetId = '22222222-2222-4222-8222-222222222222';
+      const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
 
       prisma.budget.findMany.mockResolvedValue([
         {
           id: budgetId,
           name: 'Food Budget',
           categoryId,
-          amount: '3000000',
-          category: {
-            id: categoryId,
-            name: 'Food',
-          },
+          amount: '9999999', // Legacy snapshot must not be used.
+          allocations: [{ periodStart: month.periodStart, amount: '3000000' }],
+          category: { id: categoryId, name: 'Food' },
         },
       ]);
-
       prisma.transaction.groupBy.mockResolvedValue([
         {
           categoryId,
-          _sum: {
-            amount: '2250000',
-          },
-          _count: {
-            _all: 12,
-          },
+          _sum: { amount: '2250000' },
+          _count: { _all: 12 },
         },
       ]);
 
       const result = await repository.getBudgetPerformance(userId);
 
-      expect(prisma.budget.findMany).toHaveBeenCalledWith({
-        where: {
-          userId,
-          deletedAt: null,
+      expect(prisma.budget.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ userId, deletedAt: null }),
+          include: {
+            category: true,
+            allocations: {
+              where: { periodStart: { in: [month.periodStart] } },
+              orderBy: { periodStart: 'asc' },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+      );
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          by: ['categoryId'],
+          where: expect.objectContaining({
+            userId,
+            status: 'ACTIVE',
+            currency: 'IDR',
+            type: 'EXPENSE',
+            categoryId: { in: [categoryId] },
+            transactionDate: {
+              gte: month.start,
+              lte: new Date(month.end.getTime() - 1),
+            },
+          }),
+        }),
+      );
+      expect(result.budgets).toEqual([
+        expect.objectContaining({
+          id: budgetId,
+          amount: '3000000',
+          periodStart: month.periodStart,
+        }),
+      ]);
+      expect(result.transactions).toHaveLength(1);
+    });
+
+    it('should sum monthly allocations across a multi-month report range', async () => {
+      const categoryId = '11111111-1111-4111-8111-111111111111';
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+      const endDate = new Date('2026-11-30T23:59:59.999Z');
+      const months = getBudgetMonthRanges(startDate, endDate, 'Asia/Jakarta');
+
+      prisma.budget.findMany.mockResolvedValue([
+        {
+          id: 'multi-month-budget',
+          name: 'Quarterly food',
+          categoryId,
+          amount: '9999999',
+          allocations: [
+            { periodStart: months[0].periodStart, amount: '1000000' },
+            { periodStart: months[1].periodStart, amount: '1200000' },
+            { periodStart: months[2].periodStart, amount: '1400000' },
+          ],
+          category: { id: categoryId, name: 'Food' },
         },
-        include: {
-          category: true,
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
+      ]);
+      prisma.transaction.groupBy.mockResolvedValue([]);
+
+      const result = await repository.getBudgetPerformance(userId, {
+        startDate,
+        endDate,
       });
 
-      expect(prisma.transaction.groupBy).toHaveBeenCalledWith({
-        by: ['categoryId'],
-        where: {
-          userId,
-          deletedAt: null,
-          status: 'ACTIVE',
-          currency: 'IDR',
-          type: 'EXPENSE',
-          categoryId: {
-            in: [categoryId],
-          },
-        },
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
-      });
-
-      expect(result).toEqual({
-        budgets: [
-          {
-            id: budgetId,
-            name: 'Food Budget',
-            categoryId,
-            amount: '3000000',
-            category: {
-              id: categoryId,
-              name: 'Food',
+      expect(prisma.budget.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            allocations: {
+              where: {
+                periodStart: { in: months.map((month) => month.periodStart) },
+              },
+              orderBy: { periodStart: 'asc' },
             },
-          },
-        ],
-        transactions: [
-          {
-            categoryId,
-            _sum: {
-              amount: '2250000',
+          }),
+        }),
+      );
+      expect(result.budgets[0].amount.toString()).toBe('3600000');
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            transactionDate: {
+              gte: startDate,
+              lte: new Date(months[2].end.getTime() - 1),
             },
-            _count: {
-              _all: 12,
-            },
-          },
-        ],
-      });
+          }),
+        }),
+      );
     });
 
     it('should return empty data without querying transactions when there are no budgets', async () => {
@@ -1135,13 +1196,40 @@ describe('DashboardRepository', () => {
       });
     });
 
+    it('should omit budgets that do not have an allocation for the selected month', async () => {
+      prisma.budget.findMany.mockResolvedValue([
+        {
+          id: 'budget-without-allocation',
+          name: 'Legacy Budget',
+          categoryId: '11111111-1111-4111-8111-111111111111',
+          amount: '5000000',
+          allocations: [],
+          category: {
+            id: '11111111-1111-4111-8111-111111111111',
+            name: 'Food',
+          },
+        },
+      ]);
+
+      const result = await repository.getBudgetPerformance(userId);
+
+      expect(result).toEqual({ budgets: [], transactions: [] });
+      expect(prisma.transaction.groupBy).not.toHaveBeenCalled();
+    });
+
     it('should apply date range to transaction analytics', async () => {
       prisma.budget.findMany.mockResolvedValue([
         {
           id: '22222222-2222-4222-8222-222222222222',
           name: 'Food Budget',
           categoryId: '11111111-1111-4111-8111-111111111111',
-          amount: '3000000',
+          amount: '9999999',
+          allocations: [
+            {
+              periodStart: new Date('2026-09-01T00:00:00.000Z'),
+              amount: '3000000',
+            },
+          ],
           category: {
             id: '11111111-1111-4111-8111-111111111111',
             name: 'Food',
@@ -1165,7 +1253,7 @@ describe('DashboardRepository', () => {
           where: expect.objectContaining({
             transactionDate: {
               gte: startDate,
-              lte: endDate,
+              lte: new Date('2026-09-30T16:59:59.999Z'),
             },
           }),
         }),

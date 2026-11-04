@@ -2,8 +2,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../../../../generated/prisma/client';
 import { PrismaService } from '../../../database/prisma/prisma.service';
-
-type BudgetPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY' | 'CUSTOM';
+import {
+  getBudgetMonthRange,
+  getZonedDateBoundary,
+  getZonedNextDateBoundary,
+} from '../../budgets/utils/budget-month.util';
 
 interface BudgetRange {
   start: Date;
@@ -15,7 +18,8 @@ interface BudgetWithRange {
     id: string;
     name: string;
     amount: Prisma.Decimal | number | string;
-    period: BudgetPeriod;
+    period: 'MONTHLY';
+    periodStart: Date;
     startDate: Date;
     endDate: Date | null;
     categoryId: string | null;
@@ -49,7 +53,7 @@ export class AIFinancialContextService {
     };
 
     const now = new Date();
-    const monthRange = this.getMonthRange(now, options.timezone);
+    const monthRange = getBudgetMonthRange(now, options.timezone);
 
     const transactionFilter = {
       userId,
@@ -138,28 +142,48 @@ export class AIFinancialContextService {
           userId,
           deletedAt: null,
           status: 'ACTIVE',
-          startDate: {
-            lt: monthRange.end,
-          },
-          OR: [{ endDate: null }, { endDate: { gte: monthRange.start } }],
+          startDate: { lte: monthRange.periodEndDate },
+          OR: [{ endDate: null }, { endDate: { gte: monthRange.periodStart } }],
         },
         select: {
           id: true,
           name: true,
-          amount: true,
-          period: true,
           startDate: true,
           endDate: true,
           categoryId: true,
+          allocations: {
+            where: { periodStart: monthRange.periodStart },
+            take: 1,
+            select: { amount: true, periodStart: true },
+          },
         },
       }),
     ]);
 
     const budgetsWithRanges: BudgetWithRange[] = budgets
-      .map((budget) => ({
-        budget,
-        range: this.getBudgetRange(budget, now, options.timezone),
-      }))
+      .flatMap((budget) => {
+        const allocation = budget.allocations[0];
+        if (!allocation) return [];
+
+        const budgetForContext = {
+          ...budget,
+          amount: allocation.amount,
+          period: 'MONTHLY' as const,
+          periodStart: allocation.periodStart,
+        };
+
+        return [
+          {
+            budget: budgetForContext,
+            range: this.getBudgetRange(
+              budget,
+              monthRange,
+              now,
+              options.timezone,
+            ),
+          },
+        ];
+      })
       .filter(({ range }) => range.start < range.end);
 
     /*
@@ -244,6 +268,7 @@ export class AIFinancialContextService {
         remaining: this.formatMinorUnits(remainingMinorUnits),
         usagePercentage,
         period: budget.period,
+        periodStart: budget.periodStart,
         startDate: range.start,
         endDate: range.end,
       };
@@ -308,202 +333,25 @@ export class AIFinancialContextService {
     };
   }
 
-  private getMonthRange(now: Date, timezone: string): BudgetRange {
-    const parts = this.getZonedDateParts(now, timezone);
-
-    const start = this.zonedDateToUtc(
-      parts.year,
-      parts.month,
-      1,
-      0,
-      0,
-      0,
-      timezone,
-    );
-
-    const nextMonth =
-      parts.month === 12
-        ? { year: parts.year + 1, month: 1 }
-        : { year: parts.year, month: parts.month + 1 };
-
-    const end = this.zonedDateToUtc(
-      nextMonth.year,
-      nextMonth.month,
-      1,
-      0,
-      0,
-      0,
-      timezone,
-    );
-
-    return { start, end };
-  }
-
   private getBudgetRange(
-    budget: {
-      period: BudgetPeriod;
-      startDate: Date;
-      endDate: Date | null;
-    },
+    budget: { startDate: Date; endDate: Date | null },
+    monthRange: BudgetRange,
     now: Date,
     timezone: string,
   ): BudgetRange {
-    const local = this.getZonedDateParts(now, timezone);
+    const budgetStart = getZonedDateBoundary(budget.startDate, timezone);
+    const budgetEndExclusive = budget.endDate
+      ? getZonedNextDateBoundary(budget.endDate, timezone)
+      : monthRange.end;
 
-    let start: Date;
-    let end: Date;
-
-    switch (budget.period) {
-      case 'DAILY': {
-        start = this.zonedDateToUtc(
-          local.year,
-          local.month,
-          local.day,
-          0,
-          0,
-          0,
-          timezone,
-        );
-        end = new Date(now.getTime() + 1);
-        break;
-      }
-
-      case 'WEEKLY': {
-        const localDate = new Date(
-          Date.UTC(local.year, local.month - 1, local.day),
-        );
-        const dayOfWeek = localDate.getUTCDay();
-        const daysSinceMonday = (dayOfWeek + 6) % 7;
-        localDate.setUTCDate(localDate.getUTCDate() - daysSinceMonday);
-
-        start = this.zonedDateToUtc(
-          localDate.getUTCFullYear(),
-          localDate.getUTCMonth() + 1,
-          localDate.getUTCDate(),
-          0,
-          0,
-          0,
-          timezone,
-        );
-        end = new Date(now.getTime() + 1);
-        break;
-      }
-
-      case 'MONTHLY': {
-        start = this.zonedDateToUtc(
-          local.year,
-          local.month,
-          1,
-          0,
-          0,
-          0,
-          timezone,
-        );
-        end = new Date(now.getTime() + 1);
-        break;
-      }
-
-      case 'YEARLY': {
-        start = this.zonedDateToUtc(local.year, 1, 1, 0, 0, 0, timezone);
-        end = new Date(now.getTime() + 1);
-        break;
-      }
-
-      case 'CUSTOM': {
-        start = new Date(budget.startDate);
-        end = budget.endDate ? new Date(budget.endDate) : new Date(now);
-        break;
-      }
-
-      default: {
-        start = new Date(budget.startDate);
-        end = budget.endDate ? new Date(budget.endDate) : new Date(now);
-      }
-    }
-
-    // Respect the budget's configured boundaries.
-    if (budget.startDate > start) {
-      start = new Date(budget.startDate);
-    }
-
-    if (budget.endDate && budget.endDate < end) {
-      end = new Date(budget.endDate);
-    }
-
-    // Never calculate spending beyond the current instant.
+    const start =
+      budgetStart > monthRange.start ? budgetStart : monthRange.start;
+    const configuredEnd =
+      budgetEndExclusive < monthRange.end ? budgetEndExclusive : monthRange.end;
     const maximumEnd = new Date(now.getTime() + 1);
-
-    if (maximumEnd < end) {
-      end = maximumEnd;
-    }
+    const end = maximumEnd < configuredEnd ? maximumEnd : configuredEnd;
 
     return { start, end };
-  }
-
-  private getZonedDateParts(
-    date: Date,
-    timezone: string,
-  ): { year: number; month: number; day: number } {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(date);
-
-    const values = Object.fromEntries(
-      parts.map((part) => [part.type, part.value]),
-    );
-
-    return {
-      year: Number(values.year),
-      month: Number(values.month),
-      day: Number(values.day),
-    };
-  }
-
-  private zonedDateToUtc(
-    year: number,
-    month: number,
-    day: number,
-    hour: number,
-    minute: number,
-    second: number,
-    timezone: string,
-  ): Date {
-    const targetUtc = Date.UTC(year, month - 1, day, hour, minute, second);
-
-    let result = targetUtc;
-
-    for (let iteration = 0; iteration < 3; iteration++) {
-      const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: timezone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hourCycle: 'h23',
-      }).formatToParts(new Date(result));
-
-      const values = Object.fromEntries(
-        parts.map((part) => [part.type, Number(part.value)]),
-      );
-
-      const representedUtc = Date.UTC(
-        values.year,
-        values.month - 1,
-        values.day,
-        values.hour,
-        values.minute,
-        values.second,
-      );
-
-      result += targetUtc - representedUtc;
-    }
-
-    return new Date(result);
   }
 
   private toMinorUnits(value: unknown): bigint {

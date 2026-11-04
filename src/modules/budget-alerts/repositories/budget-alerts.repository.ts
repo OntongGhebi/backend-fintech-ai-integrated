@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from 'src/database/prisma/prisma.service';
 import { GetBudgetAlertsQueryDto } from '../dto/get-budget-alerts-query.dto';
+import { getBudgetMonthRange } from '../../budgets/utils/budget-month.util';
 
 @Injectable()
 export class BudgetAlertsRepository {
@@ -12,9 +13,7 @@ export class BudgetAlertsRepository {
   ) {
     return this.prisma.budgetAlert.create({
       data,
-      include: {
-        budget: true,
-      },
+      include: this.budgetWithCurrentAllocationInclude(),
     });
   }
 
@@ -23,9 +22,7 @@ export class BudgetAlertsRepository {
       where: {
         id: budgetAlertId,
       },
-      include: {
-        budget: true,
-      },
+      include: this.budgetWithCurrentAllocationInclude(),
     });
   }
 
@@ -38,9 +35,7 @@ export class BudgetAlertsRepository {
           deletedAt: null,
         },
       },
-      include: {
-        budget: true,
-      },
+      include: this.budgetWithCurrentAllocationInclude(),
     });
   }
 
@@ -70,9 +65,7 @@ export class BudgetAlertsRepository {
       orderBy: {
         createdAt: 'asc',
       },
-      include: {
-        budget: true,
-      },
+      include: this.budgetWithCurrentAllocationInclude(),
     });
   }
 
@@ -97,9 +90,7 @@ export class BudgetAlertsRepository {
       orderBy: {
         createdAt: 'desc',
       },
-      include: {
-        budget: true,
-      },
+      include: this.budgetWithCurrentAllocationInclude(),
     });
   }
 
@@ -130,5 +121,23 @@ export class BudgetAlertsRepository {
         },
       },
     });
+  }
+
+  /**
+   * Preserve the budget relation while exposing the selected month's
+   * allocation to API consumers. Budget.amount is a legacy snapshot.
+   */
+  private budgetWithCurrentAllocationInclude() {
+    const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
+    return {
+      budget: {
+        include: {
+          allocations: {
+            where: { periodStart: month.periodStart },
+            take: 1,
+          },
+        },
+      },
+    } as const;
   }
 }

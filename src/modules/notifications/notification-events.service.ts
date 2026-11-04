@@ -7,6 +7,11 @@ import { NotificationChannel } from 'src/database/enums/notification-channel.enu
 
 import { NotificationQueueService } from './notifications-queue.service';
 import { NotificationsService } from './notifications.service';
+import {
+  getBudgetMonthRange,
+  getZonedDateBoundary,
+  getZonedNextDateBoundary,
+} from '../budgets/utils/budget-month.util';
 
 export interface RecurringTransactionExecutedEvent {
   userId: string;
@@ -39,38 +44,31 @@ export class NotificationEventsService {
     categoryId: string | null;
     transactionDate: Date;
   }): Promise<void> {
-    if (event.type !== TransactionType.EXPENSE) {
-      return;
-    }
+    if (event.type !== TransactionType.EXPENSE) return;
 
     try {
       const preferences = await this.notificationsService.getMyPreferences(
         event.userId,
       );
+      if (!preferences.budgetAlertEnabled) return;
 
-      if (!preferences.budgetAlertEnabled) {
-        return;
-      }
-
+      const userPreference = await this.prisma.userPreference.findUnique({
+        where: { userId: event.userId },
+        select: { timezone: true },
+      });
+      const timezone = userPreference?.timezone ?? 'Asia/Jakarta';
       const transactionDate = new Date(event.transactionDate);
-
-      const dateOnly = new Date(
-        Date.UTC(
-          transactionDate.getUTCFullYear(),
-          transactionDate.getUTCMonth(),
-          transactionDate.getUTCDate(),
-        ),
-      );
+      const month = getBudgetMonthRange(transactionDate, timezone);
 
       const budgets = await this.prisma.budget.findMany({
         where: {
           userId: event.userId,
           status: 'ACTIVE',
           deletedAt: null,
-          startDate: { lte: dateOnly },
+          startDate: { lte: month.periodEndDate },
           AND: [
             {
-              OR: [{ endDate: null }, { endDate: { gte: dateOnly } }],
+              OR: [{ endDate: null }, { endDate: { gte: month.periodStart } }],
             },
             {
               OR: [
@@ -81,82 +79,92 @@ export class NotificationEventsService {
           ],
         },
         include: {
-          alerts: {
-            where: { isEnabled: true },
+          allocations: {
+            where: { periodStart: month.periodStart },
+            take: 1,
           },
+          alerts: { where: { isEnabled: true } },
         },
       });
 
-      const amount = new Prisma.Decimal(event.amount);
+      const transactionAmount = new Prisma.Decimal(event.amount);
 
       for (const budget of budgets) {
-        if (budget.amount.lessThanOrEqualTo(0)) {
-          continue;
-        }
+        const allocation = budget.allocations[0];
+        if (!allocation || allocation.amount.lessThanOrEqualTo(0)) continue;
 
-        const transactionWhere = {
-          userId: event.userId,
-          type: 'EXPENSE' as const,
-          status: 'ACTIVE' as const,
-          deletedAt: null,
-          transactionDate: {
-            gte: new Date(budget.startDate),
-            ...(budget.endDate
-              ? {
-                  lt: new Date(
-                    new Date(budget.endDate).getTime() + 24 * 60 * 60 * 1000,
-                  ),
-                }
-              : {}),
-          },
-          ...(budget.categoryId ? { categoryId: budget.categoryId } : {}),
-        };
+        // Respect configured budget boundaries while evaluating only the
+        // allocation month containing the newly-created expense.
+        const budgetStart = getZonedDateBoundary(budget.startDate, timezone);
+        const budgetEndExclusive = budget.endDate
+          ? getZonedNextDateBoundary(budget.endDate, timezone)
+          : month.end;
+        const rangeStart =
+          budgetStart > month.start ? budgetStart : month.start;
+        const rangeEnd =
+          budgetEndExclusive < month.end ? budgetEndExclusive : month.end;
+
+        // Do not evaluate a budget for a transaction outside its configured
+        // lifetime, even when the budget overlaps another part of this month.
+        if (
+          rangeStart >= rangeEnd ||
+          transactionDate < rangeStart ||
+          transactionDate >= rangeEnd
+        )
+          continue;
 
         const aggregate = await this.prisma.transaction.aggregate({
-          where: transactionWhere,
+          where: {
+            userId: event.userId,
+            type: 'EXPENSE',
+            status: 'ACTIVE',
+            deletedAt: null,
+            currency: 'IDR',
+            transactionDate: { gte: rangeStart, lt: rangeEnd },
+            ...(budget.categoryId ? { categoryId: budget.categoryId } : {}),
+          },
           _sum: { amount: true },
         });
 
-        // Transaksi baru sudah termasuk dalam jumlah sesudah transaksi.
+        // The new transaction is already included in the aggregate.
         const actualAfter = new Prisma.Decimal(aggregate._sum.amount ?? 0);
-        const actualBefore = actualAfter.minus(amount);
-
-        const beforePercentage = actualBefore.div(budget.amount).mul(100);
-
-        const afterPercentage = actualAfter.div(budget.amount).mul(100);
+        const actualBefore = actualAfter.minus(transactionAmount);
+        const allocationAmount = new Prisma.Decimal(allocation.amount);
+        const beforePercentage = actualBefore.div(allocationAmount).mul(100);
+        const afterPercentage = actualAfter.div(allocationAmount).mul(100);
 
         const crossedAlerts = budget.alerts.filter(
           (alert) =>
             beforePercentage.lessThan(alert.thresholdPercentage) &&
             afterPercentage.greaterThanOrEqualTo(alert.thresholdPercentage),
         );
+        if (crossedAlerts.length === 0) continue;
 
-        if (crossedAlerts.length === 0) {
-          continue;
-        }
-
-        const crossedThresholds = [
-          ...new Set(crossedAlerts.map((alert) => alert.thresholdPercentage)),
-        ].sort((a, b) => a - b);
-
+        const crossedThresholds: number[] = Array.from(
+          new Set<number>(
+            crossedAlerts.map((alert) => alert.thresholdPercentage),
+          ),
+        ).sort((a, b) => a - b);
         const thresholdText = crossedThresholds
           .map((value) => `${value}%`)
           .join(', ');
-
         const usage = afterPercentage.toDecimalPlaces(2).toString();
-
-        const message =
-          `Anggaran "${budget.name}" telah mencapai ${usage}% pemakaian ` +
-          `(Rp${actualAfter.toFixed(0)} dari Rp${budget.amount.toFixed(0)}). ` +
-          `Ambang terlampaui: ${thresholdText}.`;
+        const monthLabel = new Intl.DateTimeFormat('id-ID', {
+          month: 'long',
+          year: 'numeric',
+          timeZone: timezone,
+        }).format(transactionDate);
 
         const title = `Peringatan anggaran: ${budget.name}`;
+        const message =
+          `Anggaran "${budget.name}" untuk ${monthLabel} telah mencapai ${usage}% pemakaian ` +
+          `(Rp${actualAfter.toFixed(0)} dari Rp${allocationAmount.toFixed(0)}). ` +
+          `Ambang terlampaui: ${thresholdText}.`;
 
         const hasInAppAlert = crossedAlerts.some(
           (alert) =>
             String(alert.channel) === String(NotificationChannel.IN_APP),
         );
-
         if (hasInAppAlert) {
           await this.notificationsService.create({
             userId: event.userId,
@@ -171,7 +179,6 @@ export class NotificationEventsService {
           (alert) =>
             String(alert.channel) === String(NotificationChannel.EMAIL),
         );
-
         if (preferences.emailEnabled && hasEmailAlert) {
           await this.createAndEnqueueExternalNotification({
             userId: event.userId,
@@ -186,7 +193,6 @@ export class NotificationEventsService {
           (alert) =>
             String(alert.channel) === String(NotificationChannel.TELEGRAM),
         );
-
         if (preferences.telegramEnabled && hasTelegramAlert) {
           await this.createAndEnqueueExternalNotification({
             userId: event.userId,
@@ -199,7 +205,7 @@ export class NotificationEventsService {
       }
 
       this.logger.log(
-        `Budget alerts evaluated for expense transaction ${event.transactionId}.`,
+        `Monthly budget alerts evaluated for expense transaction ${event.transactionId}.`,
       );
     } catch (error) {
       this.logger.error(

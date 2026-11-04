@@ -2,7 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma } from '../../../generated/prisma/client.js';
 
 import { NotificationChannel } from 'src/database/enums/notification-channel.enum';
+import { TransactionType } from 'src/database/enums/transaction-type.enum';
 import { PrismaService } from 'src/database/prisma/prisma.service';
+import { getBudgetMonthRange } from '../budgets/utils/budget-month.util';
 
 import { NotificationQueueService } from './notifications-queue.service';
 import { NotificationsService } from './notifications.service';
@@ -21,6 +23,7 @@ describe('NotificationEventsService', () => {
   };
 
   const prismaMock = {
+    userPreference: { findUnique: jest.fn() },
     budget: { findMany: jest.fn() },
     transaction: { aggregate: jest.fn() },
   };
@@ -50,6 +53,9 @@ describe('NotificationEventsService', () => {
       budgetAlertEnabled: true,
     });
 
+    prismaMock.userPreference.findUnique.mockResolvedValue({
+      timezone: 'Asia/Jakarta',
+    });
     prismaMock.budget.findMany.mockResolvedValue([]);
     prismaMock.transaction.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
 
@@ -154,7 +160,16 @@ describe('NotificationEventsService', () => {
       id: 'budget-1',
       userId: 'user-1',
       name: 'Monthly food',
-      amount: new Prisma.Decimal(1000),
+      amount: new Prisma.Decimal(9999), // Legacy snapshot must not be used.
+      allocations: [
+        {
+          periodStart: getBudgetMonthRange(
+            new Date('2026-10-23T10:00:00.000Z'),
+            'Asia/Jakarta',
+          ).periodStart,
+          amount: new Prisma.Decimal(1000),
+        },
+      ],
       startDate: new Date('2026-10-01T00:00:00.000Z'),
       endDate: new Date('2026-10-31T00:00:00.000Z'),
       categoryId: null,
@@ -176,7 +191,7 @@ describe('NotificationEventsService', () => {
     const expenseEvent = {
       userId: 'user-1',
       transactionId: 'transaction-budget-1',
-      type: 'EXPENSE',
+      type: TransactionType.EXPENSE,
       amount: '80',
       categoryId: null,
       transactionDate: new Date('2026-10-23T10:00:00.000Z'),
@@ -209,6 +224,13 @@ describe('NotificationEventsService', () => {
           channel: NotificationChannel.EMAIL,
         }),
       );
+      const notificationInput = notificationsServiceMock.create.mock.calls.find(
+        ([input]) =>
+          input.type === 'BUDGET_ALERT' &&
+          input.channel === NotificationChannel.IN_APP,
+      )?.[0];
+      expect(notificationInput.message).toContain('dari Rp1000');
+      expect(notificationInput.message).not.toContain('Rp9999');
       expect(notificationQueueServiceMock.enqueueDelivery).toHaveBeenCalledWith(
         `notification-${NotificationChannel.EMAIL.toLowerCase()}`,
       );
@@ -265,6 +287,17 @@ describe('NotificationEventsService', () => {
       ).not.toHaveBeenCalled();
     });
 
+    it('should ignore budgets without an allocation for the transaction month', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        { ...budget, allocations: [] },
+      ]);
+
+      await service.budgetExpenseCreated(expenseEvent);
+
+      expect(prismaMock.transaction.aggregate).not.toHaveBeenCalled();
+      expect(notificationsServiceMock.create).not.toHaveBeenCalled();
+    });
+
     it('should respect budgetAlertEnabled preference', async () => {
       notificationsServiceMock.getMyPreferences.mockResolvedValue({
         budgetAlertEnabled: false,
@@ -293,7 +326,10 @@ describe('NotificationEventsService', () => {
     });
 
     it('should ignore non-expense transactions', async () => {
-      await service.budgetExpenseCreated({ ...expenseEvent, type: 'INCOME' });
+      await service.budgetExpenseCreated({
+        ...expenseEvent,
+        type: TransactionType.INCOME,
+      });
       expect(prismaMock.budget.findMany).not.toHaveBeenCalled();
       expect(notificationsServiceMock.getMyPreferences).not.toHaveBeenCalled();
     });

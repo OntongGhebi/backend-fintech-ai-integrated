@@ -3,6 +3,11 @@ import { Prisma } from '../../../../generated/prisma/client';
 
 import { PrismaService } from '../../../database/prisma/prisma.service';
 import { AIFinancialContextService } from './ai-financial-context.service';
+import {
+  getBudgetMonthRange,
+  getZonedDateBoundary,
+  getZonedNextDateBoundary,
+} from '../../budgets/utils/budget-month.util';
 
 describe('AIFinancialContextService', () => {
   let service: AIFinancialContextService;
@@ -26,7 +31,15 @@ describe('AIFinancialContextService', () => {
   const makeBudget = (overrides: Record<string, unknown> = {}) => ({
     id: 'budget-1',
     name: 'Budget Makanan',
-    amount: decimal('1000.00'),
+    amount: decimal('9999.00'), // Legacy snapshot is deliberately different.
+    allocations: [
+      {
+        periodStart: getBudgetMonthRange(new Date(), 'Asia/Jakarta')
+          .periodStart,
+        amount:
+          overrides.allocationAmount ?? overrides.amount ?? decimal('1000.00'),
+      },
+    ],
     currency: 'IDR',
     period: 'MONTHLY',
     startDate: new Date('2026-01-01T00:00:00.000Z'),
@@ -288,6 +301,27 @@ describe('AIFinancialContextService', () => {
       expect(getBudgetTransactionQuery()).toBeUndefined();
     });
 
+    it('should not include a budget when the selected month has no allocation', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        { ...makeBudget(), allocations: [] },
+      ]);
+
+      const result = await service.getContext('user-1');
+
+      expect(result.budgets).toEqual([]);
+      expect(getBudgetTransactionQuery()).toBeUndefined();
+    });
+
+    it('should use the monthly allocation instead of the legacy budget amount', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        makeBudget({ allocationAmount: decimal('250.00') }),
+      ]);
+
+      const result = await service.getContext('user-1');
+
+      expect(result.budgets[0].limit).toBe('250.00');
+    });
+
     it('should filter the batch query by user, currency, status and expense type', async () => {
       prismaMock.budget.findMany.mockResolvedValue([makeBudget()]);
 
@@ -309,6 +343,22 @@ describe('AIFinancialContextService', () => {
 
       await service.getContext('user-1');
 
+      const query = prismaMock.budget.findMany.mock.calls[0][0];
+      expect(query.select).toEqual(
+        expect.objectContaining({
+          id: true,
+          name: true,
+          startDate: true,
+          endDate: true,
+          categoryId: true,
+          allocations: {
+            where: { periodStart: expect.any(Date) },
+            take: 1,
+            select: { amount: true, periodStart: true },
+          },
+        }),
+      );
+      expect(query.select.amount).toBeUndefined();
       expect(getBudgetTransactions()?.select).toEqual({
         transactionDate: true,
         amount: true,
@@ -346,11 +396,12 @@ describe('AIFinancialContextService', () => {
       expect(query).toBeDefined();
       expect(query?.where.transactionDate.gte).toBeInstanceOf(Date);
       expect(query?.where.transactionDate.lt).toBeInstanceOf(Date);
-      expect(query!.where.transactionDate.gte.getTime()).toBeLessThanOrEqual(
-        earlierStart.getTime(),
+      const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
+      expect(query!.where.transactionDate.gte.getTime()).toBeGreaterThanOrEqual(
+        month.start.getTime(),
       );
       expect(query!.where.transactionDate.lt.getTime()).toBeLessThanOrEqual(
-        Date.now() + 5_000,
+        month.end.getTime(),
       );
     });
   });
@@ -375,10 +426,11 @@ describe('AIFinancialContextService', () => {
     );
 
     it('should calculate a CUSTOM budget range', async () => {
+      const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
       await runWithBudget({
         period: 'CUSTOM',
-        startDate: new Date('2026-10-01T00:00:00.000Z'),
-        endDate: new Date('2026-10-31T00:00:00.000Z'),
+        startDate: month.periodStart,
+        endDate: month.periodEndDate,
       });
 
       const query = getBudgetTransactions();
@@ -389,7 +441,14 @@ describe('AIFinancialContextService', () => {
     });
 
     it('should clamp the budget range to the configured start date', async () => {
-      const configuredStart = new Date('2026-10-10T00:00:00.000Z');
+      const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
+      const configuredStart = new Date(
+        Date.UTC(
+          month.periodStart.getUTCFullYear(),
+          month.periodStart.getUTCMonth(),
+          2,
+        ),
+      );
 
       await runWithBudget({
         period: 'MONTHLY',
@@ -398,28 +457,46 @@ describe('AIFinancialContextService', () => {
 
       expect(
         getBudgetTransactions()!.where.transactionDate.gte.getTime(),
-      ).toBeGreaterThanOrEqual(configuredStart.getTime());
+      ).toBeGreaterThanOrEqual(
+        getZonedDateBoundary(configuredStart, 'Asia/Jakarta').getTime(),
+      );
     });
 
     it('should clamp the budget range to the configured end date', async () => {
-      const configuredEnd = new Date('2026-10-20T00:00:00.000Z');
+      const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
+      const configuredEnd = new Date(
+        Date.UTC(
+          month.periodStart.getUTCFullYear(),
+          month.periodStart.getUTCMonth(),
+          1,
+        ),
+      );
 
       await runWithBudget({
         period: 'CUSTOM',
-        startDate: new Date('2026-10-01T00:00:00.000Z'),
+        startDate: month.periodStart,
         endDate: configuredEnd,
       });
 
       expect(
         getBudgetTransactions()!.where.transactionDate.lt.getTime(),
-      ).toBeLessThanOrEqual(configuredEnd.getTime());
+      ).toBeLessThanOrEqual(
+        getZonedNextDateBoundary(configuredEnd, 'Asia/Jakarta').getTime(),
+      );
     });
 
     it('should skip the batch query when all budget ranges are invalid', async () => {
+      const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
       await runWithBudget({
         period: 'CUSTOM',
-        startDate: new Date('2026-10-20T00:00:00.000Z'),
-        endDate: new Date('2026-10-01T00:00:00.000Z'),
+        startDate: new Date(
+          Date.UTC(
+            month.periodStart.getUTCFullYear(),
+            month.periodStart.getUTCMonth(),
+            20,
+          ),
+        ),
+        endDate: month.periodStart,
       });
 
       expect(getBudgetTransactionQuery()).toBeUndefined();
@@ -462,7 +539,7 @@ describe('AIFinancialContextService', () => {
     });
 
     it('should calculate remaining budget accurately with decimal amounts', async () => {
-      const transactionDate = new Date('2026-10-20T00:00:00.000Z');
+      const transactionDate = new Date();
 
       prismaMock.budget.findMany.mockResolvedValue([
         makeBudget({
@@ -545,7 +622,7 @@ describe('AIFinancialContextService', () => {
     });
 
     it('should apply category matching while calculating budget spending', async () => {
-      const transactionDate = new Date('2026-10-20T00:00:00.000Z');
+      const transactionDate = new Date();
 
       prismaMock.budget.findMany.mockResolvedValue([
         makeBudget({
