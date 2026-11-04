@@ -1078,15 +1078,28 @@ describe('DashboardRepository', () => {
           name: 'Food Budget',
           categoryId,
           amount: '9999999', // Legacy snapshot must not be used.
-          allocations: [{ periodStart: month.periodStart, amount: '3000000' }],
-          category: { id: categoryId, name: 'Food' },
+          allocations: [
+            {
+              periodStart: month.periodStart,
+              amount: '3000000',
+            },
+          ],
+          category: {
+            id: categoryId,
+            name: 'Food',
+          },
         },
       ]);
+
       prisma.transaction.groupBy.mockResolvedValue([
         {
           categoryId,
-          _sum: { amount: '2250000' },
-          _count: { _all: 12 },
+          _sum: {
+            amount: '2250000',
+          },
+          _count: {
+            _all: 12,
+          },
         },
       ]);
 
@@ -1094,17 +1107,29 @@ describe('DashboardRepository', () => {
 
       expect(prisma.budget.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ userId, deletedAt: null }),
+          where: expect.objectContaining({
+            userId,
+            deletedAt: null,
+          }),
           include: {
             category: true,
             allocations: {
-              where: { periodStart: { in: [month.periodStart] } },
-              orderBy: { periodStart: 'asc' },
+              where: {
+                periodStart: {
+                  in: [month.periodStart],
+                },
+              },
+              orderBy: {
+                periodStart: 'asc',
+              },
             },
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: {
+            createdAt: 'desc',
+          },
         }),
       );
+
       expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
           by: ['categoryId'],
@@ -1113,7 +1138,9 @@ describe('DashboardRepository', () => {
             status: 'ACTIVE',
             currency: 'IDR',
             type: 'EXPENSE',
-            categoryId: { in: [categoryId] },
+            categoryId: {
+              in: [categoryId],
+            },
             transactionDate: {
               gte: month.start,
               lte: new Date(month.end.getTime() - 1),
@@ -1121,20 +1148,27 @@ describe('DashboardRepository', () => {
           }),
         }),
       );
-      expect(result.budgets).toEqual([
+
+      expect(result.budgets).toHaveLength(1);
+
+      expect(result.budgets[0]).toEqual(
         expect.objectContaining({
           id: budgetId,
-          amount: '3000000',
           periodStart: month.periodStart,
         }),
-      ]);
+      );
+
+      // Prisma.Decimal is intentionally retained by the repository.
+      expect(result.budgets[0].amount.toString()).toBe('3000000');
+
       expect(result.transactions).toHaveLength(1);
     });
 
     it('should sum monthly allocations across a multi-month report range', async () => {
       const categoryId = '11111111-1111-4111-8111-111111111111';
       const startDate = new Date('2026-09-01T00:00:00.000Z');
-      const endDate = new Date('2026-11-30T23:59:59.999Z');
+      const endDate = new Date('2026-11-30T16:59:59.999Z');
+
       const months = getBudgetMonthRanges(startDate, endDate, 'Asia/Jakarta');
 
       prisma.budget.findMany.mockResolvedValue([
@@ -1144,13 +1178,26 @@ describe('DashboardRepository', () => {
           categoryId,
           amount: '9999999',
           allocations: [
-            { periodStart: months[0].periodStart, amount: '1000000' },
-            { periodStart: months[1].periodStart, amount: '1200000' },
-            { periodStart: months[2].periodStart, amount: '1400000' },
+            {
+              periodStart: months[0].periodStart,
+              amount: '1000000',
+            },
+            {
+              periodStart: months[1].periodStart,
+              amount: '1200000',
+            },
+            {
+              periodStart: months[2].periodStart,
+              amount: '1400000',
+            },
           ],
-          category: { id: categoryId, name: 'Food' },
+          category: {
+            id: categoryId,
+            name: 'Food',
+          },
         },
       ]);
+
       prisma.transaction.groupBy.mockResolvedValue([]);
 
       const result = await repository.getBudgetPerformance(userId, {
@@ -1163,14 +1210,20 @@ describe('DashboardRepository', () => {
           include: expect.objectContaining({
             allocations: {
               where: {
-                periodStart: { in: months.map((month) => month.periodStart) },
+                periodStart: {
+                  in: months.map((month) => month.periodStart),
+                },
               },
-              orderBy: { periodStart: 'asc' },
+              orderBy: {
+                periodStart: 'asc',
+              },
             },
           }),
         }),
       );
+
       expect(result.budgets[0].amount.toString()).toBe('3600000');
+
       expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
@@ -1241,7 +1294,9 @@ describe('DashboardRepository', () => {
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
 
-      const endDate = new Date('2026-09-30T23:59:59.999Z');
+      // September 30, 2026 at 23:59:59.999 WIB.
+      // The equivalent UTC instant is 16:59:59.999Z.
+      const endDate = new Date('2026-09-30T16:59:59.999Z');
 
       await repository.getBudgetPerformance(userId, {
         startDate,

@@ -247,6 +247,9 @@ describe('Ownership and IDOR regression', () => {
         },
         include: {
           category: true,
+          allocations: {
+            orderBy: { periodStart: 'desc' },
+          },
         },
       });
     });
