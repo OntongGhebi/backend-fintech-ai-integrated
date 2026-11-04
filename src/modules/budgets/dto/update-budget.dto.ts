@@ -1,13 +1,17 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsBoolean,
   IsDateString,
   IsDecimal,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
   IsUUID,
   Length,
   Matches,
+  Max,
+  Min,
 } from 'class-validator';
 
 import { BudgetPeriod } from 'src/database/enums/budget-period.enum';
@@ -26,9 +30,9 @@ export class UpdateBudgetDto {
 
   @ApiPropertyOptional({
     description:
-      'Budget amount in IDR. Maximum 4 decimal places are supported.',
+      'Monthly allocation amount in IDR. Requires periodStart. Maximum 4 decimal places.',
     example: '2000000',
-    pattern: '^\\d+(\\.\\d{1,4})?$',
+    pattern: '^(?=.*[1-9])\\d+(\\.\\d{1,4})?$',
   })
   @IsOptional()
   @IsDecimal(
@@ -41,10 +45,45 @@ export class UpdateBudgetDto {
       message: 'amount must be a valid decimal with up to 4 decimal places',
     },
   )
-  @Matches(/^\d+(\.\d{1,4})?$/, {
-    message: 'amount must be a positive decimal with up to 4 decimal places',
+  @Matches(/^(?=.*[1-9])\d+(\.\d{1,4})?$/, {
+    message: 'amount must be greater than zero and have up to 4 decimal places',
   })
   amount?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'First day of the target allocation month (YYYY-MM-01). Required when amount is provided.',
+    example: '2026-11-01',
+    pattern: '^\\d{4}-\\d{2}-01$',
+  })
+  @IsOptional()
+  @IsDateString()
+  @Matches(/^\d{4}-\d{2}-01$/, {
+    message: 'periodStart must be the first day of a month (YYYY-MM-01)',
+  })
+  periodStart?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'When true, apply the amount to the selected month and following months.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  applyToFuture?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Number of months to update, including periodStart. Allowed from 1 to 24; defaults to 12 when applyToFuture is true.',
+    minimum: 1,
+    maximum: 24,
+    default: 12,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(24)
+  futureMonths?: number;
 
   @ApiPropertyOptional({
     description: 'Budget period',
@@ -66,7 +105,7 @@ export class UpdateBudgetDto {
   @ApiPropertyOptional({
     description:
       'Budget end date in ISO 8601 date format. Send null to remove the end date.',
-    example: '2026-09-30',
+    example: '2026-12-31',
     nullable: true,
   })
   @IsOptional()

@@ -27,7 +27,7 @@ export class CreateBudgetDto {
     description:
       'Budget amount in IDR. Maximum 4 decimal places are supported.',
     example: '1500000',
-    pattern: '^\\d+(\\.\\d{1,4})?$',
+    pattern: '^(?=.*[1-9])\\d+(\\.\\d{1,4})?$',
   })
   @IsDecimal(
     {
@@ -39,8 +39,8 @@ export class CreateBudgetDto {
       message: 'amount must be a valid decimal with up to 4 decimal places',
     },
   )
-  @Matches(/^\d+(\.\d{1,4})?$/, {
-    message: 'amount must be a positive decimal with up to 4 decimal places',
+  @Matches(/^(?=.*[1-9])\d+(\.\d{1,4})?$/, {
+    message: 'amount must be greater than zero and have up to 4 decimal places',
   })
   amount!: string;
 

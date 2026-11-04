@@ -175,8 +175,8 @@ describe('Budgets E2E', () => {
           name: 'Monthly Food Budget',
           amount: '1500000',
           period: 'MONTHLY',
-          startDate: '2026-09-01',
-          endDate: '2026-09-30',
+          startDate: '2026-11-01',
+          endDate: '2027-10-31',
           categoryId,
         })
         .expect(201);
@@ -190,6 +190,13 @@ describe('Budgets E2E', () => {
           period: 'MONTHLY',
           status: 'ACTIVE',
           categoryId,
+          allocations: expect.arrayContaining([
+            expect.objectContaining({
+              periodStart: expect.stringContaining('2026-11-01'),
+              amount: expect.anything(),
+              source: 'MANUAL',
+            }),
+          ]),
         }),
       );
 
@@ -204,8 +211,8 @@ describe('Budgets E2E', () => {
           name: 'Monthly Food Budget',
           amount: '2000000',
           period: 'MONTHLY',
-          startDate: '2026-09-01',
-          endDate: '2026-09-30',
+          startDate: '2026-11-01',
+          endDate: '2027-10-31',
           categoryId,
         })
         .expect(409);
@@ -287,6 +294,22 @@ describe('Budgets E2E', () => {
           }),
         ]),
       );
+    });
+
+    it('should return only the requested monthly allocation', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/budgets')
+        .query({ month: '2026-11-01' })
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      const budget = response.body.find(
+        (item: { id: string }) => item.id === budgetId,
+      );
+
+      expect(budget).toBeDefined();
+      expect(budget.allocations).toHaveLength(1);
+      expect(budget.allocations[0].periodStart).toContain('2026-11-01');
     });
 
     it('should filter budgets by status', async () => {
@@ -398,9 +421,10 @@ describe('Budgets E2E', () => {
         .send({
           name: 'Monthly Food Budget Updated',
           amount: '2000000',
+          periodStart: '2026-11-01',
           period: 'MONTHLY',
-          startDate: '2026-09-01',
-          endDate: '2026-09-30',
+          startDate: '2026-11-01',
+          endDate: '2027-10-31',
         })
         .expect(200);
 
@@ -412,6 +436,25 @@ describe('Budgets E2E', () => {
           period: 'MONTHLY',
         }),
       );
+    });
+
+    it('should reject amount updates without periodStart', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/v1/budgets/${budgetId}`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ amount: '2100000' })
+        .expect(400);
+    });
+
+    it('should reject changes to historical allocations', async () => {
+      await request(app.getHttpServer())
+        .patch(`/api/v1/budgets/${budgetId}`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({
+          amount: '2100000',
+          periodStart: '2026-10-01',
+        })
+        .expect(400);
     });
 
     it('should allow removing the category', async () => {

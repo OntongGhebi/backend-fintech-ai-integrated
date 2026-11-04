@@ -78,8 +78,9 @@ export class BudgetsController {
   async findById(
     @CurrentUser('id') userId: string,
     @Param('id', new ParseUUIDPipe({ version: '4' })) budgetId: string,
+    @Query() query: GetBudgetsQueryDto,
   ) {
-    return this.budgetsService.findById(userId, budgetId);
+    return this.budgetsService.findById(userId, budgetId, query);
   }
 
   @Patch(':id/status')

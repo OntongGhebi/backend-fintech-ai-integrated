@@ -29,6 +29,7 @@ export class ReportService {
     return {
       reportType: REPORT_DEFAULT_TYPE,
       currency: REPORT_DEFAULT_CURRENCY,
+      totalCurrentBalance: reportData.totalCurrentBalance,
       startDate: reportData.monthlyFinancialSummary.startDate,
       endDate: reportData.monthlyFinancialSummary.endDate,
       generatedAt: new Date(),
