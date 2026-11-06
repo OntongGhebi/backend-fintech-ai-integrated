@@ -7,6 +7,7 @@ import { AIService } from './services/ai.service';
 import { AIChatService } from './services/ai-chat.service';
 import { AIConversationService } from './services/ai-conversation.service';
 import { AIConversationContextService } from './services/ai-conversation-context.service';
+import { AIChatFinancialContextService } from './services/ai-chat-financial-context.service';
 
 import { AIIntentClassifierService } from './services/ai-intent-classifier.service';
 import { AITransactionEntityExtractorService } from './services/ai-transaction-entity-extractor.service';
@@ -59,7 +60,11 @@ import { AIFinancialContextService } from './services/ai-financial-context.servi
     AITransactionIntelligenceService,
     AITransactionValidationService,
 
-    AIFinancialContextService,
+    AIChatFinancialContextService,
+    {
+      provide: AIFinancialContextService,
+      useExisting: AIChatFinancialContextService,
+    },
 
     AIPromptSafetyService,
     AIPromptBuilderService,
