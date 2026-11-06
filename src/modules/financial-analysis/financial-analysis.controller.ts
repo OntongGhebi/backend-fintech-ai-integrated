@@ -31,6 +31,8 @@ import { GetBudgetRecommendationsQueryDto } from './dto/get-budget-recommendatio
 import { ListBudgetRecommendationsQueryDto } from './dto/list-budget-recommendations-query.dto';
 import { RejectBudgetRecommendationDto } from './dto/reject-budget-recommendation.dto';
 import { DeferBudgetRecommendationDto } from './dto/defer-budget-recommendation.dto';
+import { GetFinancialWellBeingQueryDto } from './dto/get-financial-well-being-query.dto';
+import { FinancialWellBeingService } from './financial-well-being.service';
 
 @Controller('financial-analysis')
 @ApiTags('Financial Analysis')
@@ -42,6 +44,7 @@ export class FinancialAnalysisController {
     private readonly financialInsightsService: FinancialInsightsService,
     private readonly budgetRecommendationsService: BudgetRecommendationsService,
     private readonly budgetRecommendationLifecycleService: BudgetRecommendationLifecycleService,
+    private readonly financialWellBeingService: FinancialWellBeingService,
   ) {}
 
   @Get('overview')
@@ -269,5 +272,21 @@ export class FinancialAnalysisController {
       userId,
       recommendationId,
     );
+  }
+
+  @Get('well-being')
+  @ApiOperation({
+    summary: 'Get financial well-being dashboard',
+    description:
+      'Combines deterministic financial analysis, budget recommendation lifecycle status, action center items, and data sufficiency indicators for a selected month.',
+  })
+  @ApiOkResponse({
+    description: 'Financial well-being dashboard retrieved successfully.',
+  })
+  async getWellBeingDashboard(
+    @CurrentUser('id') userId: string,
+    @Query() query: GetFinancialWellBeingQueryDto,
+  ) {
+    return this.financialWellBeingService.getDashboard(userId, query.month);
   }
 }
