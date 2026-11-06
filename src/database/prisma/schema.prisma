@@ -70,6 +70,28 @@ enum BudgetAllocationSource {
   ACCEPTED_RECOMMENDATION
 }
 
+enum BudgetRecommendationAction {
+  INCREASE
+  DECREASE
+  MAINTAIN
+  REVIEW
+}
+
+enum BudgetRecommendationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  DEFERRED
+  APPLIED
+  EVALUATED
+}
+
+enum BudgetRecommendationEvaluationStatus {
+  WITHIN_ALLOCATION
+  OVER_ALLOCATION
+  NO_ACTIVITY
+}
+
 enum NotificationChannel {
   IN_APP
   EMAIL
@@ -203,6 +225,7 @@ model User {
   budgets                 Budget[]
   recurringTransactions   RecurringTransaction[]
   telegramTransactionConfirmations TelegramTransactionConfirmation[]
+  budgetRecommendations BudgetRecommendation[]
 
   subscriptions Subscription[]
   payments      Payment[]
@@ -437,6 +460,7 @@ model Budget {
   category Category?     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   alerts      BudgetAlert[]
   allocations BudgetAllocation[]
+  recommendations BudgetRecommendation[]
 
   @@index([userId])
   @@index([userId, status])
@@ -457,10 +481,70 @@ model BudgetAllocation {
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  recommendation BudgetRecommendation? @relation(fields: [recommendationId], references: [id], onDelete: SetNull)
 
   @@unique([budgetId, periodStart], map: "budget_allocations_budget_period_unique")
   @@index([budgetId, periodStart(sort: Desc)], map: "budget_allocations_budget_period_idx")
+  @@index([recommendationId])
   @@map("budget_allocations")
+}
+
+model BudgetRecommendation {
+  id       String @id @default(uuid()) @db.Uuid
+  userId   String @db.Uuid
+  budgetId String @db.Uuid
+
+  targetMonth  DateTime @db.Date
+  budgetName   String   @db.VarChar(100)
+  categoryId   String?  @db.Uuid
+  categoryName String   @db.VarChar(100)
+
+  action BudgetRecommendationAction
+  status BudgetRecommendationStatus @default(PENDING)
+
+  currentAllocation  Decimal  @db.Decimal(19, 4)
+  proposedAllocation Decimal  @db.Decimal(19, 4)
+  changeAmount       Decimal  @db.Decimal(19, 4)
+  changePercentage  Decimal? @db.Decimal(9, 2)
+  averageMonthlySpend Decimal @db.Decimal(19, 4)
+
+  transactionCount   Int
+  monthsWithActivity Int
+  spendingTrend      String @db.VarChar(20)
+
+  monthlySpending   Json
+  reason            String @db.VarChar(1000)
+  guardrails        Json
+  aiExplanation     String? @db.VarChar(1000)
+  aiWhyItMatters    String? @db.VarChar(1000)
+  aiSuggestedActions Json
+  financialContext  Json
+
+  reviewedAt     DateTime? @db.Timestamptz(6)
+  deferredUntil  DateTime? @db.Timestamptz(6)
+  rejectionReason String?  @db.VarChar(500)
+  appliedAt      DateTime? @db.Timestamptz(6)
+  evaluatedAt    DateTime? @db.Timestamptz(6)
+
+  evaluationStatus BudgetRecommendationEvaluationStatus?
+  evaluation       Json?
+
+  generatedAt DateTime @default(now()) @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Restrict)
+
+  allocations BudgetAllocation[]
+
+  @@unique([userId, budgetId, targetMonth], map: "budget_recommendations_user_budget_month_unique")
+  @@index([userId, status, targetMonth], map: "budget_recommendations_user_status_month_idx")
+  @@index([userId, targetMonth], map: "budget_recommendations_user_month_idx")
+  @@index([budgetId, targetMonth], map: "budget_recommendations_budget_month_idx")
+
+  @@map("budget_recommendations")
 }
 
 // ============================================================

@@ -7,6 +7,7 @@ import { FinancialAnalysisController } from './financial-analysis.controller';
 import { FinancialAnalysisService } from './financial-analysis.service';
 import { FinancialInsightsService } from './financial-insights.service';
 import { BudgetRecommendationsService } from './budget-recommendations.service';
+import { BudgetRecommendationLifecycleService } from './budget-recommendation-lifecycle.service';
 
 @Module({
   imports: [DashboardModule, AIModule],
@@ -15,11 +16,13 @@ import { BudgetRecommendationsService } from './budget-recommendations.service';
     FinancialAnalysisService,
     FinancialInsightsService,
     BudgetRecommendationsService,
+    BudgetRecommendationLifecycleService,
   ],
   exports: [
     FinancialAnalysisService,
     FinancialInsightsService,
     BudgetRecommendationsService,
+    BudgetRecommendationLifecycleService,
   ],
 })
 export class FinancialAnalysisModule {}
