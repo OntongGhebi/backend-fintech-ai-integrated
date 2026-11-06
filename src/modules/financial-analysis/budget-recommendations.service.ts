@@ -25,6 +25,28 @@ export type BudgetRecommendationsStatus = 'GENERATED' | 'NO_RECOMMENDATIONS';
 export type BudgetRecommendationAIStatus =
   'GENERATED' | 'UNAVAILABLE' | 'SKIPPED';
 
+export type BudgetRecommendationExclusionReason =
+  | 'BUDGET_PERIOD_EXPIRED'
+  | 'BUDGET_NOT_STARTED'
+  | 'MISSING_CATEGORY'
+  | 'INVALID_CATEGORY_TYPE'
+  | 'INACTIVE_CATEGORY'
+  | 'NO_ALLOCATION';
+
+export interface BudgetRecommendationExcludedBudget {
+  budgetId: string;
+  budgetName: string;
+  reason: BudgetRecommendationExclusionReason;
+  message: string;
+}
+
+export interface BudgetRecommendationEligibility {
+  totalActiveBudgets: number;
+  eligibleBudgetCount: number;
+  excludedBudgetCount: number;
+  excludedBudgets: BudgetRecommendationExcludedBudget[];
+}
+
 export interface BudgetRecommendationMonthlySpending {
   month: string;
   amount: string;
@@ -75,6 +97,8 @@ export interface BudgetRecommendationsResult {
     startDate: string;
     endDate: string;
   };
+
+  eligibility: BudgetRecommendationEligibility;
 
   financialCapacity: {
     averageMonthlyIncome: string;
@@ -222,27 +246,19 @@ export class BudgetRecommendationsService {
       historyPeriod,
     };
 
+    /**
+     * Fetch all active budgets instead of filtering by target period
+     * in the database query.
+     *
+     * This allows the service to report why a budget is excluded,
+     * including budgets whose validity period has already expired
+     * or has not started yet.
+     */
     const budgets = await this.prisma.budget.findMany({
       where: {
         userId,
         status: 'ACTIVE',
         deletedAt: null,
-        categoryId: {
-          not: null,
-        },
-        startDate: {
-          lte: targetRange.periodEndDate,
-        },
-        OR: [
-          {
-            endDate: null,
-          },
-          {
-            endDate: {
-              gte: targetRange.periodStart,
-            },
-          },
-        ],
       },
       include: {
         category: {
@@ -271,36 +287,120 @@ export class BudgetRecommendationsService {
       },
     });
 
-    const candidates = budgets.flatMap((budget) => {
+    const candidates: Array<{
+      budgetId: string;
+      budgetName: string;
+      categoryId: string;
+      categoryName: string;
+      currentAllocation: Prisma.Decimal;
+    }> = [];
+
+    const excludedBudgets: BudgetRecommendationExcludedBudget[] = [];
+
+    /**
+     * Classify every active budget.
+     *
+     * Only budgets that:
+     * - are valid during the target month;
+     * - have an active EXPENSE category;
+     * - have a valid monthly allocation;
+     *
+     * can become recommendation candidates.
+     */
+    for (const budget of budgets) {
       const category = budget.category;
       const allocation = budget.allocations[0];
 
-      if (
-        !budget.categoryId ||
-        !category ||
-        category.type !== 'EXPENSE' ||
-        !category.isActive ||
-        category.deletedAt ||
-        !allocation
-      ) {
-        return [];
-      }
+      let exclusion: BudgetRecommendationExcludedBudget | null = null;
 
-      return [
-        {
+      if (budget.startDate > targetRange.periodEndDate) {
+        exclusion = {
           budgetId: budget.id,
           budgetName: budget.name,
-          categoryId: budget.categoryId,
-          categoryName: category.name,
-          currentAllocation: new Prisma.Decimal(allocation.amount),
-        },
-      ];
-    });
+          reason: 'BUDGET_NOT_STARTED',
+          message: 'Budget belum mulai berlaku pada bulan target.',
+        };
+      } else if (
+        budget.endDate !== null &&
+        budget.endDate < targetRange.periodStart
+      ) {
+        exclusion = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          reason: 'BUDGET_PERIOD_EXPIRED',
+          message: 'Masa berlaku budget berakhir sebelum bulan target dimulai.',
+        };
+      } else if (!budget.categoryId || !category) {
+        exclusion = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          reason: 'MISSING_CATEGORY',
+          message: 'Budget belum memiliki kategori yang dapat dianalisis.',
+        };
+      } else if (category.type !== 'EXPENSE') {
+        exclusion = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          reason: 'INVALID_CATEGORY_TYPE',
+          message:
+            'Rekomendasi alokasi hanya berlaku untuk kategori pengeluaran.',
+        };
+      } else if (!category.isActive || category.deletedAt) {
+        exclusion = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          reason: 'INACTIVE_CATEGORY',
+          message: 'Kategori budget sedang tidak aktif atau sudah dihapus.',
+        };
+      } else if (!allocation) {
+        exclusion = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          reason: 'NO_ALLOCATION',
+          message:
+            'Belum tersedia alokasi bulanan untuk bulan target atau bulan sebelumnya.',
+        };
+      }
+
+      if (exclusion) {
+        excludedBudgets.push(exclusion);
+        continue;
+      }
+
+      /**
+       * Type guard after the exclusion checks.
+       * These fields must exist for an eligible candidate.
+       */
+      if (!budget.categoryId || !category || !allocation) {
+        continue;
+      }
+
+      candidates.push({
+        budgetId: budget.id,
+        budgetName: budget.name,
+        categoryId: budget.categoryId,
+        categoryName: category.name,
+        currentAllocation: new Prisma.Decimal(allocation.amount),
+      });
+    }
+
+    /**
+     * Eligibility summary is returned for both:
+     * - GENERATED
+     * - NO_RECOMMENDATIONS
+     */
+    const eligibility: BudgetRecommendationEligibility = {
+      totalActiveBudgets: budgets.length,
+      eligibleBudgetCount: candidates.length,
+      excludedBudgetCount: excludedBudgets.length,
+      excludedBudgets,
+    };
 
     if (candidates.length === 0) {
       return {
         ...baseResult,
         status: 'NO_RECOMMENDATIONS',
+        eligibility,
         financialCapacity: {
           averageMonthlyIncome: '0',
           averageMonthlyExpense: '0',
@@ -543,6 +643,7 @@ export class BudgetRecommendationsService {
     return {
       ...baseResult,
       status: 'GENERATED',
+      eligibility,
       financialCapacity: {
         averageMonthlyIncome: averageMonthlyIncome.toString(),
         averageMonthlyExpense: averageMonthlyExpense.toString(),
