@@ -6,7 +6,26 @@ import type {
 } from '../types/dashboard.types';
 import { Prisma } from '../../../../generated/prisma/client';
 import { calculateAccountBalance } from '../../accounts/account-balance.util';
-import { getBudgetMonthRanges } from '../../budgets/utils/budget-month.util';
+import {
+  getBudgetMonthRanges,
+  getZonedDateBoundary,
+  getZonedNextDateBoundary,
+} from '../../budgets/utils/budget-month.util';
+
+/**
+ * Dashboard date filters are commonly serialized from date inputs as UTC
+ * midnight (YYYY-MM-DDT00:00:00.000Z). Treat those values as calendar dates
+ * in the user's timezone, not as literal UTC instants.
+ */
+function isUtcDateOnly(value?: Date): value is Date {
+  return Boolean(
+    value &&
+    value.getUTCHours() === 0 &&
+    value.getUTCMinutes() === 0 &&
+    value.getUTCSeconds() === 0 &&
+    value.getUTCMilliseconds() === 0,
+  );
+}
 
 @Injectable()
 export class DashboardRepository {
@@ -283,10 +302,25 @@ export class DashboardRepository {
       where: { userId },
       select: { timezone: true },
     });
+    const timezone = preference?.timezone ?? 'Asia/Jakarta';
+
+    // Date-only query values represent local calendar dates. Convert them to
+    // timezone-aware boundaries before resolving allocation months or querying
+    // transactionDate. End dates are inclusive, so use the final millisecond
+    // before the next local midnight.
+    const normalizedStartDate = isUtcDateOnly(options.startDate)
+      ? getZonedDateBoundary(options.startDate, timezone)
+      : options.startDate;
+    const normalizedEndDate = isUtcDateOnly(options.endDate)
+      ? new Date(
+          getZonedNextDateBoundary(options.endDate, timezone).getTime() - 1,
+        )
+      : options.endDate;
+
     const months = getBudgetMonthRanges(
-      options.startDate,
-      options.endDate,
-      preference?.timezone ?? 'Asia/Jakarta',
+      normalizedStartDate,
+      normalizedEndDate,
+      timezone,
     );
     const firstMonth = months[0];
     const lastMonth = months[months.length - 1];
@@ -346,13 +380,13 @@ export class DashboardRepository {
     }
 
     const transactionStart =
-      options.startDate && options.startDate > firstMonth.start
-        ? options.startDate
+      normalizedStartDate && normalizedStartDate > firstMonth.start
+        ? normalizedStartDate
         : firstMonth.start;
     const finalMonthEnd = new Date(lastMonth.end.getTime() - 1);
     const transactionEnd =
-      options.endDate && options.endDate < finalMonthEnd
-        ? options.endDate
+      normalizedEndDate && normalizedEndDate < finalMonthEnd
+        ? normalizedEndDate
         : finalMonthEnd;
 
     if (transactionStart > transactionEnd) {

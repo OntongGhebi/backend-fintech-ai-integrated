@@ -1164,6 +1164,66 @@ describe('DashboardRepository', () => {
       expect(result.transactions).toHaveLength(1);
     });
 
+    it('should interpret UTC-midnight date filters as local calendar dates for monthly budget performance', async () => {
+      const categoryId = '0332c93d-c052-421c-9d7a-4d0acf6df3e5';
+      const budgetId = 'e5b97fb1-8c9d-4550-b154-3550f2ea364e';
+      const startDate = new Date('2026-11-01T00:00:00.000Z');
+      const endDate = new Date('2026-11-30T00:00:00.000Z');
+      const month = getBudgetMonthRange(
+        new Date('2026-11-01T12:00:00.000Z'),
+        'Asia/Jakarta',
+      );
+
+      prisma.budget.findMany.mockResolvedValue([
+        {
+          id: budgetId,
+          name: 'Monthly Food Budget',
+          categoryId,
+          amount: '9999999',
+          allocations: [
+            {
+              periodStart: month.periodStart,
+              amount: '1500000',
+            },
+          ],
+          category: {
+            id: categoryId,
+            name: 'Food',
+          },
+        },
+      ]);
+      prisma.transaction.groupBy.mockResolvedValue([
+        {
+          categoryId,
+          _sum: { amount: '117000' },
+          _count: { _all: 3 },
+        },
+      ]);
+
+      const result = await repository.getBudgetPerformance(userId, {
+        startDate,
+        endDate,
+      });
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            transactionDate: {
+              gte: new Date('2026-10-31T17:00:00.000Z'),
+              lte: new Date('2026-11-30T16:59:59.999Z'),
+            },
+          }),
+        }),
+      );
+      expect(result.transactions).toEqual([
+        expect.objectContaining({
+          categoryId,
+          _sum: { amount: '117000' },
+          _count: { _all: 3 },
+        }),
+      ]);
+    });
+
     it('should sum monthly allocations across a multi-month report range', async () => {
       const categoryId = '11111111-1111-4111-8111-111111111111';
       const startDate = new Date('2026-09-01T00:00:00.000Z');
@@ -1228,7 +1288,7 @@ describe('DashboardRepository', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             transactionDate: {
-              gte: startDate,
+              gte: months[0].start,
               lte: new Date(months[2].end.getTime() - 1),
             },
           }),
@@ -1307,7 +1367,7 @@ describe('DashboardRepository', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             transactionDate: {
-              gte: startDate,
+              gte: new Date('2026-08-31T17:00:00.000Z'),
               lte: new Date('2026-09-30T16:59:59.999Z'),
             },
           }),
