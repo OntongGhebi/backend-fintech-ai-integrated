@@ -142,6 +142,17 @@ export class TransactionsRepository {
         userId,
         deletedAt: null,
       },
+      include: {
+        children: {
+          where: {
+            isActive: true,
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
     });
   }
 

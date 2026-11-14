@@ -79,11 +79,8 @@ export class TransactionDomainService {
         userId: params.userId,
         accountId: params.accountId,
         categoryId: params.categoryId ?? null,
-
         recurringTransactionId: params.recurringTransactionId ?? null,
-
         recurringExecutionKey: params.recurringExecutionKey ?? null,
-
         type: params.type as TransactionType,
         amount: params.amount,
         currency: 'IDR',
@@ -113,6 +110,17 @@ export class TransactionDomainService {
         userId,
         deletedAt: null,
       },
+      include: {
+        children: {
+          where: {
+            isActive: true,
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
     });
 
     if (!category) {
@@ -123,13 +131,21 @@ export class TransactionDomainService {
       throw new BadRequestException('Category is inactive');
     }
 
-    if (type === 'INCOME' && category.type !== 'INCOME') {
+    const children: unknown = category.children;
+
+    if (Array.isArray(children) && Object.keys(children).length > 0) {
+      throw new BadRequestException(
+        'Parent category cannot be used for transactions',
+      );
+    }
+
+    if (type === 'INCOME' && String(category.type) !== 'INCOME') {
       throw new BadRequestException(
         'Income transaction requires an income category',
       );
     }
 
-    if (type === 'EXPENSE' && category.type !== 'EXPENSE') {
+    if (type === 'EXPENSE' && String(category.type) !== 'EXPENSE') {
       throw new BadRequestException(
         'Expense transaction requires an expense category',
       );

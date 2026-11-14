@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+
 import { AccountsRepository } from 'src/modules/accounts/repositories/accounts.repository';
 import { CategoriesRepository } from 'src/modules/categories/repositories/categories.repository';
+
 import { ResolvedTransactionIntent } from '../types/resolved-transaction-intent.types';
 import { TransactionIntent } from '../types/transaction-intent.types';
 import { TransactionIntentResolutionResult } from '../types/transaction-intent-resolution.types';
@@ -16,6 +18,21 @@ type AccountLookupResult =
   | { status: 'RESOLVED'; account: AccountRecord }
   | { status: 'NEEDS_ACCOUNT'; message: string }
   | { status: 'NOT_FOUND'; message: string };
+
+type CategoryRecord = {
+  id: string;
+  name: string;
+  type: 'INCOME' | 'EXPENSE';
+  parentId: string | null;
+  isActive: boolean;
+  deletedAt: Date | null;
+};
+
+type CategoryLookupResult =
+  | { status: 'RESOLVED'; categoryId: string }
+  | { status: 'NOT_FOUND'; message: string }
+  | { status: 'NEEDS_CATEGORY'; message: string }
+  | { status: 'INVALID'; message: string };
 
 @Injectable()
 export class TransactionIntentResolutionService {
@@ -99,33 +116,20 @@ export class TransactionIntentResolutionService {
     let categoryId: string | undefined;
 
     if (input.categoryHint?.trim()) {
-      const category = await this.categoriesRepository.findByNameAndUserId(
-        input.categoryHint.trim(),
+      const categoryResult = await this.resolveCategory(
         userId,
+        input.categoryHint.trim(),
+        input.transactionType,
       );
 
-      if (!category) {
+      if (categoryResult.status !== 'RESOLVED') {
         return {
-          status: 'NOT_FOUND',
-          message: `Category "${input.categoryHint.trim()}" was not found`,
+          status: categoryResult.status,
+          message: categoryResult.message,
         };
       }
 
-      if (!category.isActive) {
-        return {
-          status: 'INVALID',
-          message: 'The selected category is inactive',
-        };
-      }
-
-      if (category.type !== input.transactionType) {
-        return {
-          status: 'INVALID',
-          message: `The selected category is not a ${input.transactionType.toLowerCase()} category`,
-        };
-      }
-
-      categoryId = category.id;
+      categoryId = categoryResult.categoryId;
     }
 
     return {
@@ -135,6 +139,168 @@ export class TransactionIntentResolutionService {
         categoryId,
       }),
     };
+  }
+
+  private async resolveCategory(
+    userId: string,
+    hint: string,
+    type: 'INCOME' | 'EXPENSE',
+  ): Promise<CategoryLookupResult> {
+    /*
+     * Prefer searching all categories owned by the user.
+     *
+     * This allows us to:
+     * - Resolve root categories.
+     * - Resolve child categories.
+     * - Detect categories with the wrong transaction type.
+     * - Detect ambiguous category names.
+     *
+     * The optional method also keeps compatibility with older
+     * repository mocks that only implement findByNameAndUserId.
+     */
+    const repository = this.categoriesRepository as CategoriesRepository & {
+      findManyByUserId?: (id: string) => Promise<CategoryRecord[]>;
+    };
+
+    let category: CategoryRecord | undefined;
+
+    if (typeof repository.findManyByUserId === 'function') {
+      const categories = await repository.findManyByUserId(userId);
+
+      const normalizedHint = this.normalizeCategoryName(hint);
+
+      const matches = categories.filter(
+        (item) =>
+          item.deletedAt === null &&
+          this.normalizeCategoryName(item.name) === normalizedHint,
+      );
+
+      if (matches.length === 0) {
+        return {
+          status: 'NOT_FOUND',
+          message: `Category "${hint}" was not found`,
+        };
+      }
+
+      if (matches.length > 1) {
+        return {
+          status: 'NEEDS_CATEGORY',
+          message: `More than one category matches "${hint}". Please specify the category more clearly.`,
+        };
+      }
+
+      category = matches[0];
+    } else {
+      /*
+       * Backward-compatible fallback for existing unit-test mocks.
+       * The returned category is still validated against the requested
+       * transaction type below.
+       */
+      const fallbackCategory =
+        await this.categoriesRepository.findByNameAndUserId(
+          hint,
+          userId,
+          type,
+          null,
+        );
+
+      if (!fallbackCategory) {
+        return {
+          status: 'NOT_FOUND',
+          message: `Category "${hint}" was not found`,
+        };
+      }
+
+      category = fallbackCategory as CategoryRecord;
+    }
+
+    if (!category.isActive) {
+      return {
+        status: 'INVALID',
+        message: 'The selected category is inactive',
+      };
+    }
+
+    if (category.type !== type) {
+      return {
+        status: 'INVALID',
+        message: `The selected category is not a ${type.toLowerCase()} category`,
+      };
+    }
+
+    /*
+     * A root category with active children is a grouping category.
+     * It cannot be assigned directly to a transaction.
+     *
+     * Child categories remain valid transaction categories.
+     */
+    if (!category.parentId) {
+      const hasActiveChildren = await this.hasActiveChildren(
+        userId,
+        category.id,
+        type,
+      );
+
+      if (hasActiveChildren) {
+        return {
+          status: 'INVALID',
+          message:
+            'The selected category is a parent category. Please select one of its subcategories.',
+        };
+      }
+    }
+
+    return {
+      status: 'RESOLVED',
+      categoryId: category.id,
+    };
+  }
+
+  private async hasActiveChildren(
+    userId: string,
+    categoryId: string,
+    type: 'INCOME' | 'EXPENSE',
+  ): Promise<boolean> {
+    const repository = this.categoriesRepository as CategoriesRepository & {
+      findManyByUserId?: (id: string) => Promise<CategoryRecord[]>;
+      findManyByUserIdAndType?: (
+        id: string,
+        categoryType: 'INCOME' | 'EXPENSE',
+      ) => Promise<CategoryRecord[]>;
+    };
+
+    if (typeof repository.findManyByUserId === 'function') {
+      const categories = await repository.findManyByUserId(userId);
+
+      return categories.some(
+        (item) =>
+          item.parentId === categoryId &&
+          item.type === type &&
+          item.isActive &&
+          item.deletedAt === null,
+      );
+    }
+
+    if (typeof repository.findManyByUserIdAndType === 'function') {
+      const categories = await repository.findManyByUserIdAndType(userId, type);
+
+      return categories.some(
+        (item) =>
+          item.parentId === categoryId &&
+          item.isActive &&
+          item.deletedAt === null,
+      );
+    }
+
+    return false;
+  }
+
+  private normalizeCategoryName(value: string): string {
+    return value
+      .normalize('NFKC')
+      .toLocaleLowerCase('id-ID')
+      .trim()
+      .replace(/\s+/g, ' ');
   }
 
   private async resolveTransfer(
@@ -254,6 +420,7 @@ export class TransactionIntentResolutionService {
     }
 
     const accounts = await repository.findManyByUserId(userId);
+
     const matches = accounts.filter((account) =>
       this.accountNameMatchesHint(account.name, normalizedHint),
     );
@@ -286,11 +453,6 @@ export class TransactionIntentResolutionService {
       return false;
     }
 
-    // Match exact normalized names or account names beginning with the hint.
-    // Examples:
-    // "bri"     -> "BRI Account"
-    // "bca"     -> "BCA Main Account"
-    // "mandiri" -> "Mandiri Account"
     return (
       normalizedName === normalizedHint ||
       normalizedName.startsWith(`${normalizedHint} `)

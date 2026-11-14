@@ -62,31 +62,7 @@ export class TransactionsService {
     }
 
     if (categoryId) {
-      const category =
-        await this.transactionsRepository.findCategoryByIdAndUserId(
-          categoryId,
-          userId,
-        );
-
-      if (!category) {
-        throw new NotFoundException('Category not found');
-      }
-
-      if (!category.isActive || category.deletedAt) {
-        throw new BadRequestException('Category is inactive');
-      }
-
-      if (dto.type === TransactionType.INCOME && category.type !== 'INCOME') {
-        throw new BadRequestException(
-          'Income transaction requires an income category',
-        );
-      }
-
-      if (dto.type === TransactionType.EXPENSE && category.type !== 'EXPENSE') {
-        throw new BadRequestException(
-          'Expense transaction requires an expense category',
-        );
-      }
+      await this.validateCategory(categoryId, userId, dto.type);
     }
 
     const transaction = await this.transactionsRepository.create({
@@ -105,6 +81,7 @@ export class TransactionsService {
     });
 
     await this.notifyBudgetAlertSafely(transaction);
+
     return transaction;
   }
 
@@ -174,6 +151,7 @@ export class TransactionsService {
     });
 
     await this.notifyBudgetAlertSafely(transaction);
+
     return transaction;
   }
 
@@ -218,13 +196,23 @@ export class TransactionsService {
       throw new BadRequestException('Category is inactive');
     }
 
-    if (type === 'INCOME' && category.type !== 'INCOME') {
+    // A parent category with active children is a grouping category.
+    // Only leaf categories can be assigned to transactions.
+    const children: unknown = category.children;
+
+    if (Array.isArray(children) && Object.keys(children).length > 0) {
+      throw new BadRequestException(
+        'Parent category cannot be used for transactions',
+      );
+    }
+
+    if (type === 'INCOME' && String(category.type) !== 'INCOME') {
       throw new BadRequestException(
         'Income transaction requires an income category',
       );
     }
 
-    if (type === 'EXPENSE' && category.type !== 'EXPENSE') {
+    if (type === 'EXPENSE' && String(category.type) !== 'EXPENSE') {
       throw new BadRequestException(
         'Expense transaction requires an expense category',
       );
@@ -298,7 +286,10 @@ export class TransactionsService {
         },
       });
 
-    if (transaction) await this.notifyBudgetAlertSafely(transaction);
+    if (transaction) {
+      await this.notifyBudgetAlertSafely(transaction);
+    }
+
     return transaction;
   }
 
@@ -366,7 +357,9 @@ export class TransactionsService {
       }
     }
 
-    if (dto.categoryId !== undefined) {
+    // null means the user intentionally removes the category.
+    // Only validate when a non-null category ID is supplied.
+    if (dto.categoryId !== undefined && dto.categoryId !== null) {
       await this.validateCategory(dto.categoryId, userId, transaction.type);
     }
 
@@ -503,7 +496,6 @@ export class TransactionsService {
     const transferGroupId = idempotencyKey ?? crypto.randomUUID();
 
     const transactionDate = new Date(dto.transactionDate);
-
     const description = dto.description?.trim() || null;
 
     const result = await this.transactionsRepository.createTransfer(
