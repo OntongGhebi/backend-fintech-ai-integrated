@@ -12,8 +12,10 @@ import { CategoriesService } from '../categories/categories.service';
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { GetBudgetsQueryDto } from './dto/get-budgets-query.dto';
 import { UpdateBudgetStatusDto } from './dto/update-budget-status.dto';
-import { UpdateBudgetDto } from './dto/update-budget.dto';
-import { BudgetsRepository } from './repositories/budgets.repository';
+import {
+  BudgetAllocationInput,
+  BudgetsRepository,
+} from './repositories/budgets.repository';
 import { BudgetsService } from './budgets.service';
 
 describe('BudgetsService', () => {
@@ -29,11 +31,17 @@ describe('BudgetsService', () => {
     findByNameAndUserId: jest.Mock;
     findByNameAndUserIdExceptId: jest.Mock;
     update: jest.Mock;
-    updateWithAllocations: jest.Mock;
+    updateWithAllocationsAndScopes: jest.Mock<
+      ReturnType<BudgetsRepository['updateWithAllocationsAndScopes']>,
+      Parameters<BudgetsRepository['updateWithAllocationsAndScopes']>
+    >;
     softDelete: jest.Mock;
   };
 
-  let categoriesService: { findById: jest.Mock };
+  let categoriesService: {
+    findById: jest.Mock;
+    validateBudgetScopeCategory: jest.Mock;
+  };
 
   const userId = '11111111-1111-4111-8111-111111111111';
   const budgetId = '22222222-2222-4222-8222-222222222222';
@@ -66,11 +74,17 @@ describe('BudgetsService', () => {
       findByNameAndUserId: jest.fn(),
       findByNameAndUserIdExceptId: jest.fn(),
       update: jest.fn(),
-      updateWithAllocations: jest.fn(),
+      updateWithAllocationsAndScopes: jest.fn<
+        ReturnType<BudgetsRepository['updateWithAllocationsAndScopes']>,
+        Parameters<BudgetsRepository['updateWithAllocationsAndScopes']>
+      >(),
       softDelete: jest.fn(),
     };
 
-    categoriesService = { findById: jest.fn() };
+    categoriesService = {
+      findById: jest.fn(),
+      validateBudgetScopeCategory: jest.fn(),
+    };
 
     service = new BudgetsService(
       budgetsRepository as unknown as BudgetsRepository,
@@ -90,7 +104,9 @@ describe('BudgetsService', () => {
 
     it('creates a budget and its first monthly allocation', async () => {
       budgetsRepository.findByNameAndUserId.mockResolvedValue(null);
-      categoriesService.findById.mockResolvedValue(baseBudget.category);
+      categoriesService.validateBudgetScopeCategory.mockResolvedValue(
+        baseBudget.category,
+      );
       budgetsRepository.createWithInitialAllocation.mockResolvedValue(
         baseBudget,
       );
@@ -101,10 +117,9 @@ describe('BudgetsService', () => {
         'Monthly Food Budget',
         userId,
       );
-      expect(categoriesService.findById).toHaveBeenCalledWith(
-        categoryId,
-        userId,
-      );
+      expect(
+        categoriesService.validateBudgetScopeCategory,
+      ).toHaveBeenCalledWith(categoryId, userId, 'CATEGORY');
       expect(
         budgetsRepository.createWithInitialAllocation,
       ).toHaveBeenCalledWith(
@@ -113,11 +128,14 @@ describe('BudgetsService', () => {
           amount: '1500000',
           period: BudgetPeriod.MONTHLY,
           status: BudgetStatus.ACTIVE,
-          endDate: expect.any(Date),
+          endDate: new Date('2026-12-31T00:00:00.000Z'),
           category: { connect: { id: categoryId } },
+          scopeCategory: { connect: { id: categoryId } },
+          scopeType: 'CATEGORY',
         }),
         new Date('2026-09-01T00:00:00.000Z'),
         '1500000',
+        [],
       );
       expect(result).toEqual(baseBudget);
     });
@@ -142,8 +160,9 @@ describe('BudgetsService', () => {
         budgetsRepository.createWithInitialAllocation,
       ).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'Monthly Food Budget' }),
-        expect.any(Date),
+        new Date('2026-09-01T00:00:00.000Z'),
         '1500000',
+        [],
       );
     });
 
@@ -201,19 +220,22 @@ describe('BudgetsService', () => {
 
       await service.create(userId, { ...createDto, categoryId: undefined });
 
-      expect(categoriesService.findById).not.toHaveBeenCalled();
+      expect(
+        categoriesService.validateBudgetScopeCategory,
+      ).not.toHaveBeenCalled();
       expect(
         budgetsRepository.createWithInitialAllocation,
       ).toHaveBeenCalledWith(
-        expect.not.objectContaining({ category: expect.anything() }),
-        expect.any(Date),
+        expect.objectContaining({ scopeType: 'ALL_EXPENSES' }),
+        new Date('2026-09-01T00:00:00.000Z'),
         '1500000',
+        [],
       );
     });
 
     it('validates the category through CategoriesService', async () => {
       budgetsRepository.findByNameAndUserId.mockResolvedValue(null);
-      categoriesService.findById.mockRejectedValue(
+      categoriesService.validateBudgetScopeCategory.mockRejectedValue(
         new NotFoundException('Category not found'),
       );
 
@@ -307,7 +329,9 @@ describe('BudgetsService', () => {
       budgetsRepository.findByIdAndUserId.mockResolvedValue(baseBudget);
       budgetsRepository.findByNameAndUserIdExceptId.mockResolvedValue(null);
       budgetsRepository.update.mockResolvedValue({ count: 1 });
-      budgetsRepository.updateWithAllocations.mockResolvedValue(baseBudget);
+      budgetsRepository.updateWithAllocationsAndScopes.mockResolvedValue(
+        baseBudget,
+      );
     });
 
     it('updates the budget name', async () => {
@@ -336,14 +360,18 @@ describe('BudgetsService', () => {
         service.update(userId, budgetId, { name: 'Transport Budget' }),
       ).rejects.toThrow(ConflictException);
       expect(budgetsRepository.update).not.toHaveBeenCalled();
-      expect(budgetsRepository.updateWithAllocations).not.toHaveBeenCalled();
+      expect(
+        budgetsRepository.updateWithAllocationsAndScopes,
+      ).not.toHaveBeenCalled();
     });
 
     it('requires periodStart when amount is updated', async () => {
       await expect(
         service.update(userId, budgetId, { amount: '2000000' }),
       ).rejects.toThrow('periodStart is required');
-      expect(budgetsRepository.updateWithAllocations).not.toHaveBeenCalled();
+      expect(
+        budgetsRepository.updateWithAllocationsAndScopes,
+      ).not.toHaveBeenCalled();
     });
 
     it('rejects periodStart without amount', async () => {
@@ -358,7 +386,9 @@ describe('BudgetsService', () => {
         periodStart: '2026-11-01',
       });
 
-      expect(budgetsRepository.updateWithAllocations).toHaveBeenCalledWith(
+      expect(
+        budgetsRepository.updateWithAllocationsAndScopes,
+      ).toHaveBeenCalledWith(
         budgetId,
         userId,
         expect.objectContaining({ amount: '2000000' }),
@@ -368,6 +398,7 @@ describe('BudgetsService', () => {
             amount: '2000000',
           },
         ],
+        undefined,
       );
       expect(budgetsRepository.update).not.toHaveBeenCalled();
     });
@@ -385,7 +416,9 @@ describe('BudgetsService', () => {
         futureMonths: 3,
       });
 
-      expect(budgetsRepository.updateWithAllocations).toHaveBeenCalledWith(
+      expect(
+        budgetsRepository.updateWithAllocationsAndScopes,
+      ).toHaveBeenCalledWith(
         budgetId,
         userId,
         expect.objectContaining({ amount: '2200000' }),
@@ -403,6 +436,7 @@ describe('BudgetsService', () => {
             amount: '2200000',
           },
         ],
+        undefined,
       );
     });
 
@@ -418,8 +452,8 @@ describe('BudgetsService', () => {
         applyToFuture: true,
       });
 
-      const allocations =
-        budgetsRepository.updateWithAllocations.mock.calls[0][3];
+      const allocations: BudgetAllocationInput[] =
+        budgetsRepository.updateWithAllocationsAndScopes.mock.calls[0][3];
       expect(allocations).toHaveLength(2);
       expect(allocations[1].periodStart).toEqual(
         new Date('2026-12-01T00:00:00.000Z'),
@@ -435,7 +469,9 @@ describe('BudgetsService', () => {
           futureMonths: 4,
         }),
       ).rejects.toThrow('futureMonths exceeds');
-      expect(budgetsRepository.updateWithAllocations).not.toHaveBeenCalled();
+      expect(
+        budgetsRepository.updateWithAllocationsAndScopes,
+      ).not.toHaveBeenCalled();
     });
 
     it('rejects historical allocation changes', async () => {
@@ -445,7 +481,9 @@ describe('BudgetsService', () => {
           periodStart: '2026-10-01',
         }),
       ).rejects.toThrow('Historical budget allocations');
-      expect(budgetsRepository.updateWithAllocations).not.toHaveBeenCalled();
+      expect(
+        budgetsRepository.updateWithAllocationsAndScopes,
+      ).not.toHaveBeenCalled();
     });
 
     it('rejects invalid month format', async () => {
@@ -497,8 +535,8 @@ describe('BudgetsService', () => {
         budgetId,
         userId,
         expect.objectContaining({
-          startDate: expect.any(Date),
-          endDate: expect.any(Date),
+          startDate: new Date('2026-10-01T00:00:00.000Z'),
+          endDate: new Date('2026-12-31T00:00:00.000Z'),
         }),
       );
     });
@@ -514,35 +552,58 @@ describe('BudgetsService', () => {
     });
 
     it('connects a new category', async () => {
-      categoriesService.findById.mockResolvedValue({ id: categoryId });
+      categoriesService.validateBudgetScopeCategory.mockResolvedValue({
+        id: categoryId,
+      });
 
       await service.update(userId, budgetId, { categoryId });
 
-      expect(categoriesService.findById).toHaveBeenCalledWith(
-        categoryId,
-        userId,
-      );
-      expect(budgetsRepository.update).toHaveBeenCalledWith(
+      expect(
+        categoriesService.validateBudgetScopeCategory,
+      ).toHaveBeenCalledWith(categoryId, userId, 'CATEGORY');
+      expect(
+        budgetsRepository.updateWithAllocationsAndScopes,
+      ).toHaveBeenCalledWith(
         budgetId,
         userId,
-        expect.objectContaining({ categoryId }),
+        expect.objectContaining({
+          categoryId,
+          scopeCategoryId: categoryId,
+          scopeType: 'CATEGORY',
+        }),
+        null,
+        [],
       );
     });
 
     it('disconnects the category when categoryId is null', async () => {
       await service.update(userId, budgetId, { categoryId: null });
 
-      expect(categoriesService.findById).not.toHaveBeenCalled();
-      expect(budgetsRepository.update).toHaveBeenCalledWith(budgetId, userId, {
-        categoryId: null,
-      });
+      expect(
+        categoriesService.validateBudgetScopeCategory,
+      ).not.toHaveBeenCalled();
+      expect(
+        budgetsRepository.updateWithAllocationsAndScopes,
+      ).toHaveBeenCalledWith(
+        budgetId,
+        userId,
+        expect.objectContaining({
+          categoryId: null,
+          scopeCategoryId: null,
+          scopeType: 'ALL_EXPENSES',
+        }),
+        null,
+        [],
+      );
     });
 
     it('returns the existing budget when no fields are provided', async () => {
       const result = await service.update(userId, budgetId, {});
 
       expect(budgetsRepository.update).not.toHaveBeenCalled();
-      expect(budgetsRepository.updateWithAllocations).not.toHaveBeenCalled();
+      expect(
+        budgetsRepository.updateWithAllocationsAndScopes,
+      ).not.toHaveBeenCalled();
       expect(result).toEqual(baseBudget);
     });
 
@@ -556,7 +617,7 @@ describe('BudgetsService', () => {
     });
 
     it('throws NotFoundException if the budget disappears before transaction update', async () => {
-      budgetsRepository.updateWithAllocations.mockResolvedValue(null);
+      budgetsRepository.updateWithAllocationsAndScopes.mockResolvedValue(null);
 
       await expect(
         service.update(userId, budgetId, {

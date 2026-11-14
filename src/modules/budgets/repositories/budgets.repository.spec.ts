@@ -87,7 +87,16 @@ describe('BudgetsRepository monthly allocations', () => {
       where: { id: budgetId },
       include: {
         category: true,
-        allocations: { orderBy: { periodStart: 'asc' } },
+        scopeCategory: true,
+        categoryScopes: {
+          include: {
+            category: true,
+          },
+          orderBy: {
+            categoryId: 'asc',
+          },
+        },
+        allocations: { orderBy: { periodStart: 'desc' } },
       },
     });
   });
@@ -104,7 +113,7 @@ describe('BudgetsRepository monthly allocations', () => {
     const result = await repository.updateWithAllocations(
       budgetId,
       userId,
-      { amount: '2000000' } as never,
+      { amount: '2000000' },
       [{ periodStart: month, amount: '2000000' }],
     );
 
@@ -141,7 +150,7 @@ describe('BudgetsRepository monthly allocations', () => {
     const result = await repository.updateWithAllocations(
       budgetId,
       userId,
-      { amount: '2000000' } as never,
+      { amount: '2000000' },
       [{ periodStart: month, amount: '2000000' }],
     );
 
@@ -161,7 +170,7 @@ describe('BudgetsRepository monthly allocations', () => {
       repository.updateWithAllocations(
         budgetId,
         userId,
-        { amount: '2000000' } as never,
+        { amount: '2000000' },
         [{ periodStart: month, amount: '2000000' }],
       ),
     ).rejects.toThrow('allocation write failed');

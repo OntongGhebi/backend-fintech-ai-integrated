@@ -346,4 +346,83 @@ export class CategoriesService {
       archived: true,
     };
   }
+
+  async validateBudgetScopeCategory(
+    categoryId: string,
+    userId: string,
+    scopeType: 'CATEGORY' | 'CATEGORY_GROUP',
+  ) {
+    const category = await this.categoriesRepository.findByIdAndUserId(
+      categoryId,
+      userId,
+    );
+
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    if (!category.isActive || category.deletedAt) {
+      throw new BadRequestException('Category is inactive');
+    }
+
+    if (String(category.type) !== 'EXPENSE') {
+      throw new BadRequestException(
+        'Budget scope only supports expense categories',
+      );
+    }
+
+    if (scopeType === 'CATEGORY' && category.parentId) {
+      // A child category can be a leaf, but must not have active children.
+      const children = await this.categoriesRepository.findActiveChildren(
+        categoryId,
+        userId,
+      );
+
+      if (children.length > 0) {
+        throw new BadRequestException(
+          'CATEGORY scope must reference a leaf category',
+        );
+      }
+
+      return category;
+    }
+
+    if (scopeType === 'CATEGORY') {
+      const children = await this.categoriesRepository.findActiveChildren(
+        categoryId,
+        userId,
+      );
+
+      if (children.length > 0) {
+        throw new BadRequestException(
+          'Parent category cannot be used with CATEGORY scope. Use CATEGORY_GROUP instead.',
+        );
+      }
+
+      return category;
+    }
+
+    if (scopeType === 'CATEGORY_GROUP') {
+      if (category.parentId) {
+        throw new BadRequestException(
+          'CATEGORY_GROUP scope must reference a root category',
+        );
+      }
+
+      const children = await this.categoriesRepository.findActiveChildren(
+        categoryId,
+        userId,
+      );
+
+      if (children.length === 0) {
+        throw new BadRequestException(
+          'CATEGORY_GROUP scope requires at least one active subcategory',
+        );
+      }
+
+      return category;
+    }
+
+    return category;
+  }
 }

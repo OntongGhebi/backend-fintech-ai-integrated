@@ -1,5 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayNotEmpty,
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsDecimal,
@@ -12,14 +15,18 @@ import {
   Matches,
   Max,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 import { BudgetPeriod } from 'src/database/enums/budget-period.enum';
+import { BudgetScopeType } from '../../../../generated/prisma/client.js';
+
+const budgetScopeTypeEnum = BudgetScopeType as Record<string, string>;
 
 export class UpdateBudgetDto {
   @ApiPropertyOptional({
     description: 'Budget name',
-    example: 'Monthly Food Budget Updated',
+    example: 'Updated Food Budget',
     minLength: 1,
     maxLength: 100,
   })
@@ -29,10 +36,8 @@ export class UpdateBudgetDto {
   name?: string;
 
   @ApiPropertyOptional({
-    description:
-      'Monthly allocation amount in IDR. Requires periodStart. Maximum 4 decimal places.',
+    description: 'Monthly allocation amount',
     example: '2000000',
-    pattern: '^(?=.*[1-9])\\d+(\\.\\d{1,4})?$',
   })
   @IsOptional()
   @IsDecimal(
@@ -51,10 +56,8 @@ export class UpdateBudgetDto {
   amount?: string;
 
   @ApiPropertyOptional({
-    description:
-      'First day of the target allocation month (YYYY-MM-01). Required when amount is provided.',
+    description: 'First day of the target allocation month',
     example: '2026-11-01',
-    pattern: '^\\d{4}-\\d{2}-01$',
   })
   @IsOptional()
   @IsDateString()
@@ -63,18 +66,12 @@ export class UpdateBudgetDto {
   })
   periodStart?: string;
 
-  @ApiPropertyOptional({
-    description:
-      'When true, apply the amount to the selected month and following months.',
-    default: false,
-  })
+  @ApiPropertyOptional({ default: false })
   @IsOptional()
   @IsBoolean()
   applyToFuture?: boolean;
 
   @ApiPropertyOptional({
-    description:
-      'Number of months to update, including periodStart. Allowed from 1 to 24; defaults to 12 when applyToFuture is true.',
     minimum: 1,
     maximum: 24,
     default: 12,
@@ -86,26 +83,19 @@ export class UpdateBudgetDto {
   futureMonths?: number;
 
   @ApiPropertyOptional({
-    description: 'Budget period',
     enum: BudgetPeriod,
-    example: BudgetPeriod.MONTHLY,
   })
   @IsOptional()
   @IsEnum(BudgetPeriod)
   period?: BudgetPeriod;
 
-  @ApiPropertyOptional({
-    description: 'Budget start date in ISO 8601 date format',
-    example: '2026-09-01',
-  })
+  @ApiPropertyOptional({ example: '2026-09-01' })
   @IsOptional()
   @IsDateString()
   startDate?: string;
 
   @ApiPropertyOptional({
-    description:
-      'Budget end date in ISO 8601 date format. Send null to remove the end date.',
-    example: '2026-12-31',
+    description: 'Send null to remove the end date.',
     nullable: true,
   })
   @IsOptional()
@@ -113,11 +103,46 @@ export class UpdateBudgetDto {
   endDate?: string | null;
 
   @ApiPropertyOptional({
-    description: 'Category UUID. Send null to remove the category association.',
-    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+    enum: BudgetScopeType as unknown as object,
+    description: 'New budget scope type',
+  })
+  @IsOptional()
+  @IsEnum(budgetScopeTypeEnum)
+  scopeType?: BudgetScopeType;
+
+  @ApiPropertyOptional({
+    description:
+      'Category ID for CATEGORY or CATEGORY_GROUP. Send null to clear it.',
+    nullable: true,
+  })
+  @ValidateIf(
+    (dto: UpdateBudgetDto) =>
+      dto.scopeCategoryId !== undefined && dto.scopeCategoryId !== null,
+  )
+  @IsUUID('4')
+  scopeCategoryId?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Category IDs for CUSTOM scope',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  categoryIds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Legacy category field. Send null to remove the category association.',
     nullable: true,
   })
   @IsOptional()
+  @ValidateIf(
+    (dto: UpdateBudgetDto) =>
+      dto.categoryId !== undefined && dto.categoryId !== null,
+  )
   @IsUUID('4')
   categoryId?: string | null;
 }

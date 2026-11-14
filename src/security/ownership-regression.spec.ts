@@ -239,19 +239,15 @@ describe('Ownership and IDOR regression', () => {
 
       await repository.findByIdAndUserId(resourceId, ownerUserId);
 
-      expect(prisma.budget.findFirst).toHaveBeenCalledWith({
-        where: {
-          id: resourceId,
-          userId: ownerUserId,
-          deletedAt: null,
-        },
-        include: {
-          category: true,
-          allocations: {
-            orderBy: { periodStart: 'desc' },
+      expect(prisma.budget.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: resourceId,
+            userId: ownerUserId,
+            deletedAt: null,
           },
-        },
-      });
+        }),
+      );
     });
 
     it('scopes budget updates to the authenticated owner', async () => {

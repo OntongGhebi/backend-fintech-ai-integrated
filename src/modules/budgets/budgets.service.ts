@@ -6,17 +6,25 @@ import {
 } from '@nestjs/common';
 
 import { BudgetStatus } from 'src/database/enums/budget-status.enum';
+import { TransactionType } from 'src/database/enums/transaction-type.enum';
+import { BudgetScopeType } from '../../../generated/prisma/client.js';
 
 import { CategoriesService } from '../categories/categories.service';
 
 import { CreateBudgetDto } from './dto/create-budget.dto';
+import { GetBudgetsQueryDto } from './dto/get-budgets-query.dto';
+import { UpdateBudgetDto } from './dto/update-budget.dto';
+import { UpdateBudgetStatusDto } from './dto/update-budget-status.dto';
 import {
   BudgetsRepository,
   BudgetAllocationInput,
 } from './repositories/budgets.repository';
-import { GetBudgetsQueryDto } from './dto/get-budgets-query.dto';
-import { UpdateBudgetDto } from './dto/update-budget.dto';
-import { UpdateBudgetStatusDto } from './dto/update-budget-status.dto';
+
+interface ResolvedBudgetScope {
+  scopeType: BudgetScopeType;
+  scopeCategoryId: string | null;
+  categoryIds: string[];
+}
 
 @Injectable()
 export class BudgetsService {
@@ -56,27 +64,46 @@ export class BudgetsService {
       throw new ConflictException('A budget with this name already exists');
     }
 
-    if (dto.categoryId) {
-      await this.categoriesService.findById(dto.categoryId, userId);
-    }
+    const scope = await this.resolveCreateScope(userId, dto);
 
-    const initialPeriodStart = this.firstDayOfMonth(startDate);
+    const data = {
+      user: {
+        connect: {
+          id: userId,
+        },
+      },
+      name,
+      amount: dto.amount,
+      period: dto.period,
+      startDate,
+      endDate,
+      status: BudgetStatus.ACTIVE,
+      scopeType: scope.scopeType,
+      ...(scope.scopeCategoryId
+        ? {
+            scopeCategory: {
+              connect: {
+                id: scope.scopeCategoryId,
+              },
+            },
+          }
+        : {}),
+      ...(scope.scopeType === BudgetScopeType.CATEGORY && scope.scopeCategoryId
+        ? {
+            category: {
+              connect: {
+                id: scope.scopeCategoryId,
+              },
+            },
+          }
+        : {}),
+    };
 
     return this.budgetsRepository.createWithInitialAllocation(
-      {
-        user: { connect: { id: userId } },
-        name,
-        amount: dto.amount,
-        period: dto.period,
-        startDate,
-        endDate,
-        status: BudgetStatus.ACTIVE,
-        ...(dto.categoryId
-          ? { category: { connect: { id: dto.categoryId } } }
-          : {}),
-      },
-      initialPeriodStart,
+      data,
+      this.firstDayOfMonth(startDate),
       dto.amount,
+      scope.categoryIds,
     );
   }
 
@@ -176,19 +203,32 @@ export class BudgetsService {
       );
     }
 
-    if (dto.categoryId !== undefined) {
-      if (dto.categoryId === null) {
-        Object.assign(data, { categoryId: null });
-      } else {
-        await this.categoriesService.findById(dto.categoryId, userId);
-        Object.assign(data, { categoryId: dto.categoryId });
-      }
+    const scopeChanged =
+      dto.scopeType !== undefined ||
+      dto.scopeCategoryId !== undefined ||
+      dto.categoryIds !== undefined ||
+      dto.categoryId !== undefined;
+
+    let categoryIdsForRepository: string[] | undefined;
+
+    if (scopeChanged) {
+      const scope = await this.resolveUpdateScope(userId, dto, existingBudget);
+
+      data.scopeType = scope.scopeType;
+      data.scopeCategoryId = scope.scopeCategoryId;
+      data.categoryId =
+        scope.scopeType === BudgetScopeType.CATEGORY
+          ? scope.scopeCategoryId
+          : null;
+
+      categoryIdsForRepository = scope.categoryIds;
     }
 
     if (dto.amount !== undefined) {
       this.assertPositiveAmount(dto.amount, 'amount');
 
       const periodStart = this.parseMonth(dto.periodStart!, 'periodStart');
+
       this.assertCurrentOrFutureMonth(periodStart);
       this.assertAllocationWithinBudget(periodStart, startDate, endDate);
 
@@ -200,15 +240,34 @@ export class BudgetsService {
         endDate,
       );
 
-      // Compatibility snapshot only. BudgetAllocation is the source of truth.
+      // Compatibility snapshot only. BudgetAllocation is authoritative.
       data.amount = dto.amount;
 
-      const updatedBudget = await this.budgetsRepository.updateWithAllocations(
-        budgetId,
-        userId,
-        data,
-        allocations,
-      );
+      const updatedBudget =
+        await this.budgetsRepository.updateWithAllocationsAndScopes(
+          budgetId,
+          userId,
+          data,
+          allocations,
+          categoryIdsForRepository,
+        );
+
+      if (!updatedBudget) {
+        throw new NotFoundException('Budget not found');
+      }
+
+      return updatedBudget;
+    }
+
+    if (scopeChanged) {
+      const updatedBudget =
+        await this.budgetsRepository.updateWithAllocationsAndScopes(
+          budgetId,
+          userId,
+          data,
+          null,
+          categoryIdsForRepository,
+        );
 
       if (!updatedBudget) {
         throw new NotFoundException('Budget not found');
@@ -238,7 +297,9 @@ export class BudgetsService {
 
     await this.budgetsRepository.softDelete(budgetId, userId);
 
-    return { message: 'Budget archived successfully' };
+    return {
+      message: 'Budget archived successfully',
+    };
   }
 
   async updateStatus(
@@ -264,6 +325,198 @@ export class BudgetsService {
     });
 
     return this.findById(userId, budgetId);
+  }
+
+  private async resolveCreateScope(
+    userId: string,
+    dto: CreateBudgetDto,
+  ): Promise<ResolvedBudgetScope> {
+    const scopeType =
+      dto.scopeType ??
+      (dto.categoryId
+        ? BudgetScopeType.CATEGORY
+        : BudgetScopeType.ALL_EXPENSES);
+
+    const scopeCategoryId = dto.scopeCategoryId ?? dto.categoryId ?? null;
+
+    if (scopeType === BudgetScopeType.ALL_EXPENSES) {
+      if (dto.scopeCategoryId || (dto.categoryIds?.length ?? 0) > 0) {
+        throw new BadRequestException(
+          'ALL_EXPENSES cannot have category scope references',
+        );
+      }
+
+      return {
+        scopeType,
+        scopeCategoryId: null,
+        categoryIds: [],
+      };
+    }
+
+    if (
+      scopeType === BudgetScopeType.CATEGORY ||
+      scopeType === BudgetScopeType.CATEGORY_GROUP
+    ) {
+      if (!scopeCategoryId) {
+        throw new BadRequestException(`${scopeType} requires scopeCategoryId`);
+      }
+
+      if ((dto.categoryIds?.length ?? 0) > 0) {
+        throw new BadRequestException(`${scopeType} cannot have categoryIds`);
+      }
+
+      await this.categoriesService.validateBudgetScopeCategory(
+        scopeCategoryId,
+        userId,
+        scopeType,
+      );
+
+      return {
+        scopeType,
+        scopeCategoryId,
+        categoryIds: [],
+      };
+    }
+
+    if (scopeType === BudgetScopeType.CUSTOM) {
+      if (dto.scopeCategoryId || dto.categoryId) {
+        throw new BadRequestException(
+          'CUSTOM cannot have scopeCategoryId or categoryId',
+        );
+      }
+
+      const categoryIds = this.normalizeCategoryIds(dto.categoryIds);
+
+      await this.validateCustomCategories(categoryIds, userId);
+
+      return {
+        scopeType,
+        scopeCategoryId: null,
+        categoryIds,
+      };
+    }
+
+    throw new BadRequestException('Unsupported budget scope type');
+  }
+
+  private async resolveUpdateScope(
+    userId: string,
+    dto: UpdateBudgetDto,
+    existingBudget: {
+      scopeType: BudgetScopeType;
+      scopeCategoryId: string | null;
+      categoryId: string | null;
+      categoryScopes: Array<{
+        categoryId: string;
+      }>;
+    },
+  ): Promise<ResolvedBudgetScope> {
+    let scopeType = existingBudget.scopeType;
+
+    if (dto.scopeType !== undefined) {
+      scopeType = dto.scopeType;
+    } else if (dto.categoryId !== undefined) {
+      scopeType = dto.categoryId
+        ? BudgetScopeType.CATEGORY
+        : BudgetScopeType.ALL_EXPENSES;
+    }
+
+    if (scopeType === BudgetScopeType.ALL_EXPENSES) {
+      if (dto.scopeCategoryId || (dto.categoryIds?.length ?? 0) > 0) {
+        throw new BadRequestException(
+          'ALL_EXPENSES cannot have category scope references',
+        );
+      }
+
+      return {
+        scopeType,
+        scopeCategoryId: null,
+        categoryIds: [],
+      };
+    }
+
+    if (
+      scopeType === BudgetScopeType.CATEGORY ||
+      scopeType === BudgetScopeType.CATEGORY_GROUP
+    ) {
+      if ((dto.categoryIds?.length ?? 0) > 0) {
+        throw new BadRequestException(`${scopeType} cannot have categoryIds`);
+      }
+
+      const scopeCategoryId =
+        dto.scopeCategoryId ??
+        (scopeType === BudgetScopeType.CATEGORY ? dto.categoryId : undefined) ??
+        existingBudget.scopeCategoryId ??
+        (scopeType === BudgetScopeType.CATEGORY
+          ? existingBudget.categoryId
+          : null);
+
+      if (!scopeCategoryId) {
+        throw new BadRequestException(`${scopeType} requires scopeCategoryId`);
+      }
+
+      await this.categoriesService.validateBudgetScopeCategory(
+        scopeCategoryId,
+        userId,
+        scopeType,
+      );
+
+      return {
+        scopeType,
+        scopeCategoryId,
+        categoryIds: [],
+      };
+    }
+
+    if (scopeType === BudgetScopeType.CUSTOM) {
+      if (dto.scopeCategoryId || dto.categoryId) {
+        throw new BadRequestException(
+          'CUSTOM cannot have scopeCategoryId or categoryId',
+        );
+      }
+
+      const categoryIds = this.normalizeCategoryIds(
+        dto.categoryIds ??
+          existingBudget.categoryScopes.map((item) => item.categoryId),
+      );
+
+      await this.validateCustomCategories(categoryIds, userId);
+
+      return {
+        scopeType,
+        scopeCategoryId: null,
+        categoryIds,
+      };
+    }
+
+    throw new BadRequestException('Unsupported budget scope type');
+  }
+
+  private normalizeCategoryIds(categoryIds: string[] | undefined): string[] {
+    if (!categoryIds || categoryIds.length === 0) {
+      throw new BadRequestException('CUSTOM requires at least one categoryId');
+    }
+
+    const normalized = [...new Set(categoryIds)];
+
+    if (normalized.length !== categoryIds.length) {
+      throw new BadRequestException('categoryIds must not contain duplicates');
+    }
+
+    return normalized;
+  }
+
+  private async validateCustomCategories(
+    categoryIds: string[],
+    userId: string,
+  ): Promise<void> {
+    for (const categoryId of categoryIds) {
+      await this.categoriesService.validateTransactionCategory(
+        categoryId,
+        userId,
+        TransactionType.EXPENSE,
+      );
+    }
   }
 
   private validateAllocationUpdateContract(dto: UpdateBudgetDto): void {
@@ -338,10 +591,14 @@ export class BudgetsService {
             'futureMonths exceeds the budget endDate range',
           );
         }
+
         break;
       }
 
-      allocations.push({ periodStart: month, amount });
+      allocations.push({
+        periodStart: month,
+        amount,
+      });
     }
 
     return allocations;
@@ -386,6 +643,7 @@ export class BudgetsService {
     }).formatToParts(new Date());
 
     const year = Number(parts.find((part) => part.type === 'year')?.value);
+
     const month = Number(parts.find((part) => part.type === 'month')?.value);
 
     return new Date(Date.UTC(year, month - 1, 1));

@@ -1,13 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../../../../generated/prisma/client.js';
 import { PrismaService } from 'src/database/prisma/prisma.service';
 
 type BudgetCreateData = Prisma.BudgetCreateInput;
-type BudgetUpdateData = Prisma.BudgetUpdateManyMutationInput;
+type BudgetUpdateData = Prisma.BudgetUncheckedUpdateManyInput;
+
 export interface BudgetAllocationInput {
   periodStart: Date;
   amount: string;
@@ -17,26 +14,38 @@ export interface BudgetAllocationInput {
 export class BudgetsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private readonly budgetInclude = {
+    category: true,
+    scopeCategory: true,
+    categoryScopes: {
+      include: {
+        category: true,
+      },
+      orderBy: {
+        categoryId: 'asc',
+      },
+    },
+    allocations: {
+      orderBy: {
+        periodStart: 'desc',
+      },
+    },
+  } satisfies Prisma.BudgetInclude;
+
   async create(data: BudgetCreateData) {
     return this.prisma.budget.create({
       data,
-      include: {
-        category: true,
-        allocations: { orderBy: { periodStart: 'asc' } },
-      },
+      include: this.budgetInclude,
     });
   }
 
-  /**
-   * Creates the budget and its first monthly allocation in one transaction.
-   * Budget.amount remains a compatibility snapshot; allocations are authoritative.
-   */
   async createWithInitialAllocation(
     data: BudgetCreateData,
     periodStart: Date,
     amount: string,
+    categoryIds: string[] = [],
   ) {
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    return this.prisma.$transaction(async (tx) => {
       const budget = await tx.budget.create({
         data,
       });
@@ -52,19 +61,30 @@ export class BudgetsRepository {
         },
       });
 
+      if (categoryIds.length > 0) {
+        await tx.budgetCategoryScope.createMany({
+          data: categoryIds.map((categoryId) => ({
+            budgetId: budget.id,
+            categoryId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
       return tx.budget.findUniqueOrThrow({
-        where: { id: budget.id },
-        include: {
-          category: true,
-          allocations: { orderBy: { periodStart: 'asc' } },
+        where: {
+          id: budget.id,
         },
+        include: this.budgetInclude,
       });
     });
   }
 
   async findById(budgetId: string) {
     return this.prisma.budget.findUnique({
-      where: { id: budgetId },
+      where: {
+        id: budgetId,
+      },
     });
   }
 
@@ -80,10 +100,18 @@ export class BudgetsRepository {
         deletedAt: null,
       },
       include: {
-        category: true,
+        ...this.budgetInclude,
         allocations: {
-          ...(periodStart ? { where: { periodStart } } : {}),
-          orderBy: { periodStart: 'desc' },
+          ...(periodStart
+            ? {
+                where: {
+                  periodStart,
+                },
+              }
+            : {}),
+          orderBy: {
+            periodStart: 'desc',
+          },
         },
       },
     });
@@ -96,13 +124,28 @@ export class BudgetsRepository {
         deletedAt: null,
       },
       include: {
-        category: true,
+        ...this.budgetInclude,
         allocations: {
-          ...(periodStart ? { where: { periodStart } } : {}),
-          orderBy: { periodStart: 'desc' },
+          ...(periodStart
+            ? {
+                where: {
+                  periodStart,
+                },
+              }
+            : {}),
+          orderBy: {
+            periodStart: 'desc',
+          },
         },
       },
-      orderBy: [{ startDate: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [
+        {
+          startDate: 'desc',
+        },
+        {
+          createdAt: 'desc',
+        },
+      ],
     });
   }
 
@@ -122,13 +165,28 @@ export class BudgetsRepository {
         deletedAt: null,
       },
       include: {
-        category: true,
+        ...this.budgetInclude,
         allocations: {
-          ...(periodStart ? { where: { periodStart } } : {}),
-          orderBy: { periodStart: 'desc' },
+          ...(periodStart
+            ? {
+                where: {
+                  periodStart,
+                },
+              }
+            : {}),
+          orderBy: {
+            periodStart: 'desc',
+          },
         },
       },
-      orderBy: [{ startDate: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [
+        {
+          startDate: 'desc',
+        },
+        {
+          createdAt: 'desc',
+        },
+      ],
     });
   }
 
@@ -136,7 +194,10 @@ export class BudgetsRepository {
     return this.prisma.budget.findFirst({
       where: {
         userId,
-        name: { equals: name, mode: 'insensitive' },
+        name: {
+          equals: name,
+          mode: 'insensitive',
+        },
         deletedAt: null,
       },
     });
@@ -150,8 +211,13 @@ export class BudgetsRepository {
     return this.prisma.budget.findFirst({
       where: {
         userId,
-        id: { not: budgetId },
-        name: { equals: name, mode: 'insensitive' },
+        id: {
+          not: budgetId,
+        },
+        name: {
+          equals: name,
+          mode: 'insensitive',
+        },
         deletedAt: null,
       },
     });
@@ -159,25 +225,43 @@ export class BudgetsRepository {
 
   async update(budgetId: string, userId: string, data: BudgetUpdateData) {
     return this.prisma.budget.updateMany({
-      where: { id: budgetId, userId, deletedAt: null },
+      where: {
+        id: budgetId,
+        userId,
+        deletedAt: null,
+      },
       data,
     });
   }
 
   /**
-   * Updates budget metadata and all requested monthly allocations atomically.
-   * previousAmount always records the value that was replaced, when present.
+   * Updates budget metadata, allocations, and custom category scopes
+   * atomically.
+   *
+   * categoryIds:
+   * - undefined: preserve existing custom category scopes.
+   * - []: remove all existing custom category scopes.
+   * - non-empty: replace existing scopes with the supplied categories.
+   *
+   * allocations:
+   * - null: do not modify monthly allocations.
+   * - array: upsert the supplied monthly allocations.
    */
-  async updateWithAllocations(
+  async updateWithAllocationsAndScopes(
     budgetId: string,
     userId: string,
     data: BudgetUpdateData,
-    allocations: BudgetAllocationInput[],
+    allocations: BudgetAllocationInput[] | null,
+    categoryIds?: string[],
   ) {
     return this.prisma.$transaction(
-      async (tx: Prisma.TransactionClient) => {
+      async (tx) => {
         const updated = await tx.budget.updateMany({
-          where: { id: budgetId, userId, deletedAt: null },
+          where: {
+            id: budgetId,
+            userId,
+            deletedAt: null,
+          },
           data,
         });
 
@@ -185,59 +269,105 @@ export class BudgetsRepository {
           return null;
         }
 
-        for (const allocation of allocations) {
-          const existing = (await tx.budgetAllocation.findUnique({
-            where: {
-              budgetId_periodStart: {
-                budgetId,
-                periodStart: allocation.periodStart,
+        if (allocations) {
+          for (const allocation of allocations) {
+            const existing = await tx.budgetAllocation.findUnique({
+              where: {
+                budgetId_periodStart: {
+                  budgetId,
+                  periodStart: allocation.periodStart,
+                },
               },
-            },
-            select: { amount: true },
-          })) as unknown as Prisma.BudgetAllocationGetPayload<{
-            select: { amount: true };
-          }> | null;
+              select: {
+                amount: true,
+              },
+            });
 
-          await tx.budgetAllocation.upsert({
-            where: {
-              budgetId_periodStart: {
+            await tx.budgetAllocation.upsert({
+              where: {
+                budgetId_periodStart: {
+                  budgetId,
+                  periodStart: allocation.periodStart,
+                },
+              },
+              create: {
                 budgetId,
                 periodStart: allocation.periodStart,
+                amount: allocation.amount,
+                source: 'MANUAL',
+                previousAmount: null,
+                recommendationId: null,
               },
-            },
-            create: {
+              update: {
+                amount: allocation.amount,
+                source: 'MANUAL',
+                previousAmount: existing?.amount ?? null,
+                recommendationId: null,
+              },
+            });
+          }
+        }
+
+        if (categoryIds !== undefined) {
+          await tx.budgetCategoryScope.deleteMany({
+            where: {
               budgetId,
-              periodStart: allocation.periodStart,
-              amount: allocation.amount,
-              source: 'MANUAL',
-              previousAmount: null,
-              recommendationId: null,
-            },
-            update: {
-              amount: allocation.amount,
-              source: 'MANUAL',
-              previousAmount: existing?.amount ?? null,
-              recommendationId: null,
             },
           });
+
+          if (categoryIds.length > 0) {
+            await tx.budgetCategoryScope.createMany({
+              data: categoryIds.map((categoryId) => ({
+                budgetId,
+                categoryId,
+              })),
+              skipDuplicates: true,
+            });
+          }
         }
 
         return tx.budget.findFirst({
-          where: { id: budgetId, userId, deletedAt: null },
-          include: {
-            category: true,
-            allocations: { orderBy: { periodStart: 'desc' } },
+          where: {
+            id: budgetId,
+            userId,
+            deletedAt: null,
           },
+          include: this.budgetInclude,
         });
       },
-      { isolationLevel: 'Serializable' },
+      {
+        isolationLevel: 'Serializable',
+      },
+    );
+  }
+
+  /**
+   * Backward-compatible wrapper for allocation-only updates.
+   */
+  async updateWithAllocations(
+    budgetId: string,
+    userId: string,
+    data: BudgetUpdateData,
+    allocations: BudgetAllocationInput[],
+  ) {
+    return this.updateWithAllocationsAndScopes(
+      budgetId,
+      userId,
+      data,
+      allocations,
     );
   }
 
   async softDelete(budgetId: string, userId: string) {
     return this.prisma.budget.updateMany({
-      where: { id: budgetId, userId, deletedAt: null },
-      data: { deletedAt: new Date() },
+      where: {
+        id: budgetId,
+        userId,
+        deletedAt: null,
+      },
+      data: {
+        deletedAt: new Date(),
+      },
     });
   }
 }

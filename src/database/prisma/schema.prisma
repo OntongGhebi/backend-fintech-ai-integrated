@@ -384,9 +384,9 @@ model Category {
   user                  User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
   parent                Category?              @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
   children              Category[]             @relation("CategoryHierarchy")
-  budgetScopes          BudgetCategoryScope[]  @relation("BudgetScopeCategory")
   transactions          Transaction[]
   budgets               Budget[]
+  budgetScopes          BudgetCategoryScope[]  @relation("BudgetCustomCategory")
   scopedBudgets         Budget[]               @relation("BudgetScopeCategory")
   recurringTransactions RecurringTransaction[]
 
@@ -494,7 +494,7 @@ model BudgetCategoryScope {
   createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   budget   Budget   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
-  category Category @relation("BudgetScopeCategory", fields: [categoryId], references: [id], onDelete: Restrict)
+  category Category @relation("BudgetCustomCategory", fields: [categoryId], references: [id], onDelete: Restrict)
 
   @@unique([budgetId, categoryId], map: "budget_category_scopes_budget_category_unique")
   @@index([categoryId])

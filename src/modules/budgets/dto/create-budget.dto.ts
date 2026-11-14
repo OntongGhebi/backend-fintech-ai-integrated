@@ -1,5 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayNotEmpty,
+  ArrayUnique,
+  IsArray,
   IsDateString,
   IsDecimal,
   IsEnum,
@@ -8,9 +11,11 @@ import {
   IsUUID,
   Length,
   Matches,
+  ValidateIf,
 } from 'class-validator';
 
 import { BudgetPeriod } from 'src/database/enums/budget-period.enum';
+import { BudgetScopeType } from '../../../../generated/prisma/client.js';
 
 export class CreateBudgetDto {
   @ApiProperty({
@@ -24,8 +29,7 @@ export class CreateBudgetDto {
   name!: string;
 
   @ApiProperty({
-    description:
-      'Budget amount in IDR. Maximum 4 decimal places are supported.',
+    description: 'Budget amount in IDR',
     example: '1500000',
     pattern: '^(?=.*[1-9])\\d+(\\.\\d{1,4})?$',
   })
@@ -53,23 +57,58 @@ export class CreateBudgetDto {
   period!: BudgetPeriod;
 
   @ApiProperty({
-    description: 'Budget start date in ISO 8601 date format',
+    description: 'Budget start date',
     example: '2026-09-01',
   })
   @IsDateString()
   startDate!: string;
 
   @ApiPropertyOptional({
-    description: 'Optional budget end date in ISO 8601 date format',
-    example: '2026-09-30',
+    description: 'Optional budget end date',
+    example: '2026-12-31',
   })
   @IsOptional()
   @IsDateString()
   endDate?: string;
 
   @ApiPropertyOptional({
-    description: 'Optional category UUID associated with the budget',
-    example: '2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70',
+    description: 'Budget scope type',
+    enum: BudgetScopeType as Record<string, string>,
+    default: 'ALL_EXPENSES',
+  })
+  @IsOptional()
+  @IsEnum(BudgetScopeType as object)
+  scopeType?: BudgetScopeType;
+
+  @ApiPropertyOptional({
+    description:
+      'Category ID for CATEGORY or CATEGORY_GROUP scope. For legacy requests, categoryId is also supported.',
+    format: 'uuid',
+  })
+  @ValidateIf(
+    (dto: CreateBudgetDto) =>
+      dto.scopeCategoryId !== undefined && dto.scopeCategoryId !== null,
+  )
+  @IsUUID('4')
+  scopeCategoryId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Category IDs for CUSTOM scope. Every category must be an active expense leaf category.',
+    type: [String],
+    example: ['2d8c9a7d-1c25-4b6e-8d44-7a3d4c5e6f70'],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  categoryIds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Legacy category field. When supplied without scopeType, it creates a CATEGORY budget.',
+    format: 'uuid',
   })
   @IsOptional()
   @IsUUID('4')
