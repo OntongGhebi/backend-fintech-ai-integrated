@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   MaxLength,
@@ -18,7 +19,9 @@ export class CreateCategoryDto {
     minLength: 1,
     maxLength: 100,
   })
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
   @Length(1, 100)
   name!: string;
@@ -32,12 +35,23 @@ export class CreateCategoryDto {
   type!: CategoryType;
 
   @ApiPropertyOptional({
+    description: 'Parent category ID. Omit or use null for a root category.',
+    example: '22222222-2222-4222-8222-222222222222',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsUUID()
+  parentId?: string | null;
+
+  @ApiPropertyOptional({
     description: 'Optional icon identifier',
     example: 'utensils',
     maxLength: 50,
   })
   @IsOptional()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
   @MaxLength(50)
   icon?: string;
@@ -48,7 +62,9 @@ export class CreateCategoryDto {
     maxLength: 20,
   })
   @IsOptional()
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
   @IsString()
   @MaxLength(20)
   @Matches(/^#[0-9A-Fa-f]{6}$/, {

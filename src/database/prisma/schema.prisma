@@ -356,8 +356,9 @@ model Account {
 // ============================================================
 
 model Category {
-  id     String @id @default(uuid()) @db.Uuid
-  userId String @db.Uuid
+  id       String  @id @default(uuid()) @db.Uuid
+  userId   String  @db.Uuid
+  parentId String? @db.Uuid
 
   name String       @db.VarChar(100)
   type CategoryType
@@ -374,6 +375,8 @@ model Category {
 
   // Relations
   user                  User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  parent                Category?              @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children              Category[]             @relation("CategoryHierarchy")
   transactions          Transaction[]
   budgets               Budget[]
   recurringTransactions RecurringTransaction[]
@@ -382,6 +385,8 @@ model Category {
   @@index([userId, type])
   @@index([userId, isActive])
   @@index([userId, deletedAt])
+  @@index([parentId])
+  @@index([userId, parentId, type])
   @@map("categories")
 }
 

@@ -1,43 +1,120 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+
 import { CategoriesRepository } from './repositories/categories.repository';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { GetCategoriesQueryDto } from './dto/get-categories-query.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { CategoryType } from 'src/database/enums/category-type.enum';
+
+type CategoryRecord = {
+  id: string;
+  userId: string;
+  name: string;
+  type: CategoryType;
+  parentId: string | null;
+  isSystem: boolean;
+  isActive: boolean;
+  deletedAt: Date | null;
+  parent?: CategoryRecord | null;
+  children?: CategoryRecord[];
+};
 
 @Injectable()
 export class CategoriesService {
   constructor(private readonly categoriesRepository: CategoriesRepository) {}
 
-  async create(userId: string, dto: CreateCategoryDto) {
-    const name = dto.name.trim();
-
-    const existingCategory =
-      await this.categoriesRepository.findByNameAndUserId(name, userId);
-
-    if (existingCategory) {
-      throw new ConflictException('A category with this name already exists');
+  private async validateParent(
+    parentId: string | null | undefined,
+    userId: string,
+    type: CategoryType,
+    currentCategoryId?: string,
+  ) {
+    if (!parentId) {
+      return null;
     }
 
-    const safeDto = {
-      ...dto,
-      name,
-      icon: dto.icon?.trim() || null,
-      color: dto.color?.trim() || null,
-      isSystem: false,
-      isActive: true,
-    };
+    if (parentId === currentCategoryId) {
+      throw new BadRequestException('A category cannot be its own parent');
+    }
+
+    const parent = await this.categoriesRepository.findByIdAndUserId(
+      parentId,
+      userId,
+    );
+
+    if (!parent) {
+      throw new NotFoundException('Parent category not found');
+    }
+
+    if (!parent.isActive || parent.deletedAt) {
+      throw new BadRequestException('Parent category is inactive');
+    }
+
+    if (parent.type !== type) {
+      throw new BadRequestException(
+        'Parent and child categories must have the same type',
+      );
+    }
+
+    if (parent.parentId) {
+      throw new BadRequestException(
+        'Category hierarchy supports a maximum of two levels',
+      );
+    }
+
+    return parent;
+  }
+
+  private async validateUniqueName(
+    name: string,
+    userId: string,
+    type: CategoryType,
+    parentId: string | null,
+    currentCategoryId?: string,
+  ) {
+    const existingCategory = currentCategoryId
+      ? await this.categoriesRepository.findByNameAndUserIdExceptId(
+          name,
+          userId,
+          currentCategoryId,
+          type,
+          parentId,
+        )
+      : await this.categoriesRepository.findByNameAndUserId(
+          name,
+          userId,
+          type,
+          parentId,
+        );
+
+    if (existingCategory) {
+      throw new ConflictException(
+        'A category with this name already exists in this category group',
+      );
+    }
+  }
+
+  async create(userId: string, dto: CreateCategoryDto) {
+    const name = dto.name.trim();
+    const parentId = dto.parentId?.trim() || null;
+
+    await this.validateParent(parentId, userId, dto.type);
+
+    await this.validateUniqueName(name, userId, dto.type, parentId);
 
     return this.categoriesRepository.create({
       userId,
+      parentId,
       name,
       type: dto.type,
-      icon: safeDto.icon,
-      color: safeDto.color,
+      icon: dto.icon?.trim() || null,
+      color: dto.color?.trim() || null,
       isSystem: false,
       isActive: true,
     });
@@ -81,32 +158,69 @@ export class CategoriesService {
       throw new ForbiddenException('System categories cannot be updated');
     }
 
+    const nextType = (dto.type ?? category.type) as CategoryType;
+    const nextParentId: string | null =
+      dto.parentId !== undefined
+        ? typeof dto.parentId === 'string'
+          ? dto.parentId.trim() || null
+          : null
+        : category.parentId;
+
+    if (nextParentId) {
+      await this.validateParent(nextParentId, userId, nextType, categoryId);
+    }
+
+    const children = await this.categoriesRepository.findActiveChildren(
+      categoryId,
+      userId,
+    );
+
+    if (children.length > 0 && nextParentId) {
+      throw new BadRequestException(
+        'A category with children cannot become a child category',
+      );
+    }
+
+    if (children.length > 0 && dto.type && dto.type !== category.type) {
+      throw new BadRequestException(
+        'Category type cannot change while it has active child categories',
+      );
+    }
+
     const updateData: {
       name?: string;
-      type?: UpdateCategoryDto['type'];
+      type?: CategoryType;
+      parentId?: string | null;
       icon?: string | null;
       color?: string | null;
     } = {};
 
+    const nextName = dto.name !== undefined ? dto.name.trim() : category.name;
+
+    if (
+      dto.name !== undefined ||
+      dto.type !== undefined ||
+      dto.parentId !== undefined
+    ) {
+      await this.validateUniqueName(
+        nextName,
+        userId,
+        nextType,
+        nextParentId,
+        categoryId,
+      );
+    }
+
     if (dto.name !== undefined) {
-      const name = dto.name.trim();
-
-      const existingCategory =
-        await this.categoriesRepository.findByNameAndUserIdExceptId(
-          name,
-          userId,
-          categoryId,
-        );
-
-      if (existingCategory) {
-        throw new ConflictException('A category with this name already exists');
-      }
-
-      updateData.name = name;
+      updateData.name = nextName;
     }
 
     if (dto.type !== undefined) {
       updateData.type = dto.type;
+    }
+
+    if (dto.parentId !== undefined) {
+      updateData.parentId = nextParentId;
     }
 
     if (dto.icon !== undefined) {
@@ -146,6 +260,17 @@ export class CategoriesService {
 
     if (category.isSystem) {
       throw new ForbiddenException('System categories cannot be archived');
+    }
+
+    const children = await this.categoriesRepository.findActiveChildren(
+      categoryId,
+      userId,
+    );
+
+    if (children.length > 0) {
+      throw new BadRequestException(
+        'A category with active subcategories cannot be archived',
+      );
     }
 
     const result = await this.categoriesRepository.softDelete(

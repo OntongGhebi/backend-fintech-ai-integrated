@@ -14,7 +14,13 @@ export class CategoriesRepository {
   async create(
     data: Parameters<PrismaService['category']['create']>[0]['data'],
   ) {
-    return this.prisma.category.create({ data });
+    return this.prisma.category.create({
+      data,
+      include: {
+        parent: true,
+        children: true,
+      },
+    });
   }
 
   async findById(categoryId: string) {
@@ -32,13 +38,31 @@ export class CategoriesRepository {
         userId,
         deletedAt: null,
       },
+      include: {
+        parent: true,
+        children: {
+          where: {
+            deletedAt: null,
+          },
+          orderBy: {
+            name: 'asc',
+          },
+        },
+      },
     });
   }
 
-  async findByNameAndUserId(name: string, userId: string) {
+  async findByNameAndUserId(
+    name: string,
+    userId: string,
+    type: CategoryType,
+    parentId: string | null,
+  ) {
     return this.prisma.category.findFirst({
       where: {
         userId,
+        type,
+        parentId,
         name: {
           equals: name,
           mode: 'insensitive',
@@ -52,6 +76,8 @@ export class CategoriesRepository {
     name: string,
     userId: string,
     categoryId: string,
+    type: CategoryType,
+    parentId: string | null,
   ) {
     return this.prisma.category.findFirst({
       where: {
@@ -59,10 +85,23 @@ export class CategoriesRepository {
         id: {
           not: categoryId,
         },
+        type,
+        parentId,
         name: {
           equals: name,
           mode: 'insensitive',
         },
+        deletedAt: null,
+      },
+    });
+  }
+
+  async findActiveChildren(categoryId: string, userId: string) {
+    return this.prisma.category.findMany({
+      where: {
+        parentId: categoryId,
+        userId,
+        isActive: true,
         deletedAt: null,
       },
     });
@@ -73,6 +112,17 @@ export class CategoriesRepository {
       where: {
         userId,
         deletedAt: null,
+      },
+      include: {
+        parent: true,
+        children: {
+          where: {
+            deletedAt: null,
+          },
+          orderBy: {
+            name: 'asc',
+          },
+        },
       },
       orderBy: [
         {
@@ -94,6 +144,17 @@ export class CategoriesRepository {
         userId,
         type,
         deletedAt: null,
+      },
+      include: {
+        parent: true,
+        children: {
+          where: {
+            deletedAt: null,
+          },
+          orderBy: {
+            name: 'asc',
+          },
+        },
       },
       orderBy: {
         name: 'asc',
