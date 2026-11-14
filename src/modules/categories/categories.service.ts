@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 
 import { CategoryType } from 'src/database/enums/category-type.enum';
+import { TransactionType } from 'src/database/enums/transaction-type.enum';
 
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { GetCategoriesQueryDto } from './dto/get-categories-query.dto';
@@ -142,6 +143,56 @@ export class CategoriesService {
 
     if (!category) {
       throw new NotFoundException('Category not found');
+    }
+
+    return category;
+  }
+
+  /**
+   * Validates whether a category can be assigned to a transaction.
+   *
+   * Only active leaf categories owned by the current user
+   * and matching the transaction type are allowed.
+   */
+  async validateTransactionCategory(
+    categoryId: string,
+    userId: string,
+    type: TransactionType,
+  ) {
+    if (type === TransactionType.TRANSFER) {
+      throw new BadRequestException(
+        'Transfer transaction cannot have a category',
+      );
+    }
+
+    const category = await this.categoriesRepository.findByIdAndUserId(
+      categoryId,
+      userId,
+    );
+
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    if (!category.isActive || category.deletedAt) {
+      throw new BadRequestException('Category is inactive');
+    }
+
+    if (String(category.type) !== String(type)) {
+      throw new BadRequestException(
+        `The selected category is not a ${String(type).toLowerCase()} category`,
+      );
+    }
+
+    const activeChildren = await this.categoriesRepository.findActiveChildren(
+      categoryId,
+      userId,
+    );
+
+    if (activeChildren.length > 0) {
+      throw new BadRequestException(
+        'Parent category cannot be used for transactions. Please select one of its subcategories.',
+      );
     }
 
     return category;

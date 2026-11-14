@@ -35,7 +35,11 @@ export class RecurringTransactionsService {
     await this.accountsService.findById(dto.accountId, userId);
 
     if (dto.categoryId) {
-      await this.categoriesService.findById(dto.categoryId, userId);
+      await this.categoriesService.validateTransactionCategory(
+        dto.categoryId,
+        userId,
+        dto.type,
+      );
     }
 
     const nextRunAt = this.calculatedNextRunAt(startDate, dto.frequency);
@@ -109,15 +113,27 @@ export class RecurringTransactionsService {
       throw new NotFoundException('Recurring transaction not found');
     }
 
-    // Validate that the selected account belongs to this user.
     if (dto.accountId !== undefined) {
       await this.accountsService.findById(dto.accountId, userId);
     }
 
-    // Validate category ownership when a category is provided.
-    // A null categoryId explicitly removes the category association.
-    if (dto.categoryId !== undefined && dto.categoryId !== null) {
-      await this.categoriesService.findById(dto.categoryId, userId);
+    const nextCategoryId =
+      dto.categoryId !== undefined ? dto.categoryId : existing.categoryId;
+
+    const nextType: CreateRecurringTransactionDto['type'] =
+      dto.type ?? (existing.type as CreateRecurringTransactionDto['type']);
+
+    // Revalidate when either category or transaction type changes.
+    // This also catches a type change while retaining the old category.
+    if (
+      nextCategoryId &&
+      (dto.categoryId !== undefined || dto.type !== undefined)
+    ) {
+      await this.categoriesService.validateTransactionCategory(
+        nextCategoryId,
+        userId,
+        nextType,
+      );
     }
 
     const startDate =
@@ -152,10 +168,8 @@ export class RecurringTransactionsService {
     }
 
     /*
-     * IMPORTANT:
      * updateMany() only accepts scalar field updates.
-     * Use accountId/categoryId instead of account.connect,
-     * category.connect, or category.disconnect.
+     * Use accountId/categoryId instead of nested relation operations.
      */
     const updateData: Parameters<
       typeof this.recurringTransactionsRepository.update
