@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   BadRequestException,
   ConflictException,
@@ -6,28 +7,29 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
-import { CategoriesRepository } from './repositories/categories.repository';
+import { CategoryType } from 'src/database/enums/category-type.enum';
+
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { GetCategoriesQueryDto } from './dto/get-categories-query.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
-import { CategoryType } from 'src/database/enums/category-type.enum';
-
-type CategoryRecord = {
-  id: string;
-  userId: string;
-  name: string;
-  type: CategoryType;
-  parentId: string | null;
-  isSystem: boolean;
-  isActive: boolean;
-  deletedAt: Date | null;
-  parent?: CategoryRecord | null;
-  children?: CategoryRecord[];
-};
+import { CategoriesRepository } from './repositories/categories.repository';
 
 @Injectable()
 export class CategoriesService {
   constructor(private readonly categoriesRepository: CategoriesRepository) {}
+
+  private toCategoryType(value: string): CategoryType {
+    switch (String(value)) {
+      case 'INCOME':
+        return CategoryType.INCOME;
+
+      case 'EXPENSE':
+        return CategoryType.EXPENSE;
+
+      default:
+        throw new BadRequestException('Invalid category type');
+    }
+  }
 
   private async validateParent(
     parentId: string | null | undefined,
@@ -56,7 +58,7 @@ export class CategoriesService {
       throw new BadRequestException('Parent category is inactive');
     }
 
-    if (parent.type !== type) {
+    if (String(parent.type) !== String(type)) {
       throw new BadRequestException(
         'Parent and child categories must have the same type',
       );
@@ -103,16 +105,17 @@ export class CategoriesService {
   async create(userId: string, dto: CreateCategoryDto) {
     const name = dto.name.trim();
     const parentId = dto.parentId?.trim() || null;
+    const type = this.toCategoryType(String(dto.type));
 
-    await this.validateParent(parentId, userId, dto.type);
+    await this.validateParent(parentId, userId, type);
 
-    await this.validateUniqueName(name, userId, dto.type, parentId);
+    await this.validateUniqueName(name, userId, type, parentId);
 
     return this.categoriesRepository.create({
       userId,
       parentId,
       name,
-      type: dto.type,
+      type,
       icon: dto.icon?.trim() || null,
       color: dto.color?.trim() || null,
       isSystem: false,
@@ -158,7 +161,8 @@ export class CategoriesService {
       throw new ForbiddenException('System categories cannot be updated');
     }
 
-    const nextType = (dto.type ?? category.type) as CategoryType;
+    const nextType = this.toCategoryType(String(dto.type ?? category.type));
+
     const nextParentId: string | null =
       dto.parentId !== undefined
         ? typeof dto.parentId === 'string'
@@ -181,7 +185,11 @@ export class CategoriesService {
       );
     }
 
-    if (children.length > 0 && dto.type && dto.type !== category.type) {
+    if (
+      children.length > 0 &&
+      dto.type !== undefined &&
+      String(dto.type) !== String(category.type)
+    ) {
       throw new BadRequestException(
         'Category type cannot change while it has active child categories',
       );
@@ -216,7 +224,7 @@ export class CategoriesService {
     }
 
     if (dto.type !== undefined) {
-      updateData.type = dto.type;
+      updateData.type = nextType;
     }
 
     if (dto.parentId !== undefined) {

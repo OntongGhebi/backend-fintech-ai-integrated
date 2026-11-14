@@ -38,17 +38,17 @@ export class CategoriesRepository {
         userId,
         deletedAt: null,
       },
-      include: {
-        parent: true,
-        children: {
-          where: {
-            deletedAt: null,
-          },
-          orderBy: {
-            name: 'asc',
-          },
-        },
-      },
+      // include: {
+      //   parent: true,
+      //   children: {
+      //     where: {
+      //       deletedAt: null,
+      //     },
+      //     orderBy: {
+      //       name: 'asc',
+      //     },
+      //   },
+      // },
     });
   }
 
