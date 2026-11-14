@@ -43,23 +43,52 @@ describe('TransactionDomainService', () => {
       },
     };
 
-    it('should create a SYSTEM transaction successfully', async () => {
-      const account = {
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
-        currency: 'IDR',
-        deletedAt: null,
-      };
+    const activeAccount = {
+      id: baseParams.accountId,
+      userId: baseParams.userId,
+      isActive: true,
+      currency: 'IDR',
+      deletedAt: null,
+    };
 
-      const category = {
+    const activeLeafCategory = {
+      id: baseParams.categoryId,
+      userId: baseParams.userId,
+      isActive: true,
+      deletedAt: null,
+      type: 'EXPENSE',
+      children: [],
+    };
+
+    const parentCategory = {
+      id: baseParams.categoryId,
+      userId: baseParams.userId,
+      isActive: true,
+      deletedAt: null,
+      type: 'EXPENSE',
+      children: [{ id: 'child-category-uuid' }],
+    };
+
+    const categoryQuery = {
+      where: {
         id: baseParams.categoryId,
         userId: baseParams.userId,
-        isActive: true,
         deletedAt: null,
-        type: 'EXPENSE',
-      };
+      },
+      include: {
+        children: {
+          where: {
+            isActive: true,
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
+    };
 
+    it('should create a SYSTEM transaction successfully', async () => {
       const transaction = {
         id: 'transaction-uuid',
         userId: baseParams.userId,
@@ -72,8 +101,8 @@ describe('TransactionDomainService', () => {
         status: 'ACTIVE',
       };
 
-      accountFindFirstMock.mockResolvedValue(account);
-      categoryFindFirstMock.mockResolvedValue(category);
+      accountFindFirstMock.mockResolvedValue(activeAccount);
+      categoryFindFirstMock.mockResolvedValue(activeLeafCategory);
       transactionCreateMock.mockResolvedValue(transaction);
 
       const result = await service.createSystemTransaction(tx, baseParams);
@@ -86,13 +115,7 @@ describe('TransactionDomainService', () => {
         },
       });
 
-      expect(categoryFindFirstMock).toHaveBeenCalledWith({
-        where: {
-          id: baseParams.categoryId,
-          userId: baseParams.userId,
-          deletedAt: null,
-        },
-      });
+      expect(categoryFindFirstMock).toHaveBeenCalledWith(categoryQuery);
 
       expect(transactionCreateMock).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -131,11 +154,8 @@ describe('TransactionDomainService', () => {
 
     it('should reject when account is inactive', async () => {
       accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
+        ...activeAccount,
         isActive: false,
-        currency: 'IDR',
-        deletedAt: null,
       });
 
       await expect(
@@ -148,11 +168,8 @@ describe('TransactionDomainService', () => {
 
     it('should reject when account currency is not IDR', async () => {
       accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
+        ...activeAccount,
         currency: 'USD',
-        deletedAt: null,
       });
 
       await expect(
@@ -166,55 +183,35 @@ describe('TransactionDomainService', () => {
     });
 
     it('should reject when category does not exist', async () => {
-      accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
-        currency: 'IDR',
-        deletedAt: null,
-      });
-
+      accountFindFirstMock.mockResolvedValue(activeAccount);
       categoryFindFirstMock.mockResolvedValue(null);
 
       await expect(
         service.createSystemTransaction(tx, baseParams),
       ).rejects.toThrow(new NotFoundException('Category not found'));
 
+      expect(categoryFindFirstMock).toHaveBeenCalledWith(categoryQuery);
       expect(transactionCreateMock).not.toHaveBeenCalled();
     });
 
     it('should reject when category is inactive', async () => {
-      accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
-        currency: 'IDR',
-        deletedAt: null,
-      });
+      accountFindFirstMock.mockResolvedValue(activeAccount);
 
       categoryFindFirstMock.mockResolvedValue({
-        id: baseParams.categoryId,
-        userId: baseParams.userId,
+        ...activeLeafCategory,
         isActive: false,
-        deletedAt: null,
-        type: 'EXPENSE',
       });
 
       await expect(
         service.createSystemTransaction(tx, baseParams),
       ).rejects.toThrow(new BadRequestException('Category is inactive'));
 
+      expect(categoryFindFirstMock).toHaveBeenCalledWith(categoryQuery);
       expect(transactionCreateMock).not.toHaveBeenCalled();
     });
 
     it('should reject when category has been deleted', async () => {
-      accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
-        currency: 'IDR',
-        deletedAt: null,
-      });
+      accountFindFirstMock.mockResolvedValue(activeAccount);
 
       // The Prisma query explicitly requires deletedAt: null,
       // so a soft-deleted category is not returned.
@@ -224,31 +221,58 @@ describe('TransactionDomainService', () => {
         service.createSystemTransaction(tx, baseParams),
       ).rejects.toThrow(new NotFoundException('Category not found'));
 
-      expect(categoryFindFirstMock).toHaveBeenCalledWith({
-        where: {
-          id: baseParams.categoryId,
-          userId: baseParams.userId,
-          deletedAt: null,
-        },
-      });
-
+      expect(categoryFindFirstMock).toHaveBeenCalledWith(categoryQuery);
       expect(transactionCreateMock).not.toHaveBeenCalled();
     });
 
-    it('should reject when EXPENSE uses an INCOME category', async () => {
-      accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
-        currency: 'IDR',
-        deletedAt: null,
+    it('should reject parent category with active children', async () => {
+      accountFindFirstMock.mockResolvedValue(activeAccount);
+      categoryFindFirstMock.mockResolvedValue(parentCategory);
+
+      await expect(
+        service.createSystemTransaction(tx, baseParams),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Parent category cannot be used for transactions',
+        ),
+      );
+
+      expect(categoryFindFirstMock).toHaveBeenCalledWith(categoryQuery);
+      expect(transactionCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('should allow a root category when all its children are inactive', async () => {
+      accountFindFirstMock.mockResolvedValue(activeAccount);
+
+      // The repository query only returns active, non-deleted children.
+      // An empty result therefore means the root can be used.
+      categoryFindFirstMock.mockResolvedValue({
+        ...activeLeafCategory,
+        children: [],
       });
 
+      transactionCreateMock.mockResolvedValue({
+        id: 'transaction-uuid',
+        categoryId: baseParams.categoryId,
+        source: 'SYSTEM',
+      });
+
+      await expect(
+        service.createSystemTransaction(tx, baseParams),
+      ).resolves.toEqual({
+        id: 'transaction-uuid',
+        categoryId: baseParams.categoryId,
+        source: 'SYSTEM',
+      });
+
+      expect(transactionCreateMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reject when EXPENSE uses an INCOME category', async () => {
+      accountFindFirstMock.mockResolvedValue(activeAccount);
+
       categoryFindFirstMock.mockResolvedValue({
-        id: baseParams.categoryId,
-        userId: baseParams.userId,
-        isActive: true,
-        deletedAt: null,
+        ...activeLeafCategory,
         type: 'INCOME',
       });
 
@@ -264,21 +288,9 @@ describe('TransactionDomainService', () => {
     });
 
     it('should reject when INCOME uses an EXPENSE category', async () => {
-      accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
-        currency: 'IDR',
-        deletedAt: null,
-      });
+      accountFindFirstMock.mockResolvedValue(activeAccount);
 
-      categoryFindFirstMock.mockResolvedValue({
-        id: baseParams.categoryId,
-        userId: baseParams.userId,
-        isActive: true,
-        deletedAt: null,
-        type: 'EXPENSE',
-      });
+      categoryFindFirstMock.mockResolvedValue(activeLeafCategory);
 
       await expect(
         service.createSystemTransaction(tx, {
@@ -295,13 +307,7 @@ describe('TransactionDomainService', () => {
     });
 
     it('should reject TRANSFER with a category', async () => {
-      accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
-        currency: 'IDR',
-        deletedAt: null,
-      });
+      accountFindFirstMock.mockResolvedValue(activeAccount);
 
       await expect(
         service.createSystemTransaction(tx, {
@@ -317,13 +323,7 @@ describe('TransactionDomainService', () => {
     });
 
     it('should allow TRANSFER without a category', async () => {
-      accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
-        currency: 'IDR',
-        deletedAt: null,
-      });
+      accountFindFirstMock.mockResolvedValue(activeAccount);
 
       const transaction = {
         id: 'transfer-transaction-uuid',
@@ -358,21 +358,8 @@ describe('TransactionDomainService', () => {
     });
 
     it('should use Prisma.DbNull when metadata is omitted', async () => {
-      accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
-        currency: 'IDR',
-        deletedAt: null,
-      });
-
-      categoryFindFirstMock.mockResolvedValue({
-        id: baseParams.categoryId,
-        userId: baseParams.userId,
-        isActive: true,
-        deletedAt: null,
-        type: 'EXPENSE',
-      });
+      accountFindFirstMock.mockResolvedValue(activeAccount);
+      categoryFindFirstMock.mockResolvedValue(activeLeafCategory);
 
       transactionCreateMock.mockResolvedValue({
         id: 'transaction-uuid',
@@ -395,21 +382,8 @@ describe('TransactionDomainService', () => {
     });
 
     it('should trim description before creating the transaction', async () => {
-      accountFindFirstMock.mockResolvedValue({
-        id: baseParams.accountId,
-        userId: baseParams.userId,
-        isActive: true,
-        currency: 'IDR',
-        deletedAt: null,
-      });
-
-      categoryFindFirstMock.mockResolvedValue({
-        id: baseParams.categoryId,
-        userId: baseParams.userId,
-        isActive: true,
-        deletedAt: null,
-        type: 'EXPENSE',
-      });
+      accountFindFirstMock.mockResolvedValue(activeAccount);
+      categoryFindFirstMock.mockResolvedValue(activeLeafCategory);
 
       transactionCreateMock.mockResolvedValue({
         id: 'transaction-uuid',

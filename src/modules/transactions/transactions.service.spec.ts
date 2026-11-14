@@ -31,6 +31,7 @@ describe('TransactionsService', () => {
   const secondAccountId = '33333333-3333-4333-8333-333333333333';
 
   const categoryId = '44444444-4444-4444-8444-444444444444';
+  const parentCategoryId = '88888888-8888-4888-8888-888888888888';
 
   const transactionId = '55555555-5555-4555-8555-555555555555';
 
@@ -74,6 +75,7 @@ describe('TransactionsService', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
+    children: [],
   };
 
   const expenseCategory = {
@@ -88,6 +90,27 @@ describe('TransactionsService', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
+    children: [],
+  };
+
+  const parentExpenseCategory = {
+    id: parentCategoryId,
+    userId,
+    name: 'Food',
+    type: 'EXPENSE',
+    icon: null,
+    color: null,
+    isSystem: false,
+    isActive: true,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+    children: [{ id: categoryId }],
+  };
+
+  const rootWithInactiveChildren = {
+    ...expenseCategory,
+    children: [],
   };
 
   const activeTransaction = {
@@ -367,6 +390,44 @@ describe('TransactionsService', () => {
       expect(transactionsRepository.create).not.toHaveBeenCalled();
     });
 
+    it('should reject parent category with active children', async () => {
+      accountsRepository.findByIdAndUserId.mockResolvedValue(
+        activeAccount as never,
+      );
+
+      transactionsRepository.findCategoryByIdAndUserId.mockResolvedValue(
+        parentExpenseCategory as never,
+      );
+
+      await expect(service.create(userId, dto)).rejects.toThrow(
+        new BadRequestException(
+          'Parent category cannot be used for transactions',
+        ),
+      );
+
+      expect(transactionsRepository.create).not.toHaveBeenCalled();
+    });
+
+    it('should allow a root category when it has no active children', async () => {
+      accountsRepository.findByIdAndUserId.mockResolvedValue(
+        activeAccount as never,
+      );
+
+      transactionsRepository.findCategoryByIdAndUserId.mockResolvedValue(
+        rootWithInactiveChildren as never,
+      );
+
+      transactionsRepository.create.mockResolvedValue(
+        activeTransaction as never,
+      );
+
+      await expect(service.create(userId, dto)).resolves.toEqual(
+        activeTransaction,
+      );
+
+      expect(transactionsRepository.create).toHaveBeenCalledTimes(1);
+    });
+
     it('should reject expense transaction with income category', async () => {
       accountsRepository.findByIdAndUserId.mockResolvedValue(
         activeAccount as never,
@@ -434,6 +495,7 @@ describe('TransactionsService', () => {
         type: 'EXPENSE',
         isActive: true,
         deletedAt: null,
+        children: [],
       });
 
       transactionsRepository.create.mockResolvedValue({
@@ -462,12 +524,15 @@ describe('TransactionsService', () => {
         amount: 5000000,
         transactionDate,
       };
+
       accountsRepository.findByIdAndUserId.mockResolvedValue(
         activeAccount as never,
       );
+
       transactionsRepository.create.mockResolvedValue(
         activeTransaction as never,
       );
+
       notificationEventsService.budgetExpenseCreated.mockRejectedValueOnce(
         new Error('notification unavailable'),
       );
@@ -475,6 +540,7 @@ describe('TransactionsService', () => {
       await expect(service.create(userId, incomeDto)).resolves.toEqual(
         activeTransaction,
       );
+
       expect(transactionsRepository.create).toHaveBeenCalledTimes(1);
     });
   });
@@ -985,6 +1051,65 @@ describe('TransactionsService', () => {
           categoryId,
         }),
       ).rejects.toThrow(new BadRequestException('Category is inactive'));
+    });
+
+    it('should reject parent category when updating transaction', async () => {
+      transactionsRepository.findByIdAndUserId.mockResolvedValue(
+        activeTransaction as never,
+      );
+
+      transactionsRepository.findCategoryByIdAndUserId.mockResolvedValue(
+        parentExpenseCategory as never,
+      );
+
+      await expect(
+        service.update(transactionId, userId, {
+          categoryId: parentCategoryId,
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Parent category cannot be used for transactions',
+        ),
+      );
+
+      expect(transactionsRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('should allow removing category by setting categoryId to null', async () => {
+      const transactionWithoutCategory = {
+        ...activeTransaction,
+        categoryId: null,
+      };
+
+      transactionsRepository.findByIdAndUserId
+        .mockResolvedValueOnce(activeTransaction as never)
+        .mockResolvedValueOnce(transactionWithoutCategory as never);
+
+      transactionsRepository.update.mockResolvedValue({
+        count: 1,
+      } as never);
+
+      const result = await service.update(transactionId, userId, {
+        categoryId: null,
+      });
+
+      expect(
+        transactionsRepository.findCategoryByIdAndUserId,
+      ).not.toHaveBeenCalled();
+
+      expect(transactionsRepository.update).toHaveBeenCalledWith(
+        transactionId,
+        userId,
+        {
+          categoryId: null,
+        },
+      );
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          categoryId: null,
+        }),
+      );
     });
 
     it('should reject category type mismatch', async () => {
