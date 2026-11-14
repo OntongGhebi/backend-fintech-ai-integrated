@@ -57,6 +57,13 @@ enum BudgetPeriod {
   CUSTOM
 }
 
+enum BudgetScopeType {
+  ALL_EXPENSES
+  CATEGORY
+  CATEGORY_GROUP
+  CUSTOM
+}
+
 enum BudgetStatus {
   ACTIVE
   PAUSED
@@ -216,16 +223,16 @@ model User {
   deletedAt DateTime? @db.Timestamptz(6)
 
   // Relations
-  preferences             UserPreference?
-  emailVerificationTokens EmailVerificationToken[]
-  sessions                Session[]
-  accounts                Account[]
-  categories              Category[]
-  transactions            Transaction[]
-  budgets                 Budget[]
-  recurringTransactions   RecurringTransaction[]
+  preferences                      UserPreference?
+  emailVerificationTokens          EmailVerificationToken[]
+  sessions                         Session[]
+  accounts                         Account[]
+  categories                       Category[]
+  transactions                     Transaction[]
+  budgets                          Budget[]
+  recurringTransactions            RecurringTransaction[]
   telegramTransactionConfirmations TelegramTransactionConfirmation[]
-  budgetRecommendations BudgetRecommendation[]
+  budgetRecommendations            BudgetRecommendation[]
 
   subscriptions Subscription[]
   payments      Payment[]
@@ -377,8 +384,10 @@ model Category {
   user                  User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
   parent                Category?              @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
   children              Category[]             @relation("CategoryHierarchy")
+  budgetScopes          BudgetCategoryScope[]  @relation("BudgetScopeCategory")
   transactions          Transaction[]
   budgets               Budget[]
+  scopedBudgets         Budget[]               @relation("BudgetScopeCategory")
   recurringTransactions RecurringTransaction[]
 
   @@index([userId])
@@ -395,10 +404,10 @@ model Category {
 // ============================================================
 
 model Transaction {
-  id         String  @id @default(uuid()) @db.Uuid
-  userId     String  @db.Uuid
-  accountId  String  @db.Uuid
-  categoryId String? @db.Uuid
+  id                     String  @id @default(uuid()) @db.Uuid
+  userId                 String  @db.Uuid
+  accountId              String  @db.Uuid
+  categoryId             String? @db.Uuid
   telegramConfirmationId String? @unique @db.Uuid
 
   recurringTransactionId String? @db.Uuid
@@ -422,7 +431,7 @@ model Transaction {
   account  Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
   category Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
-  recurringTransaction RecurringTransaction? @relation(fields: [recurringTransactionId], references: [id])
+  recurringTransaction RecurringTransaction?            @relation(fields: [recurringTransactionId], references: [id])
   telegramConfirmation TelegramTransactionConfirmation? @relation("TelegramConfirmationTransaction", fields: [telegramConfirmationId], references: [id], onDelete: Restrict)
 
   @@index([userId, transactionDate])
@@ -443,9 +452,11 @@ model Transaction {
 // ============================================================
 
 model Budget {
-  id         String  @id @default(uuid()) @db.Uuid
-  userId     String  @db.Uuid
-  categoryId String? @db.Uuid
+  id              String          @id @default(uuid()) @db.Uuid
+  userId          String          @db.Uuid
+  categoryId      String?         @db.Uuid
+  scopeCategoryId String?         @db.Uuid
+  scopeType       BudgetScopeType @default(ALL_EXPENSES)
 
   name   String  @db.VarChar(100)
   amount Decimal @db.Decimal(19, 4)
@@ -461,10 +472,12 @@ model Budget {
   deletedAt DateTime? @db.Timestamptz(6)
 
   // Relations
-  user     User          @relation(fields: [userId], references: [id], onDelete: Restrict)
-  category Category?     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  alerts      BudgetAlert[]
-  allocations BudgetAllocation[]
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  category        Category?              @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  scopeCategory   Category?              @relation("BudgetScopeCategory", fields: [scopeCategoryId], references: [id], onDelete: Restrict)
+  alerts          BudgetAlert[]
+  allocations     BudgetAllocation[]
+  categoryScopes  BudgetCategoryScope[]
   recommendations BudgetRecommendation[]
 
   @@index([userId])
@@ -473,19 +486,35 @@ model Budget {
   @@map("budgets")
 }
 
-model BudgetAllocation {
+model BudgetCategoryScope {
   id         String @id @default(uuid()) @db.Uuid
   budgetId   String @db.Uuid
-  periodStart DateTime @db.Date
-  amount     Decimal @db.Decimal(19, 4)
-  source     BudgetAllocationSource @default(MANUAL)
-  previousAmount Decimal? @db.Decimal(19, 4)
-  recommendationId String? @db.Uuid
+  categoryId String @db.Uuid
+
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  budget   Budget   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  category Category @relation("BudgetScopeCategory", fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@unique([budgetId, categoryId], map: "budget_category_scopes_budget_category_unique")
+  @@index([categoryId])
+  @@index([budgetId])
+  @@map("budget_category_scopes")
+}
+
+model BudgetAllocation {
+  id               String                 @id @default(uuid()) @db.Uuid
+  budgetId         String                 @db.Uuid
+  periodStart      DateTime               @db.Date
+  amount           Decimal                @db.Decimal(19, 4)
+  source           BudgetAllocationSource @default(MANUAL)
+  previousAmount   Decimal?               @db.Decimal(19, 4)
+  recommendationId String?                @db.Uuid
 
   createdAt DateTime @default(now()) @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
-  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  budget         Budget                @relation(fields: [budgetId], references: [id], onDelete: Cascade)
   recommendation BudgetRecommendation? @relation(fields: [recommendationId], references: [id], onDelete: SetNull)
 
   @@unique([budgetId, periodStart], map: "budget_allocations_budget_period_unique")
@@ -507,29 +536,29 @@ model BudgetRecommendation {
   action BudgetRecommendationAction
   status BudgetRecommendationStatus @default(PENDING)
 
-  currentAllocation  Decimal  @db.Decimal(19, 4)
-  proposedAllocation Decimal  @db.Decimal(19, 4)
-  changeAmount       Decimal  @db.Decimal(19, 4)
-  changePercentage  Decimal? @db.Decimal(9, 2)
-  averageMonthlySpend Decimal @db.Decimal(19, 4)
+  currentAllocation   Decimal  @db.Decimal(19, 4)
+  proposedAllocation  Decimal  @db.Decimal(19, 4)
+  changeAmount        Decimal  @db.Decimal(19, 4)
+  changePercentage    Decimal? @db.Decimal(9, 2)
+  averageMonthlySpend Decimal  @db.Decimal(19, 4)
 
   transactionCount   Int
   monthsWithActivity Int
   spendingTrend      String @db.VarChar(20)
 
-  monthlySpending   Json
-  reason            String @db.VarChar(1000)
-  guardrails        Json
-  aiExplanation     String? @db.VarChar(1000)
-  aiWhyItMatters    String? @db.VarChar(1000)
+  monthlySpending    Json
+  reason             String  @db.VarChar(1000)
+  guardrails         Json
+  aiExplanation      String? @db.VarChar(1000)
+  aiWhyItMatters     String? @db.VarChar(1000)
   aiSuggestedActions Json
-  financialContext  Json
+  financialContext   Json
 
-  reviewedAt     DateTime? @db.Timestamptz(6)
-  deferredUntil  DateTime? @db.Timestamptz(6)
-  rejectionReason String?  @db.VarChar(500)
-  appliedAt      DateTime? @db.Timestamptz(6)
-  evaluatedAt    DateTime? @db.Timestamptz(6)
+  reviewedAt      DateTime? @db.Timestamptz(6)
+  deferredUntil   DateTime? @db.Timestamptz(6)
+  rejectionReason String?   @db.VarChar(500)
+  appliedAt       DateTime? @db.Timestamptz(6)
+  evaluatedAt     DateTime? @db.Timestamptz(6)
 
   evaluationStatus BudgetRecommendationEvaluationStatus?
   evaluation       Json?
@@ -548,7 +577,6 @@ model BudgetRecommendation {
   @@index([userId, status, targetMonth], map: "budget_recommendations_user_status_month_idx")
   @@index([userId, targetMonth], map: "budget_recommendations_user_month_idx")
   @@index([budgetId, targetMonth], map: "budget_recommendations_budget_month_idx")
-
   @@map("budget_recommendations")
 }
 
@@ -818,8 +846,8 @@ model TelegramAccount {
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
-  user     User              @relation(fields: [userId], references: [id], onDelete: Restrict)
-  messages TelegramMessage[]
+  user          User                              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  messages      TelegramMessage[]
   confirmations TelegramTransactionConfirmation[]
 
   @@unique([telegramUserId])
@@ -896,7 +924,6 @@ model TelegramTransactionConfirmation {
   @@index([status, expiresAt])
   @@map("telegram_transaction_confirmations")
 }
-
 
 // ============================================================
 // 19. AI CONVERSATIONS
