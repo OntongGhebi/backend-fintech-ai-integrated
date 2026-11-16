@@ -309,43 +309,30 @@ export class DashboardService {
 
     let totalBudgetAmount = new Prisma.Decimal(0);
 
-    let totalActualAmount = new Prisma.Decimal(0);
-
-    const transactionMap = new Map<
+    // Prevent transactions from being counted more than once in the
+    // dashboard-wide actual amount when multiple budgets overlap.
+    const uniqueActualTransactions = new Map<
       string,
-      {
-        amount: Prisma.Decimal;
-        count: number;
-      }
+      { amount: Prisma.Decimal }
     >();
 
-    for (const transaction of result.transactions) {
-      if (!transaction.categoryId) {
-        continue;
-      }
-
-      transactionMap.set(transaction.categoryId, {
-        amount: new Prisma.Decimal(
-          (transaction._sum.amount ?? new Prisma.Decimal(0)).toString(),
-        ),
-        count: transaction._count._all,
-      });
-    }
-
-    const budgets: DashboardBudgetPerformanceItem[] = result.budgets.flatMap(
+    const budgets: DashboardBudgetPerformanceItem[] = result.budgets.map(
       (budget) => {
-        if (!budget.categoryId) {
-          return [];
-        }
-
         const budgetAmount = new Prisma.Decimal(budget.amount);
 
-        const transaction = transactionMap.get(budget.categoryId);
+        const matchingTransactions = result.transactions.filter(
+          (transaction) =>
+            budget.categoryIds === null ||
+            (transaction.categoryId !== null &&
+              budget.categoryIds.includes(transaction.categoryId)),
+        );
 
-        const actualAmount = transaction?.amount ?? new Prisma.Decimal(0);
+        const actualAmount = matchingTransactions.reduce(
+          (total, transaction) => total.plus(transaction.amount),
+          new Prisma.Decimal(0),
+        );
 
-        const transactionCount = transaction?.count ?? 0;
-
+        const transactionCount = matchingTransactions.length;
         const remainingAmount = budgetAmount.minus(actualAmount);
 
         const usagePercentage = budgetAmount.greaterThan(0)
@@ -368,23 +355,45 @@ export class DashboardService {
 
         totalBudgetAmount = totalBudgetAmount.plus(budgetAmount);
 
-        totalActualAmount = totalActualAmount.plus(actualAmount);
+        for (const transaction of matchingTransactions) {
+          uniqueActualTransactions.set(transaction.id, {
+            amount: new Prisma.Decimal(transaction.amount),
+          });
+        }
 
-        return [
-          {
-            budgetId: budget.id,
-            budgetName: budget.name,
-            categoryId: budget.categoryId,
-            categoryName: budget.category?.name ?? budget.categoryId,
-            budgetAmount: budgetAmount.toString(),
-            actualAmount: actualAmount.toString(),
-            remainingAmount: remainingAmount.toString(),
-            usagePercentage: usagePercentage.toString(),
-            transactionCount,
-            status,
-          },
-        ];
+        const categoryName =
+          budget.scopeType === 'ALL_EXPENSES'
+            ? 'Semua Pengeluaran'
+            : budget.scopeType === 'CATEGORY_GROUP'
+              ? (budget.scopeCategory?.name ?? budget.name)
+              : budget.scopeType === 'CUSTOM'
+                ? 'Kategori pilihan'
+                : (budget.category?.name ??
+                  budget.scopeCategory?.name ??
+                  budget.categoryId ??
+                  'Kategori');
+
+        return {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          categoryId: budget.categoryId,
+          categoryName,
+          scopeType: budget.scopeType,
+          budgetAmount: budgetAmount.toString(),
+          actualAmount: actualAmount.toString(),
+          remainingAmount: remainingAmount.toString(),
+          usagePercentage: usagePercentage.toString(),
+          transactionCount,
+          status,
+        };
       },
+    );
+
+    const totalActualAmount = Array.from(
+      uniqueActualTransactions.values(),
+    ).reduce(
+      (total, transaction) => total.plus(transaction.amount),
+      new Prisma.Decimal(0),
     );
 
     const totalRemainingAmount = totalBudgetAmount.minus(totalActualAmount);

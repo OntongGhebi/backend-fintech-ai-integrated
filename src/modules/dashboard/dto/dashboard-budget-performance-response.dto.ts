@@ -13,13 +13,20 @@ export class DashboardBudgetPerformanceItemDto {
 
   @ApiProperty({
     example: '22222222-2222-4222-8222-222222222222',
+    nullable: true,
   })
-  categoryId!: string;
+  categoryId!: string | null;
 
   @ApiProperty({
     example: 'Food',
   })
   categoryName!: string;
+
+  @ApiProperty({
+    example: 'ALL_EXPENSES',
+    enum: ['ALL_EXPENSES', 'CATEGORY', 'CATEGORY_GROUP', 'CUSTOM'],
+  })
+  scopeType!: 'ALL_EXPENSES' | 'CATEGORY' | 'CATEGORY_GROUP' | 'CUSTOM';
 
   @ApiProperty({
     example: '3000000',

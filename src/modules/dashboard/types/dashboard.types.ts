@@ -70,11 +70,15 @@ export interface DashboardAccountAnalytics {
 export type DashboardBudgetPerformanceStatus =
   'ON_TRACK' | 'NEAR_LIMIT' | 'OVER_BUDGET';
 
+export type DashboardBudgetScopeType =
+  'ALL_EXPENSES' | 'CATEGORY' | 'CATEGORY_GROUP' | 'CUSTOM';
+
 export interface DashboardBudgetPerformanceItem {
   budgetId: string;
   budgetName: string;
-  categoryId: string;
+  categoryId: string | null;
   categoryName: string;
+  scopeType: DashboardBudgetScopeType;
   budgetAmount: string;
   actualAmount: string;
   remainingAmount: string;

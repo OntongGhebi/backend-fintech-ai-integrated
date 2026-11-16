@@ -11,6 +11,7 @@ import {
   getZonedDateBoundary,
   getZonedNextDateBoundary,
 } from '../../budgets/utils/budget-month.util';
+import { BudgetScopeEngine } from 'src/modules/budgets/budget-scope.engine';
 
 /**
  * Dashboard date filters are commonly serialized from date inputs as UTC
@@ -29,7 +30,10 @@ function isUtcDateOnly(value?: Date): value is Date {
 
 @Injectable()
 export class DashboardRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly budgetScopeEngine: BudgetScopeEngine,
+  ) {}
 
   /**
    * Calculates the current balance across active, non-deleted IDR accounts.
@@ -296,21 +300,17 @@ export class DashboardRepository {
     userId: string,
     options: DashboardQueryOptions = {},
   ) {
-    // A dashboard/report range can span multiple months. Sum the monthly
-    // allocations touched by the range instead of falling back to Budget.amount.
+    // Monthly allocations remain the source of truth.
     const preference = await this.prisma.userPreference.findUnique({
       where: { userId },
       select: { timezone: true },
     });
     const timezone = preference?.timezone ?? 'Asia/Jakarta';
 
-    // Date-only query values represent local calendar dates. Convert them to
-    // timezone-aware boundaries before resolving allocation months or querying
-    // transactionDate. End dates are inclusive, so use the final millisecond
-    // before the next local midnight.
     const normalizedStartDate = isUtcDateOnly(options.startDate)
       ? getZonedDateBoundary(options.startDate, timezone)
       : options.startDate;
+
     const normalizedEndDate = isUtcDateOnly(options.endDate)
       ? new Date(
           getZonedNextDateBoundary(options.endDate, timezone).getTime() - 1,
@@ -322,21 +322,22 @@ export class DashboardRepository {
       normalizedEndDate,
       timezone,
     );
+
     const firstMonth = months[0];
     const lastMonth = months[months.length - 1];
     const periodStarts = months.map((month) => month.periodStart);
 
-    const budgetWhere = {
-      userId,
-      deletedAt: null,
-      startDate: { lte: lastMonth.periodEndDate },
-      OR: [{ endDate: null }, { endDate: { gte: firstMonth.periodStart } }],
-    };
-
     const rawBudgets = await this.prisma.budget.findMany({
-      where: budgetWhere,
+      where: {
+        userId,
+        deletedAt: null,
+        startDate: { lte: lastMonth.periodEndDate },
+        OR: [{ endDate: null }, { endDate: { gte: firstMonth.periodStart } }],
+      },
       include: {
         category: true,
+        scopeCategory: true,
+        categoryScopes: true,
         allocations: {
           where: { periodStart: { in: periodStarts } },
           orderBy: { periodStart: 'asc' },
@@ -345,73 +346,86 @@ export class DashboardRepository {
       orderBy: { createdAt: 'desc' },
     });
 
-    // A budget without an allocation for this month is intentionally omitted.
-    // Budget.amount is a legacy compatibility snapshot and is never consulted.
-    const budgets = rawBudgets.flatMap((budget) => {
-      if (budget.allocations.length === 0) return [];
+    const budgets = await Promise.all(
+      rawBudgets.flatMap((budget) => {
+        if (budget.allocations.length === 0) {
+          return [];
+        }
 
-      const allocationTotal = budget.allocations.reduce(
-        (total, allocation) => total.plus(allocation.amount),
-        new Prisma.Decimal(0),
-      );
+        const allocationTotal = budget.allocations.reduce(
+          (total, allocation) => total.plus(allocation.amount),
+          new Prisma.Decimal(0),
+        );
 
-      return [
-        {
-          id: budget.id,
-          name: budget.name,
-          categoryId: budget.categoryId,
-          category: budget.category,
-          amount: allocationTotal,
-          periodStart: firstMonth.periodStart,
-        },
-      ];
-    });
+        return [
+          this.budgetScopeEngine
+            .resolveCategoryIds(budget)
+            .then((categoryIds) => ({
+              id: budget.id,
+              name: budget.name,
+              categoryId: budget.categoryId,
+              category: budget.category,
+              scopeCategory: budget.scopeCategory,
+              scopeType: budget.scopeType,
+              categoryIds,
+              amount: allocationTotal,
+              periodStart: firstMonth.periodStart,
+            })),
+        ];
+      }),
+    );
 
     if (budgets.length === 0) {
-      return { budgets: [], transactions: [] };
-    }
-
-    const categoryIds = budgets
-      .map((budget) => budget.categoryId)
-      .filter((categoryId): categoryId is string => categoryId !== null);
-
-    if (categoryIds.length === 0) {
-      return { budgets, transactions: [] };
+      return {
+        budgets: [],
+        transactions: [],
+      };
     }
 
     const transactionStart =
       normalizedStartDate && normalizedStartDate > firstMonth.start
         ? normalizedStartDate
         : firstMonth.start;
+
     const finalMonthEnd = new Date(lastMonth.end.getTime() - 1);
+
     const transactionEnd =
       normalizedEndDate && normalizedEndDate < finalMonthEnd
         ? normalizedEndDate
         : finalMonthEnd;
 
     if (transactionStart > transactionEnd) {
-      return { budgets, transactions: [] };
+      return {
+        budgets,
+        transactions: [],
+      };
     }
 
-    const transactions = await this.prisma.transaction.groupBy({
-      by: ['categoryId'],
+    // Fetch all expenses once, including transactions without categories.
+    // Scope matching is performed independently for every budget.
+    const transactions = await this.prisma.transaction.findMany({
       where: {
         userId,
         deletedAt: null,
         status: 'ACTIVE',
         currency: 'IDR',
         type: 'EXPENSE',
-        categoryId: { in: categoryIds },
         transactionDate: {
           gte: transactionStart,
           lte: transactionEnd,
         },
       },
-      _sum: { amount: true },
-      _count: { _all: true },
+      select: {
+        id: true,
+        categoryId: true,
+        amount: true,
+      },
     });
 
-    return { budgets, transactions };
+    return {
+      budgets,
+      transactions,
+    };
   }
 
   async getRecurringPerformance(
