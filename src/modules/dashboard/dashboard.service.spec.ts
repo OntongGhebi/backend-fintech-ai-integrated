@@ -886,65 +886,60 @@ describe('DashboardService', () => {
 
   describe('getBudgetPerformance', () => {
     const foodCategoryId = '11111111-1111-4111-8111-111111111111';
-
     const transportCategoryId = '22222222-2222-4222-8222-222222222222';
+    const housingCategoryId = '55555555-5555-4555-8555-555555555555';
 
-    it('should calculate budget performance', async () => {
+    const createTransaction = (
+      id: string,
+      categoryId: string | null,
+      amount: string | number,
+    ) => ({
+      id,
+      categoryId,
+      amount: new Prisma.Decimal(amount),
+    });
+
+    it('should calculate budget performance from raw transactions', async () => {
       dashboardRepository.getBudgetPerformance.mockResolvedValue({
         budgets: [
           {
             id: '33333333-3333-4333-8333-333333333333',
             name: 'Food Budget',
             categoryId: foodCategoryId,
-            amount: '3000000',
-            category: {
-              id: foodCategoryId,
-              name: 'Food',
-            },
+            scopeType: 'CATEGORY',
+            categoryIds: [foodCategoryId],
+            amount: new Prisma.Decimal('3000000'),
+            category: { id: foodCategoryId, name: 'Food' },
+            scopeCategory: null,
           },
           {
             id: '44444444-4444-4444-8444-444444444444',
             name: 'Transport Budget',
             categoryId: transportCategoryId,
-            amount: '2000000',
-            category: {
-              id: transportCategoryId,
-              name: 'Transport',
-            },
+            scopeType: 'CATEGORY',
+            categoryIds: [transportCategoryId],
+            amount: new Prisma.Decimal('2000000'),
+            category: { id: transportCategoryId, name: 'Transport' },
+            scopeCategory: null,
           },
         ],
         transactions: [
-          {
-            categoryId: foodCategoryId,
-            _sum: {
-              amount: '2250000',
-            },
-            _count: {
-              _all: 12,
-            },
-          },
-          {
-            categoryId: transportCategoryId,
-            _sum: {
-              amount: '500000',
-            },
-            _count: {
-              _all: 3,
-            },
-          },
+          createTransaction('transaction-food-1', foodCategoryId, '2000000'),
+          createTransaction('transaction-food-2', foodCategoryId, '250000'),
+          createTransaction(
+            'transaction-transport-1',
+            transportCategoryId,
+            '500000',
+          ),
         ],
-      });
+      } as never);
 
       const result = await service.getBudgetPerformance(userId);
 
       expect(dashboardRepository.getBudgetPerformance).toHaveBeenCalledWith(
         userId,
-        {
-          startDate: undefined,
-          endDate: undefined,
-        },
+        { startDate: undefined, endDate: undefined },
       );
-
       expect(result).toEqual({
         currency: 'IDR',
         budgets: [
@@ -953,11 +948,12 @@ describe('DashboardService', () => {
             budgetName: 'Food Budget',
             categoryId: foodCategoryId,
             categoryName: 'Food',
+            scopeType: 'CATEGORY',
             budgetAmount: '3000000',
             actualAmount: '2250000',
             remainingAmount: '750000',
             usagePercentage: '75',
-            transactionCount: 12,
+            transactionCount: 2,
             status: 'ON_TRACK',
           },
           {
@@ -965,11 +961,12 @@ describe('DashboardService', () => {
             budgetName: 'Transport Budget',
             categoryId: transportCategoryId,
             categoryName: 'Transport',
+            scopeType: 'CATEGORY',
             budgetAmount: '2000000',
             actualAmount: '500000',
             remainingAmount: '1500000',
             usagePercentage: '25',
-            transactionCount: 3,
+            transactionCount: 1,
             status: 'ON_TRACK',
           },
         ],
@@ -983,33 +980,24 @@ describe('DashboardService', () => {
       dashboardRepository.getBudgetPerformance.mockResolvedValue({
         budgets: [
           {
-            id: '33333333-3333-4333-8333-333333333333',
+            id: 'budget-1',
             name: 'Food Budget',
             categoryId: foodCategoryId,
-            amount: '1000000',
-            category: {
-              id: foodCategoryId,
-              name: 'Food',
-            },
+            scopeType: 'CATEGORY',
+            categoryIds: [foodCategoryId],
+            amount: new Prisma.Decimal('1000000'),
+            category: { id: foodCategoryId, name: 'Food' },
+            scopeCategory: null,
           },
         ],
         transactions: [
-          {
-            categoryId: foodCategoryId,
-            _sum: {
-              amount: '800000',
-            },
-            _count: {
-              _all: 5,
-            },
-          },
+          createTransaction('transaction-1', foodCategoryId, '800000'),
         ],
-      });
+      } as never);
 
       const result = await service.getBudgetPerformance(userId);
 
       expect(result.budgets[0].usagePercentage).toBe('80');
-
       expect(result.budgets[0].status).toBe('NEAR_LIMIT');
     });
 
@@ -1017,35 +1005,25 @@ describe('DashboardService', () => {
       dashboardRepository.getBudgetPerformance.mockResolvedValue({
         budgets: [
           {
-            id: '33333333-3333-4333-8333-333333333333',
+            id: 'budget-1',
             name: 'Food Budget',
             categoryId: foodCategoryId,
-            amount: '1000000',
-            category: {
-              id: foodCategoryId,
-              name: 'Food',
-            },
+            scopeType: 'CATEGORY',
+            categoryIds: [foodCategoryId],
+            amount: new Prisma.Decimal('1000000'),
+            category: { id: foodCategoryId, name: 'Food' },
+            scopeCategory: null,
           },
         ],
         transactions: [
-          {
-            categoryId: foodCategoryId,
-            _sum: {
-              amount: '1250000',
-            },
-            _count: {
-              _all: 10,
-            },
-          },
+          createTransaction('transaction-1', foodCategoryId, '1250000'),
         ],
-      });
+      } as never);
 
       const result = await service.getBudgetPerformance(userId);
 
       expect(result.budgets[0].usagePercentage).toBe('125');
-
       expect(result.budgets[0].remainingAmount).toBe('-250000');
-
       expect(result.budgets[0].status).toBe('OVER_BUDGET');
     });
 
@@ -1053,18 +1031,18 @@ describe('DashboardService', () => {
       dashboardRepository.getBudgetPerformance.mockResolvedValue({
         budgets: [
           {
-            id: '33333333-3333-4333-8333-333333333333',
+            id: 'budget-1',
             name: 'Food Budget',
             categoryId: foodCategoryId,
-            amount: '3000000',
-            category: {
-              id: foodCategoryId,
-              name: 'Food',
-            },
+            scopeType: 'CATEGORY',
+            categoryIds: [foodCategoryId],
+            amount: new Prisma.Decimal('3000000'),
+            category: { id: foodCategoryId, name: 'Food' },
+            scopeCategory: null,
           },
         ],
         transactions: [],
-      });
+      } as never);
 
       const result = await service.getBudgetPerformance(userId);
 
@@ -1072,10 +1050,11 @@ describe('DashboardService', () => {
         currency: 'IDR',
         budgets: [
           {
-            budgetId: '33333333-3333-4333-8333-333333333333',
+            budgetId: 'budget-1',
             budgetName: 'Food Budget',
             categoryId: foodCategoryId,
             categoryName: 'Food',
+            scopeType: 'CATEGORY',
             budgetAmount: '3000000',
             actualAmount: '0',
             remainingAmount: '3000000',
@@ -1090,16 +1069,211 @@ describe('DashboardService', () => {
       });
     });
 
+    it('should include categorized and uncategorized transactions in ALL_EXPENSES', async () => {
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [
+          {
+            id: 'all-expenses-budget',
+            name: 'All Expenses',
+            categoryId: null,
+            scopeType: 'ALL_EXPENSES',
+            categoryIds: null,
+            amount: new Prisma.Decimal('2000000'),
+            category: null,
+            scopeCategory: null,
+          },
+        ],
+        transactions: [
+          createTransaction('food-expense', foodCategoryId, '500000'),
+          createTransaction('transport-expense', transportCategoryId, '250000'),
+          createTransaction('uncategorized-expense', null, '125000'),
+        ],
+      } as never);
+
+      const result = await service.getBudgetPerformance(userId);
+
+      expect(result.budgets[0]).toEqual(
+        expect.objectContaining({
+          categoryName: 'Semua Pengeluaran',
+          scopeType: 'ALL_EXPENSES',
+          actualAmount: '875000',
+          remainingAmount: '1125000',
+          transactionCount: 3,
+        }),
+      );
+      expect(result.totalActualAmount).toBe('875000');
+    });
+
+    it('should calculate CATEGORY_GROUP performance from all resolved category IDs', async () => {
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [
+          {
+            id: 'food-group-budget',
+            name: 'Food Group Budget',
+            categoryId: null,
+            scopeType: 'CATEGORY_GROUP',
+            categoryIds: [foodCategoryId, transportCategoryId],
+            amount: new Prisma.Decimal('1500000'),
+            category: null,
+            scopeCategory: { id: 'root-category', name: 'Daily Needs' },
+          },
+        ],
+        transactions: [
+          createTransaction('food-transaction', foodCategoryId, '400000'),
+          createTransaction(
+            'transport-transaction',
+            transportCategoryId,
+            '300000',
+          ),
+          createTransaction('housing-transaction', housingCategoryId, '900000'),
+        ],
+      } as never);
+
+      const result = await service.getBudgetPerformance(userId);
+
+      expect(result.budgets[0]).toEqual(
+        expect.objectContaining({
+          categoryName: 'Daily Needs',
+          scopeType: 'CATEGORY_GROUP',
+          actualAmount: '700000',
+          remainingAmount: '800000',
+          transactionCount: 2,
+        }),
+      );
+    });
+
+    it('should calculate CUSTOM performance from explicitly selected categories', async () => {
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [
+          {
+            id: 'custom-budget',
+            name: 'Custom Budget',
+            categoryId: null,
+            scopeType: 'CUSTOM',
+            categoryIds: [foodCategoryId, housingCategoryId],
+            amount: new Prisma.Decimal('2000000'),
+            category: null,
+            scopeCategory: null,
+          },
+        ],
+        transactions: [
+          createTransaction('food-transaction', foodCategoryId, '300000'),
+          createTransaction('housing-transaction', housingCategoryId, '700000'),
+          createTransaction(
+            'transport-transaction',
+            transportCategoryId,
+            '250000',
+          ),
+          createTransaction('uncategorized-transaction', null, '100000'),
+        ],
+      } as never);
+
+      const result = await service.getBudgetPerformance(userId);
+
+      expect(result.budgets[0]).toEqual(
+        expect.objectContaining({
+          categoryName: 'Kategori pilihan',
+          scopeType: 'CUSTOM',
+          actualAmount: '1000000',
+          remainingAmount: '1000000',
+          transactionCount: 2,
+        }),
+      );
+    });
+
+    it('should count overlapping transactions once in dashboard totals but in each matching budget', async () => {
+      const sharedTransaction = createTransaction(
+        'shared-transaction',
+        foodCategoryId,
+        '400000',
+      );
+
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [
+          {
+            id: 'food-budget',
+            name: 'Food Budget',
+            categoryId: foodCategoryId,
+            scopeType: 'CATEGORY',
+            categoryIds: [foodCategoryId],
+            amount: new Prisma.Decimal('1000000'),
+            category: { id: foodCategoryId, name: 'Food' },
+            scopeCategory: null,
+          },
+          {
+            id: 'all-expenses-budget',
+            name: 'All Expenses Budget',
+            categoryId: null,
+            scopeType: 'ALL_EXPENSES',
+            categoryIds: null,
+            amount: new Prisma.Decimal('2000000'),
+            category: null,
+            scopeCategory: null,
+          },
+        ],
+        transactions: [sharedTransaction],
+      } as never);
+
+      const result = await service.getBudgetPerformance(userId);
+
+      expect(result.budgets[0].actualAmount).toBe('400000');
+      expect(result.budgets[0].transactionCount).toBe(1);
+      expect(result.budgets[1].actualAmount).toBe('400000');
+      expect(result.budgets[1].transactionCount).toBe(1);
+      expect(result.totalBudgetAmount).toBe('3000000');
+      expect(result.totalActualAmount).toBe('400000');
+      expect(result.totalRemainingAmount).toBe('2600000');
+    });
+
+    it('should count different transactions once each in dashboard totals', async () => {
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [
+          {
+            id: 'all-expenses-budget',
+            name: 'All Expenses',
+            categoryId: null,
+            scopeType: 'ALL_EXPENSES',
+            categoryIds: null,
+            amount: new Prisma.Decimal('2000000'),
+            category: null,
+            scopeCategory: null,
+          },
+        ],
+        transactions: [
+          createTransaction('transaction-1', foodCategoryId, '100000'),
+          createTransaction('transaction-2', null, '50000'),
+        ],
+      } as never);
+
+      const result = await service.getBudgetPerformance(userId);
+
+      expect(result.totalActualAmount).toBe('150000');
+      expect(result.budgets[0].transactionCount).toBe(2);
+    });
+
+    it('should return empty performance when there are no budgets', async () => {
+      dashboardRepository.getBudgetPerformance.mockResolvedValue({
+        budgets: [],
+        transactions: [],
+      } as never);
+
+      const result = await service.getBudgetPerformance(userId);
+
+      expect(result).toEqual({
+        currency: 'IDR',
+        budgets: [],
+        totalBudgetAmount: '0',
+        totalActualAmount: '0',
+        totalRemainingAmount: '0',
+      });
+    });
+
     it('should validate the date range', async () => {
       const startDate = new Date('2026-09-30T00:00:00.000Z');
-
       const endDate = new Date('2026-09-01T00:00:00.000Z');
 
       await expect(
-        service.getBudgetPerformance(userId, {
-          startDate,
-          endDate,
-        }),
+        service.getBudgetPerformance(userId, { startDate, endDate }),
       ).rejects.toThrow(
         new BadRequestException(
           'startDate must be earlier than or equal to endDate',

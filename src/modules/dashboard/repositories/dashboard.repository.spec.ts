@@ -8,6 +8,7 @@ import {
 
 describe('DashboardRepository', () => {
   let repository: DashboardRepository;
+  let budgetScopeEngine: { resolveCategoryIds: jest.Mock };
 
   let prisma: {
     transaction: {
@@ -16,19 +17,11 @@ describe('DashboardRepository', () => {
       aggregate: jest.Mock;
       findMany: jest.Mock;
     };
-    category: {
-      findMany: jest.Mock;
-    };
-    account: {
-      findMany: jest.Mock;
-    };
-    budget: {
-      findMany: jest.Mock;
-    };
+    category: { findMany: jest.Mock };
+    account: { findMany: jest.Mock };
+    budget: { findMany: jest.Mock };
     userPreference: { findUnique: jest.Mock };
-    recurringTransaction: {
-      findMany: jest.Mock;
-    };
+    recurringTransaction: { findMany: jest.Mock };
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -41,24 +34,23 @@ describe('DashboardRepository', () => {
         aggregate: jest.fn(),
         findMany: jest.fn(),
       },
-      category: {
-        findMany: jest.fn(),
-      },
-      account: {
-        findMany: jest.fn(),
-      },
-      budget: {
-        findMany: jest.fn(),
-      },
+      category: { findMany: jest.fn() },
+      account: { findMany: jest.fn() },
+      budget: { findMany: jest.fn() },
       userPreference: {
         findUnique: jest.fn().mockResolvedValue({ timezone: 'Asia/Jakarta' }),
       },
-      recurringTransaction: {
-        findMany: jest.fn(),
-      },
+      recurringTransaction: { findMany: jest.fn() },
     };
 
-    repository = new DashboardRepository(prisma as never);
+    budgetScopeEngine = {
+      resolveCategoryIds: jest.fn().mockResolvedValue([]),
+    };
+
+    repository = new DashboardRepository(
+      prisma as never,
+      budgetScopeEngine as never,
+    );
   });
 
   describe('getTotalCurrentBalance', () => {
@@ -127,26 +119,17 @@ describe('DashboardRepository', () => {
       const groupedTransactions = [
         {
           type: 'INCOME',
-          _sum: {
-            amount: '5000000',
-          },
-          _count: {
-            _all: 5,
-          },
+          _sum: { amount: '5000000' },
+          _count: { _all: 5 },
         },
         {
           type: 'EXPENSE',
-          _sum: {
-            amount: '1750000',
-          },
-          _count: {
-            _all: 3,
-          },
+          _sum: { amount: '1750000' },
+          _count: { _all: 3 },
         },
       ];
 
       prisma.transaction.groupBy.mockResolvedValue(groupedTransactions);
-
       prisma.transaction.count.mockResolvedValue(8);
 
       const result = await repository.getFinancialSummary(userId);
@@ -159,16 +142,10 @@ describe('DashboardRepository', () => {
           status: 'ACTIVE',
           currency: 'IDR',
         },
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
-
       expect(prisma.transaction.count).not.toHaveBeenCalled();
-
       expect(result).toEqual({
         groupedTransactions,
         transactionCount: 8,
@@ -177,48 +154,12 @@ describe('DashboardRepository', () => {
 
     it('should apply the start and end dates', async () => {
       prisma.transaction.groupBy.mockResolvedValue([]);
-
       prisma.transaction.count.mockResolvedValue(0);
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
-
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
-      await repository.getFinancialSummary(userId, {
-        startDate,
-        endDate,
-      });
-
-      const expectedWhere = {
-        userId,
-        deletedAt: null,
-        status: 'ACTIVE',
-        currency: 'IDR',
-        transactionDate: {
-          gte: startDate,
-          lte: endDate,
-        },
-      };
-
-      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expectedWhere,
-        }),
-      );
-
-      expect(prisma.transaction.count).not.toHaveBeenCalled();
-    });
-
-    it('should apply only the start date', async () => {
-      prisma.transaction.groupBy.mockResolvedValue([]);
-
-      prisma.transaction.count.mockResolvedValue(0);
-
-      const startDate = new Date('2026-09-01T00:00:00.000Z');
-
-      await repository.getFinancialSummary(userId, {
-        startDate,
-      });
+      await repository.getFinancialSummary(userId, { startDate, endDate });
 
       expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -227,9 +168,29 @@ describe('DashboardRepository', () => {
             deletedAt: null,
             status: 'ACTIVE',
             currency: 'IDR',
-            transactionDate: {
-              gte: startDate,
-            },
+            transactionDate: { gte: startDate, lte: endDate },
+          },
+        }),
+      );
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
+    });
+
+    it('should apply only the start date', async () => {
+      prisma.transaction.groupBy.mockResolvedValue([]);
+      prisma.transaction.count.mockResolvedValue(0);
+
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      await repository.getFinancialSummary(userId, { startDate });
+
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            userId,
+            deletedAt: null,
+            status: 'ACTIVE',
+            currency: 'IDR',
+            transactionDate: { gte: startDate },
           },
         }),
       );
@@ -237,14 +198,11 @@ describe('DashboardRepository', () => {
 
     it('should apply only the end date', async () => {
       prisma.transaction.groupBy.mockResolvedValue([]);
-
       prisma.transaction.count.mockResolvedValue(0);
 
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
-      await repository.getFinancialSummary(userId, {
-        endDate,
-      });
+      await repository.getFinancialSummary(userId, { endDate });
 
       expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -253,9 +211,7 @@ describe('DashboardRepository', () => {
             deletedAt: null,
             status: 'ACTIVE',
             currency: 'IDR',
-            transactionDate: {
-              lte: endDate,
-            },
+            transactionDate: { lte: endDate },
           },
         }),
       );
@@ -265,12 +221,8 @@ describe('DashboardRepository', () => {
   describe('getIncomeAnalytics', () => {
     it('should aggregate only active IDR income transactions', async () => {
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '7500000',
-        },
-        _count: {
-          _all: 6,
-        },
+        _sum: { amount: '7500000' },
+        _count: { _all: 6 },
       });
 
       const result = await repository.getIncomeAnalytics(userId);
@@ -283,81 +235,26 @@ describe('DashboardRepository', () => {
           currency: 'IDR',
           type: 'INCOME',
         },
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
-
       expect(result).toEqual({
         totalIncome: '7500000',
         transactionCount: 6,
       });
-
       expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should apply the date range to income analytics', async () => {
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '3000000',
-        },
-        _count: {
-          _all: 2,
-        },
+        _sum: { amount: '3000000' },
+        _count: { _all: 2 },
       });
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
-
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
-      await repository.getIncomeAnalytics(userId, {
-        startDate,
-        endDate,
-      });
-
-      const expectedWhere = {
-        userId,
-        deletedAt: null,
-        status: 'ACTIVE',
-        currency: 'IDR',
-        type: 'INCOME',
-        transactionDate: {
-          gte: startDate,
-          lte: endDate,
-        },
-      };
-
-      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
-        where: expectedWhere,
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
-      });
-
-      expect(prisma.transaction.count).not.toHaveBeenCalled();
-    });
-
-    it('should apply only the start date', async () => {
-      prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '1000000',
-        },
-        _count: {
-          _all: 1,
-        },
-      });
-
-      const startDate = new Date('2026-09-01T00:00:00.000Z');
-
-      await repository.getIncomeAnalytics(userId, {
-        startDate,
-      });
+      await repository.getIncomeAnalytics(userId, { startDate, endDate });
 
       expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
         where: {
@@ -366,35 +263,48 @@ describe('DashboardRepository', () => {
           status: 'ACTIVE',
           currency: 'IDR',
           type: 'INCOME',
-          transactionDate: {
-            gte: startDate,
-          },
+          transactionDate: { gte: startDate, lte: endDate },
         },
-        _sum: {
-          amount: true,
+        _sum: { amount: true },
+        _count: { _all: true },
+      });
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
+    });
+
+    it('should apply only the start date', async () => {
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: { amount: '1000000' },
+        _count: { _all: 1 },
+      });
+
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      await repository.getIncomeAnalytics(userId, { startDate });
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'INCOME',
+          transactionDate: { gte: startDate },
         },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
       expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should apply only the end date', async () => {
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '1000000',
-        },
-        _count: {
-          _all: 1,
-        },
+        _sum: { amount: '1000000' },
+        _count: { _all: 1 },
       });
 
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
-      await repository.getIncomeAnalytics(userId, {
-        endDate,
-      });
+      await repository.getIncomeAnalytics(userId, { endDate });
 
       expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
         where: {
@@ -403,49 +313,33 @@ describe('DashboardRepository', () => {
           status: 'ACTIVE',
           currency: 'IDR',
           type: 'INCOME',
-          transactionDate: {
-            lte: endDate,
-          },
+          transactionDate: { lte: endDate },
         },
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
       expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should scope analytics queries by userId', async () => {
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '1000000',
-        },
-        _count: {
-          _all: 1,
-        },
+        _sum: { amount: '1000000' },
+        _count: { _all: 1 },
       });
 
       await repository.getExpenseAnalytics('user-123');
 
       expect(prisma.transaction.aggregate).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({
-            userId: 'user-123',
-          }),
+          where: expect.objectContaining({ userId: 'user-123' }),
         }),
       );
     });
 
     it('should exclude deleted and inactive transactions from analytics', async () => {
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '1000000',
-        },
-        _count: {
-          _all: 1,
-        },
+        _sum: { amount: '1000000' },
+        _count: { _all: 1 },
       });
 
       await repository.getExpenseAnalytics('user-1');
@@ -462,21 +356,15 @@ describe('DashboardRepository', () => {
 
     it('should only include IDR transactions', async () => {
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '1000000',
-        },
-        _count: {
-          _all: 1,
-        },
+        _sum: { amount: '1000000' },
+        _count: { _all: 1 },
       });
 
       await repository.getIncomeAnalytics('user-1');
 
       expect(prisma.transaction.aggregate).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({
-            currency: 'IDR',
-          }),
+          where: expect.objectContaining({ currency: 'IDR' }),
         }),
       );
     });
@@ -485,14 +373,9 @@ describe('DashboardRepository', () => {
   describe('getExpenseAnalytics', () => {
     it('should aggregate only active IDR expense transactions', async () => {
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '3750000',
-        },
-        _count: {
-          _all: 10,
-        },
+        _sum: { amount: '3750000' },
+        _count: { _all: 10 },
       });
-
       prisma.transaction.count.mockResolvedValue(10);
 
       const result = await repository.getExpenseAnalytics(userId);
@@ -505,16 +388,10 @@ describe('DashboardRepository', () => {
           currency: 'IDR',
           type: 'EXPENSE',
         },
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
-
       expect(prisma.transaction.count).not.toHaveBeenCalled();
-
       expect(result).toEqual({
         totalExpense: '3750000',
         transactionCount: 10,
@@ -523,63 +400,14 @@ describe('DashboardRepository', () => {
 
     it('should apply the date range to expense analytics', async () => {
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '3000000',
-        },
-        _count: {
-          _all: 3,
-        },
+        _sum: { amount: '3000000' },
+        _count: { _all: 3 },
       });
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
-
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
-      await repository.getExpenseAnalytics(userId, {
-        startDate,
-        endDate,
-      });
-
-      const expectedWhere = {
-        userId,
-        deletedAt: null,
-        status: 'ACTIVE',
-        currency: 'IDR',
-        type: 'EXPENSE',
-        transactionDate: {
-          gte: startDate,
-          lte: endDate,
-        },
-      };
-
-      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
-        where: expectedWhere,
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
-      });
-
-      expect(prisma.transaction.count).not.toHaveBeenCalled();
-    });
-
-    it('should apply only the start date', async () => {
-      prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '1000000',
-        },
-        _count: {
-          _all: 1,
-        },
-      });
-
-      const startDate = new Date('2026-09-01T00:00:00.000Z');
-
-      await repository.getExpenseAnalytics(userId, {
-        startDate,
-      });
+      await repository.getExpenseAnalytics(userId, { startDate, endDate });
 
       expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
         where: {
@@ -588,35 +416,48 @@ describe('DashboardRepository', () => {
           status: 'ACTIVE',
           currency: 'IDR',
           type: 'EXPENSE',
-          transactionDate: {
-            gte: startDate,
-          },
+          transactionDate: { gte: startDate, lte: endDate },
         },
-        _sum: {
-          amount: true,
+        _sum: { amount: true },
+        _count: { _all: true },
+      });
+      expect(prisma.transaction.count).not.toHaveBeenCalled();
+    });
+
+    it('should apply only the start date', async () => {
+      prisma.transaction.aggregate.mockResolvedValue({
+        _sum: { amount: '1000000' },
+        _count: { _all: 1 },
+      });
+
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+
+      await repository.getExpenseAnalytics(userId, { startDate });
+
+      expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'EXPENSE',
+          transactionDate: { gte: startDate },
         },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
       expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
 
     it('should apply only the end date', async () => {
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '1000000',
-        },
-        _count: {
-          _all: 1,
-        },
+        _sum: { amount: '1000000' },
+        _count: { _all: 1 },
       });
 
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
-      await repository.getExpenseAnalytics(userId, {
-        endDate,
-      });
+      await repository.getExpenseAnalytics(userId, { endDate });
 
       expect(prisma.transaction.aggregate).toHaveBeenCalledWith({
         where: {
@@ -625,16 +466,10 @@ describe('DashboardRepository', () => {
           status: 'ACTIVE',
           currency: 'IDR',
           type: 'EXPENSE',
-          transactionDate: {
-            lte: endDate,
-          },
+          transactionDate: { lte: endDate },
         },
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
       expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
@@ -647,28 +482,16 @@ describe('DashboardRepository', () => {
       prisma.transaction.groupBy.mockResolvedValue([
         {
           categoryId,
-          _sum: {
-            amount: '2500000',
-          },
-          _count: {
-            _all: 8,
-          },
+          _sum: { amount: '2500000' },
+          _count: { _all: 8 },
         },
       ]);
-
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '2500000',
-        },
+        _sum: { amount: '2500000' },
       });
-
       prisma.transaction.count.mockResolvedValue(8);
-
       prisma.category.findMany.mockResolvedValue([
-        {
-          id: categoryId,
-          name: 'Food',
-        },
+        { id: categoryId, name: 'Food' },
       ]);
 
       const result = await repository.getCategoryAnalytics(userId, 'EXPENSE');
@@ -681,54 +504,30 @@ describe('DashboardRepository', () => {
           status: 'ACTIVE',
           currency: 'IDR',
           type: 'EXPENSE',
-          categoryId: {
-            not: null,
-          },
+          categoryId: { not: null },
         },
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
-
       expect(prisma.category.findMany).toHaveBeenCalledWith({
         where: {
-          id: {
-            in: [categoryId],
-          },
+          id: { in: [categoryId] },
           userId,
           deletedAt: null,
         },
-        select: {
-          id: true,
-          name: true,
-        },
+        select: { id: true, name: true },
       });
-
       expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
-
       expect(prisma.transaction.count).not.toHaveBeenCalled();
-
       expect(result).toEqual({
         groupedCategories: [
           {
             categoryId,
-            _sum: {
-              amount: '2500000',
-            },
-            _count: {
-              _all: 8,
-            },
+            _sum: { amount: '2500000' },
+            _count: { _all: 8 },
           },
         ],
-        categories: [
-          {
-            id: categoryId,
-            name: 'Food',
-          },
-        ],
+        categories: [{ id: categoryId, name: 'Food' }],
         totalAmount: '2500000',
         transactionCount: 8,
       });
@@ -739,7 +538,6 @@ describe('DashboardRepository', () => {
       prisma.category.findMany.mockResolvedValue([]);
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
-
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
       await repository.getCategoryAnalytics(userId, 'INCOME', {
@@ -747,30 +545,20 @@ describe('DashboardRepository', () => {
         endDate,
       });
 
-      const expectedWhere = {
-        userId,
-        deletedAt: null,
-        status: 'ACTIVE',
-        currency: 'IDR',
-        type: 'INCOME',
-        categoryId: {
-          not: null,
-        },
-        transactionDate: {
-          gte: startDate,
-          lte: endDate,
-        },
-      };
-
       expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expectedWhere,
-          _count: {
-            _all: true,
+          where: {
+            userId,
+            deletedAt: null,
+            status: 'ACTIVE',
+            currency: 'IDR',
+            type: 'INCOME',
+            categoryId: { not: null },
+            transactionDate: { gte: startDate, lte: endDate },
           },
+          _count: { _all: true },
         }),
       );
-
       expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
       expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
@@ -778,16 +566,13 @@ describe('DashboardRepository', () => {
     it('should not query categories when there are no grouped categories', async () => {
       prisma.transaction.groupBy.mockResolvedValue([]);
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: null,
-        },
+        _sum: { amount: null },
       });
       prisma.transaction.count.mockResolvedValue(0);
 
       const result = await repository.getCategoryAnalytics(userId, 'EXPENSE');
 
       expect(prisma.category.findMany).not.toHaveBeenCalled();
-
       expect(result).toEqual({
         groupedCategories: [],
         categories: [],
@@ -804,28 +589,16 @@ describe('DashboardRepository', () => {
       prisma.transaction.groupBy.mockResolvedValue([
         {
           accountId,
-          _sum: {
-            amount: '2500000',
-          },
-          _count: {
-            _all: 8,
-          },
+          _sum: { amount: '2500000' },
+          _count: { _all: 8 },
         },
       ]);
-
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: '2500000',
-        },
+        _sum: { amount: '2500000' },
       });
-
       prisma.transaction.count.mockResolvedValue(8);
-
       prisma.account.findMany.mockResolvedValue([
-        {
-          id: accountId,
-          name: 'BCA',
-        },
+        { id: accountId, name: 'BCA' },
       ]);
 
       const result = await repository.getAccountAnalytics(userId, 'EXPENSE');
@@ -839,50 +612,28 @@ describe('DashboardRepository', () => {
           currency: 'IDR',
           type: 'EXPENSE',
         },
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
-
       expect(prisma.account.findMany).toHaveBeenCalledWith({
         where: {
-          id: {
-            in: [accountId],
-          },
+          id: { in: [accountId] },
           userId,
           deletedAt: null,
         },
-        select: {
-          id: true,
-          name: true,
-        },
+        select: { id: true, name: true },
       });
-
       expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
-
       expect(prisma.transaction.count).not.toHaveBeenCalled();
-
       expect(result).toEqual({
         groupedAccounts: [
           {
             accountId,
-            _sum: {
-              amount: '2500000',
-            },
-            _count: {
-              _all: 8,
-            },
+            _sum: { amount: '2500000' },
+            _count: { _all: 8 },
           },
         ],
-        accounts: [
-          {
-            id: accountId,
-            name: 'BCA',
-          },
-        ],
+        accounts: [{ id: accountId, name: 'BCA' }],
         totalAmount: '2500000',
         transactionCount: 8,
       });
@@ -893,7 +644,6 @@ describe('DashboardRepository', () => {
       prisma.account.findMany.mockResolvedValue([]);
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
-
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
       await repository.getAccountAnalytics(userId, 'INCOME', {
@@ -901,27 +651,19 @@ describe('DashboardRepository', () => {
         endDate,
       });
 
-      const expectedWhere = {
-        userId,
-        deletedAt: null,
-        status: 'ACTIVE',
-        currency: 'IDR',
-        type: 'INCOME',
-        transactionDate: {
-          gte: startDate,
-          lte: endDate,
-        },
-      };
-
       expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expectedWhere,
-          _count: {
-            _all: true,
+          where: {
+            userId,
+            deletedAt: null,
+            status: 'ACTIVE',
+            currency: 'IDR',
+            type: 'INCOME',
+            transactionDate: { gte: startDate, lte: endDate },
           },
+          _count: { _all: true },
         }),
       );
-
       expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
       expect(prisma.transaction.count).not.toHaveBeenCalled();
     });
@@ -929,16 +671,13 @@ describe('DashboardRepository', () => {
     it('should not query accounts when there are no grouped accounts', async () => {
       prisma.transaction.groupBy.mockResolvedValue([]);
       prisma.transaction.aggregate.mockResolvedValue({
-        _sum: {
-          amount: null,
-        },
+        _sum: { amount: null },
       });
       prisma.transaction.count.mockResolvedValue(0);
 
       const result = await repository.getAccountAnalytics(userId, 'EXPENSE');
 
       expect(prisma.account.findMany).not.toHaveBeenCalled();
-
       expect(result).toEqual({
         groupedAccounts: [],
         accounts: [],
@@ -953,28 +692,19 @@ describe('DashboardRepository', () => {
       const groupedTransactions = [
         {
           type: 'INCOME',
-          _sum: {
-            amount: '5000000',
-          },
-          _count: {
-            _all: 5,
-          },
+          _sum: { amount: '5000000' },
+          _count: { _all: 5 },
         },
         {
           type: 'EXPENSE',
-          _sum: {
-            amount: '2000000',
-          },
-          _count: {
-            _all: 3,
-          },
+          _sum: { amount: '2000000' },
+          _count: { _all: 3 },
         },
       ];
 
       prisma.transaction.groupBy.mockResolvedValue(groupedTransactions);
 
       const startDate = new Date('2026-09-01T00:00:00.000Z');
-
       const endDate = new Date('2026-09-30T23:59:59.999Z');
 
       const result = await repository.getIncomeExpenseAnalyticsBase(userId, {
@@ -983,7 +713,6 @@ describe('DashboardRepository', () => {
       });
 
       expect(result).toEqual(groupedTransactions);
-
       expect(prisma.transaction.groupBy).toHaveBeenCalledWith({
         by: ['type'],
         where: {
@@ -991,24 +720,13 @@ describe('DashboardRepository', () => {
           deletedAt: null,
           status: 'ACTIVE',
           currency: 'IDR',
-          type: {
-            in: ['INCOME', 'EXPENSE'],
-          },
-          transactionDate: {
-            gte: startDate,
-            lte: endDate,
-          },
+          type: { in: ['INCOME', 'EXPENSE'] },
+          transactionDate: { gte: startDate, lte: endDate },
         },
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
-
       expect(prisma.transaction.count).not.toHaveBeenCalled();
-
       expect(prisma.transaction.aggregate).not.toHaveBeenCalled();
     });
 
@@ -1040,12 +758,8 @@ describe('DashboardRepository', () => {
             lte: new Date('2026-09-30T23:59:59.999Z'),
           },
         },
-        _sum: {
-          amount: true,
-        },
-        _count: {
-          _all: true,
-        },
+        _sum: { amount: true },
+        _count: { _all: true },
       });
     });
 
@@ -1057,9 +771,7 @@ describe('DashboardRepository', () => {
       expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
-            type: {
-              in: ['INCOME', 'EXPENSE'],
-            },
+            type: { in: ['INCOME', 'EXPENSE'] },
           }),
         }),
       );
@@ -1067,106 +779,113 @@ describe('DashboardRepository', () => {
   });
 
   describe('getBudgetPerformance', () => {
-    it('should load the selected monthly allocation and aggregate expenses in that month', async () => {
-      const categoryId = '11111111-1111-4111-8111-111111111111';
-      const budgetId = '22222222-2222-4222-8222-222222222222';
+    const foodCategoryId = '11111111-1111-4111-8111-111111111111';
+    const transportCategoryId = '22222222-2222-4222-8222-222222222222';
+
+    const createBudget = (overrides: Record<string, unknown> = {}) => {
       const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
 
-      prisma.budget.findMany.mockResolvedValue([
-        {
-          id: budgetId,
-          name: 'Food Budget',
-          categoryId,
-          amount: '9999999', // Legacy snapshot must not be used.
-          allocations: [
-            {
-              periodStart: month.periodStart,
-              amount: '3000000',
-            },
-          ],
-          category: {
-            id: categoryId,
-            name: 'Food',
+      return {
+        id: 'budget-1',
+        name: 'Food Budget',
+        categoryId: foodCategoryId,
+        scopeType: 'CATEGORY',
+        scopeCategoryId: foodCategoryId,
+        amount: '9999999',
+        allocations: [
+          {
+            periodStart: month.periodStart,
+            amount: '3000000',
           },
+        ],
+        category: {
+          id: foodCategoryId,
+          name: 'Food',
         },
-      ]);
+        scopeCategory: {
+          id: foodCategoryId,
+          name: 'Food',
+        },
+        categoryScopes: [],
+        ...overrides,
+      };
+    };
 
-      prisma.transaction.groupBy.mockResolvedValue([
+    it('should load monthly allocations, resolve budget scopes, and fetch raw expense transactions', async () => {
+      const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
+      const budget = createBudget();
+
+      prisma.budget.findMany.mockResolvedValue([budget] as never);
+      budgetScopeEngine.resolveCategoryIds.mockResolvedValue([foodCategoryId]);
+      prisma.transaction.findMany.mockResolvedValue([
         {
-          categoryId,
-          _sum: {
-            amount: '2250000',
-          },
-          _count: {
-            _all: 12,
-          },
+          id: 'transaction-1',
+          categoryId: foodCategoryId,
+          amount: new Prisma.Decimal('2250000'),
         },
-      ]);
+      ] as never);
 
       const result = await repository.getBudgetPerformance(userId);
 
+      expect(prisma.userPreference.findUnique).toHaveBeenCalledWith({
+        where: { userId },
+        select: { timezone: true },
+      });
       expect(prisma.budget.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             userId,
             deletedAt: null,
+            startDate: { lte: month.periodEndDate },
+            OR: [{ endDate: null }, { endDate: { gte: month.periodStart } }],
           }),
           include: {
             category: true,
+            scopeCategory: true,
+            categoryScopes: true,
             allocations: {
-              where: {
-                periodStart: {
-                  in: [month.periodStart],
-                },
-              },
-              orderBy: {
-                periodStart: 'asc',
-              },
+              where: { periodStart: { in: [month.periodStart] } },
+              orderBy: { periodStart: 'asc' },
             },
           },
-          orderBy: {
-            createdAt: 'desc',
+          orderBy: { createdAt: 'desc' },
+        }),
+      );
+      expect(budgetScopeEngine.resolveCategoryIds).toHaveBeenCalledWith(budget);
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith({
+        where: {
+          userId,
+          deletedAt: null,
+          status: 'ACTIVE',
+          currency: 'IDR',
+          type: 'EXPENSE',
+          transactionDate: {
+            gte: month.start,
+            lte: new Date(month.end.getTime() - 1),
           },
-        }),
-      );
-
-      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          by: ['categoryId'],
-          where: expect.objectContaining({
-            userId,
-            status: 'ACTIVE',
-            currency: 'IDR',
-            type: 'EXPENSE',
-            categoryId: {
-              in: [categoryId],
-            },
-            transactionDate: {
-              gte: month.start,
-              lte: new Date(month.end.getTime() - 1),
-            },
-          }),
-        }),
-      );
+        },
+        select: {
+          id: true,
+          categoryId: true,
+          amount: true,
+        },
+      });
 
       expect(result.budgets).toHaveLength(1);
-
       expect(result.budgets[0]).toEqual(
         expect.objectContaining({
-          id: budgetId,
+          id: 'budget-1',
+          categoryIds: [foodCategoryId],
+          scopeType: 'CATEGORY',
           periodStart: month.periodStart,
         }),
       );
-
-      // Prisma.Decimal is intentionally retained by the repository.
       expect(result.budgets[0].amount.toString()).toBe('3000000');
-
       expect(result.transactions).toHaveLength(1);
+      expect(result.transactions[0].id).toBe('transaction-1');
     });
 
-    it('should interpret UTC-midnight date filters as local calendar dates for monthly budget performance', async () => {
-      const categoryId = '0332c93d-c052-421c-9d7a-4d0acf6df3e5';
-      const budgetId = 'e5b97fb1-8c9d-4550-b154-3550f2ea364e';
+    it('should interpret UTC-midnight date filters as local calendar dates', async () => {
       const startDate = new Date('2026-11-01T00:00:00.000Z');
       const endDate = new Date('2026-11-30T00:00:00.000Z');
       const month = getBudgetMonthRange(
@@ -1175,37 +894,26 @@ describe('DashboardRepository', () => {
       );
 
       prisma.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'november-budget',
+          allocations: [{ periodStart: month.periodStart, amount: '1500000' }],
+        }),
+      ] as never);
+      budgetScopeEngine.resolveCategoryIds.mockResolvedValue([foodCategoryId]);
+      prisma.transaction.findMany.mockResolvedValue([
         {
-          id: budgetId,
-          name: 'Monthly Food Budget',
-          categoryId,
-          amount: '9999999',
-          allocations: [
-            {
-              periodStart: month.periodStart,
-              amount: '1500000',
-            },
-          ],
-          category: {
-            id: categoryId,
-            name: 'Food',
-          },
+          id: 'november-transaction',
+          categoryId: foodCategoryId,
+          amount: new Prisma.Decimal('117000'),
         },
-      ]);
-      prisma.transaction.groupBy.mockResolvedValue([
-        {
-          categoryId,
-          _sum: { amount: '117000' },
-          _count: { _all: 3 },
-        },
-      ]);
+      ] as never);
 
       const result = await repository.getBudgetPerformance(userId, {
         startDate,
         endDate,
       });
 
-      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             transactionDate: {
@@ -1217,48 +925,30 @@ describe('DashboardRepository', () => {
       );
       expect(result.transactions).toEqual([
         expect.objectContaining({
-          categoryId,
-          _sum: { amount: '117000' },
-          _count: { _all: 3 },
+          id: 'november-transaction',
+          categoryId: foodCategoryId,
+          amount: expect.any(Prisma.Decimal),
         }),
       ]);
     });
 
     it('should sum monthly allocations across a multi-month report range', async () => {
-      const categoryId = '11111111-1111-4111-8111-111111111111';
       const startDate = new Date('2026-09-01T00:00:00.000Z');
       const endDate = new Date('2026-11-30T16:59:59.999Z');
-
       const months = getBudgetMonthRanges(startDate, endDate, 'Asia/Jakarta');
 
       prisma.budget.findMany.mockResolvedValue([
-        {
+        createBudget({
           id: 'multi-month-budget',
-          name: 'Quarterly food',
-          categoryId,
-          amount: '9999999',
           allocations: [
-            {
-              periodStart: months[0].periodStart,
-              amount: '1000000',
-            },
-            {
-              periodStart: months[1].periodStart,
-              amount: '1200000',
-            },
-            {
-              periodStart: months[2].periodStart,
-              amount: '1400000',
-            },
+            { periodStart: months[0].periodStart, amount: '1000000' },
+            { periodStart: months[1].periodStart, amount: '1200000' },
+            { periodStart: months[2].periodStart, amount: '1400000' },
           ],
-          category: {
-            id: categoryId,
-            name: 'Food',
-          },
-        },
-      ]);
-
-      prisma.transaction.groupBy.mockResolvedValue([]);
+        }),
+      ] as never);
+      budgetScopeEngine.resolveCategoryIds.mockResolvedValue([foodCategoryId]);
+      prisma.transaction.findMany.mockResolvedValue([]);
 
       const result = await repository.getBudgetPerformance(userId, {
         startDate,
@@ -1274,17 +964,13 @@ describe('DashboardRepository', () => {
                   in: months.map((month) => month.periodStart),
                 },
               },
-              orderBy: {
-                periodStart: 'asc',
-              },
+              orderBy: { periodStart: 'asc' },
             },
           }),
         }),
       );
-
       expect(result.budgets[0].amount.toString()).toBe('3600000');
-
-      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             transactionDate: {
@@ -1301,69 +987,111 @@ describe('DashboardRepository', () => {
 
       const result = await repository.getBudgetPerformance(userId);
 
-      expect(prisma.transaction.groupBy).not.toHaveBeenCalled();
-
-      expect(result).toEqual({
-        budgets: [],
-        transactions: [],
-      });
+      expect(result).toEqual({ budgets: [], transactions: [] });
+      expect(prisma.transaction.findMany).not.toHaveBeenCalled();
+      expect(budgetScopeEngine.resolveCategoryIds).not.toHaveBeenCalled();
     });
 
-    it('should omit budgets that do not have an allocation for the selected month', async () => {
+    it('should omit budgets that do not have an allocation in the selected range', async () => {
       prisma.budget.findMany.mockResolvedValue([
-        {
-          id: 'budget-without-allocation',
-          name: 'Legacy Budget',
-          categoryId: '11111111-1111-4111-8111-111111111111',
-          amount: '5000000',
-          allocations: [],
-          category: {
-            id: '11111111-1111-4111-8111-111111111111',
-            name: 'Food',
-          },
-        },
-      ]);
+        createBudget({ allocations: [] }),
+      ] as never);
 
       const result = await repository.getBudgetPerformance(userId);
 
       expect(result).toEqual({ budgets: [], transactions: [] });
-      expect(prisma.transaction.groupBy).not.toHaveBeenCalled();
+      expect(prisma.transaction.findMany).not.toHaveBeenCalled();
+      expect(budgetScopeEngine.resolveCategoryIds).not.toHaveBeenCalled();
     });
 
-    it('should apply date range to transaction analytics', async () => {
-      prisma.budget.findMany.mockResolvedValue([
-        {
-          id: '22222222-2222-4222-8222-222222222222',
-          name: 'Food Budget',
-          categoryId: '11111111-1111-4111-8111-111111111111',
-          amount: '9999999',
-          allocations: [
-            {
-              periodStart: new Date('2026-09-01T00:00:00.000Z'),
-              amount: '3000000',
-            },
-          ],
-          category: {
-            id: '11111111-1111-4111-8111-111111111111',
-            name: 'Food',
-          },
-        },
-      ]);
-
-      prisma.transaction.groupBy.mockResolvedValue([]);
-
-      const startDate = new Date('2026-09-01T00:00:00.000Z');
-
-      // September 30, 2026 at 23:59:59.999 WIB.
-      // The equivalent UTC instant is 16:59:59.999Z.
-      const endDate = new Date('2026-09-30T16:59:59.999Z');
-
-      await repository.getBudgetPerformance(userId, {
-        startDate,
-        endDate,
+    it('should preserve ALL_EXPENSES scope as null so uncategorized expenses can be matched', async () => {
+      const budget = createBudget({
+        id: 'all-expenses-budget',
+        categoryId: null,
+        scopeType: 'ALL_EXPENSES',
+        scopeCategoryId: null,
+        category: null,
+        scopeCategory: null,
       });
 
-      expect(prisma.transaction.groupBy).toHaveBeenCalledWith(
+      prisma.budget.findMany.mockResolvedValue([budget] as never);
+      budgetScopeEngine.resolveCategoryIds.mockResolvedValue(null);
+      prisma.transaction.findMany.mockResolvedValue([
+        {
+          id: 'categorized-expense',
+          categoryId: foodCategoryId,
+          amount: new Prisma.Decimal('100000'),
+        },
+        {
+          id: 'uncategorized-expense',
+          categoryId: null,
+          amount: new Prisma.Decimal('50000'),
+        },
+      ] as never);
+
+      const result = await repository.getBudgetPerformance(userId);
+
+      expect(result.budgets[0].categoryIds).toBeNull();
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.not.objectContaining({
+            categoryId: expect.anything(),
+          }),
+        }),
+      );
+      expect(result.transactions).toHaveLength(2);
+      expect(result.transactions[1].categoryId).toBeNull();
+    });
+
+    it('should fetch all expense transactions once for independent budget scope matching', async () => {
+      prisma.budget.findMany.mockResolvedValue([
+        createBudget({ id: 'food-budget' }),
+        createBudget({
+          id: 'transport-budget',
+          name: 'Transport Budget',
+          categoryId: transportCategoryId,
+          scopeType: 'CATEGORY',
+          scopeCategoryId: transportCategoryId,
+          category: { id: transportCategoryId, name: 'Transport' },
+          scopeCategory: { id: transportCategoryId, name: 'Transport' },
+        }),
+      ] as never);
+      budgetScopeEngine.resolveCategoryIds
+        .mockResolvedValueOnce([foodCategoryId])
+        .mockResolvedValueOnce([transportCategoryId]);
+      prisma.transaction.findMany.mockResolvedValue([]);
+
+      const result = await repository.getBudgetPerformance(userId);
+
+      expect(result.budgets).toHaveLength(2);
+      expect(budgetScopeEngine.resolveCategoryIds).toHaveBeenCalledTimes(2);
+      expect(prisma.transaction.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            type: 'EXPENSE',
+            userId,
+          }),
+        }),
+      );
+    });
+
+    it('should apply the requested date range to raw expense transactions', async () => {
+      const startDate = new Date('2026-09-01T00:00:00.000Z');
+      const endDate = new Date('2026-09-30T16:59:59.999Z');
+      const month = getBudgetMonthRange(startDate, 'Asia/Jakarta');
+
+      prisma.budget.findMany.mockResolvedValue([
+        createBudget({
+          allocations: [{ periodStart: month.periodStart, amount: '3000000' }],
+        }),
+      ] as never);
+      budgetScopeEngine.resolveCategoryIds.mockResolvedValue([foodCategoryId]);
+      prisma.transaction.findMany.mockResolvedValue([]);
+
+      await repository.getBudgetPerformance(userId, { startDate, endDate });
+
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             transactionDate: {
@@ -1411,7 +1139,6 @@ describe('DashboardRepository', () => {
           }),
         }),
       );
-
       expect(prisma.transaction.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
@@ -1421,9 +1148,7 @@ describe('DashboardRepository', () => {
           }),
         }),
       );
-
       expect(result.recurringTransactions).toHaveLength(1);
-
       expect(result.transactions).toHaveLength(1);
     });
 
@@ -1436,7 +1161,6 @@ describe('DashboardRepository', () => {
         recurringTransactions: [],
         transactions: [],
       });
-
       expect(prisma.transaction.findMany).not.toHaveBeenCalled();
     });
   });
@@ -1465,16 +1189,11 @@ describe('DashboardRepository', () => {
             deletedAt: null,
             status: 'ACTIVE',
             currency: 'IDR',
-            type: {
-              in: ['INCOME', 'EXPENSE'],
-            },
+            type: { in: ['INCOME', 'EXPENSE'] },
           }),
-          orderBy: {
-            transactionDate: 'asc',
-          },
+          orderBy: { transactionDate: 'asc' },
         }),
       );
-
       expect(result).toHaveLength(1);
     });
 
@@ -1508,16 +1227,13 @@ describe('DashboardRepository', () => {
       });
 
       expect(result).toEqual(transactions);
-
       expect(prisma.transaction.findMany).toHaveBeenCalledWith({
         where: {
           userId: 'user-id',
           deletedAt: null,
           status: 'ACTIVE',
           currency: 'IDR',
-          type: {
-            in: ['INCOME', 'EXPENSE'],
-          },
+          type: { in: ['INCOME', 'EXPENSE'] },
           transactionDate: {
             gte: new Date('2026-09-01T00:00:00.000Z'),
             lte: new Date('2026-09-30T23:59:59.999Z'),
@@ -1529,9 +1245,7 @@ describe('DashboardRepository', () => {
           amount: true,
           transactionDate: true,
         },
-        orderBy: {
-          transactionDate: 'asc',
-        },
+        orderBy: { transactionDate: 'asc' },
       });
     });
 
