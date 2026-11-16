@@ -1,21 +1,27 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+
+import { QueueModule } from 'src/queue/queue.module';
+
+import { BudgetsModule } from '../budgets/budgets.module';
 import { TransactionsModule } from '../transactions/transactions.module';
+import { telegramModule } from '../telegram/telegram.module';
+
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
 import { NotificationsRepository } from './repositories/notifications.repository';
-import { QueueModule } from 'src/queue/queue.module';
-import { BullModule } from '@nestjs/bullmq';
 import { NotificationQueueService } from './notifications-queue.service';
 import { NOTIFICATIONS_QUEUE } from './notifications.constants';
 import { NotificationDeliveryProcessor } from './processors/notification-delivery.processor';
-import { telegramModule } from '../telegram/telegram.module';
 import { NotificationEventsService } from './notification-events.service';
 
 const isTestEnvironment = process.env.NODE_ENV === 'test';
 
 class TestNotificationQueueService {
   enqueueDelivery(notificationId: string): Promise<{ jobId: string }> {
-    return Promise.resolve({ jobId: `test-${notificationId}` });
+    return Promise.resolve({
+      jobId: `test-${notificationId}`,
+    });
   }
 
   getQueueCounts(): Promise<{
@@ -38,6 +44,7 @@ class TestNotificationQueueService {
 @Module({
   imports: [
     QueueModule,
+    BudgetsModule,
     forwardRef(() => telegramModule),
     forwardRef(() => TransactionsModule),
     ...(isTestEnvironment

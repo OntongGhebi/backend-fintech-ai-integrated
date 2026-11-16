@@ -4,6 +4,8 @@ import { Prisma } from '../../../generated/prisma/client.js';
 import { NotificationChannel } from 'src/database/enums/notification-channel.enum';
 import { TransactionType } from 'src/database/enums/transaction-type.enum';
 import { PrismaService } from 'src/database/prisma/prisma.service';
+
+import { BudgetScopeEngine } from '../budgets/budget-scope.engine';
 import { getBudgetMonthRange } from '../budgets/utils/budget-month.util';
 
 import { NotificationQueueService } from './notifications-queue.service';
@@ -22,10 +24,20 @@ describe('NotificationEventsService', () => {
     enqueueDelivery: jest.fn(),
   };
 
+  const budgetScopeEngineMock = {
+    resolveCategoryIds: jest.fn(),
+  };
+
   const prismaMock = {
-    userPreference: { findUnique: jest.fn() },
-    budget: { findMany: jest.fn() },
-    transaction: { aggregate: jest.fn() },
+    userPreference: {
+      findUnique: jest.fn(),
+    },
+    budget: {
+      findMany: jest.fn(),
+    },
+    transaction: {
+      aggregate: jest.fn(),
+    },
   };
 
   const event = {
@@ -53,14 +65,22 @@ describe('NotificationEventsService', () => {
       budgetAlertEnabled: true,
     });
 
+    notificationQueueServiceMock.enqueueDelivery.mockResolvedValue({
+      jobId: 'notification-job-1',
+    });
+
+    budgetScopeEngineMock.resolveCategoryIds.mockResolvedValue(null);
+
     prismaMock.userPreference.findUnique.mockResolvedValue({
       timezone: 'Asia/Jakarta',
     });
-    prismaMock.budget.findMany.mockResolvedValue([]);
-    prismaMock.transaction.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
 
-    notificationQueueServiceMock.enqueueDelivery.mockResolvedValue({
-      jobId: 'notification-job-1',
+    prismaMock.budget.findMany.mockResolvedValue([]);
+
+    prismaMock.transaction.aggregate.mockResolvedValue({
+      _sum: {
+        amount: 0,
+      },
     });
 
     const module: TestingModule = await Test.createTestingModule({
@@ -74,7 +94,14 @@ describe('NotificationEventsService', () => {
           provide: NotificationQueueService,
           useValue: notificationQueueServiceMock,
         },
-        { provide: PrismaService, useValue: prismaMock },
+        {
+          provide: PrismaService,
+          useValue: prismaMock,
+        },
+        {
+          provide: BudgetScopeEngine,
+          useValue: budgetScopeEngineMock,
+        },
       ],
     }).compile();
 
@@ -85,82 +112,95 @@ describe('NotificationEventsService', () => {
     expect(service).toBeDefined();
   });
 
-  it('should create in-app and enqueue enabled external channels', async () => {
-    await service.recurringTransactionExecuted(event);
+  describe('recurringTransactionExecuted', () => {
+    it('should create in-app and enqueue enabled external channels', async () => {
+      await service.recurringTransactionExecuted(event);
 
-    expect(notificationsServiceMock.create).toHaveBeenCalledTimes(3);
+      expect(notificationsServiceMock.create).toHaveBeenCalledTimes(3);
 
-    expect(notificationsServiceMock.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'user-1',
-        type: 'RECURRING_TRANSACTION_EXECUTED',
-        channel: NotificationChannel.IN_APP,
-      }),
-    );
+      expect(notificationsServiceMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          type: 'RECURRING_TRANSACTION_EXECUTED',
+          channel: NotificationChannel.IN_APP,
+        }),
+      );
 
-    expect(notificationQueueServiceMock.enqueueDelivery).toHaveBeenCalledTimes(
-      2,
-    );
+      expect(
+        notificationQueueServiceMock.enqueueDelivery,
+      ).toHaveBeenCalledTimes(2);
 
-    expect(notificationQueueServiceMock.enqueueDelivery).toHaveBeenCalledWith(
-      `notification-${NotificationChannel.EMAIL.toLowerCase()}`,
-    );
+      expect(notificationQueueServiceMock.enqueueDelivery).toHaveBeenCalledWith(
+        `notification-${NotificationChannel.EMAIL.toLowerCase()}`,
+      );
 
-    expect(notificationQueueServiceMock.enqueueDelivery).toHaveBeenCalledWith(
-      `notification-${NotificationChannel.TELEGRAM.toLowerCase()}`,
-    );
-  });
-
-  it('should respect disabled email and Telegram preferences', async () => {
-    notificationsServiceMock.getMyPreferences.mockResolvedValue({
-      emailEnabled: false,
-      telegramEnabled: false,
+      expect(notificationQueueServiceMock.enqueueDelivery).toHaveBeenCalledWith(
+        `notification-${NotificationChannel.TELEGRAM.toLowerCase()}`,
+      );
     });
 
-    await service.recurringTransactionExecuted(event);
+    it('should respect disabled email and Telegram preferences', async () => {
+      notificationsServiceMock.getMyPreferences.mockResolvedValue({
+        emailEnabled: false,
+        telegramEnabled: false,
+      });
 
-    expect(notificationsServiceMock.create).toHaveBeenCalledTimes(1);
+      await service.recurringTransactionExecuted(event);
 
-    expect(notificationsServiceMock.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: NotificationChannel.IN_APP,
-      }),
-    );
+      expect(notificationsServiceMock.create).toHaveBeenCalledTimes(1);
 
-    expect(notificationQueueServiceMock.enqueueDelivery).not.toHaveBeenCalled();
-  });
+      expect(notificationsServiceMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: NotificationChannel.IN_APP,
+        }),
+      );
 
-  it('should still enqueue Telegram if email queueing fails', async () => {
-    notificationQueueServiceMock.enqueueDelivery
-      .mockRejectedValueOnce(new Error('Email queue unavailable'))
-      .mockResolvedValueOnce({ jobId: 'telegram-job' });
-
-    await expect(
-      service.recurringTransactionExecuted(event),
-    ).resolves.toBeUndefined();
-
-    expect(notificationQueueServiceMock.enqueueDelivery).toHaveBeenCalledTimes(
-      2,
-    );
-  });
-
-  it('should omit the description when it is empty', async () => {
-    await service.recurringTransactionExecuted({
-      ...event,
-      description: '  ',
+      expect(
+        notificationQueueServiceMock.enqueueDelivery,
+      ).not.toHaveBeenCalled();
     });
 
-    const inAppInput = notificationsServiceMock.create.mock.calls[0][0];
+    it('should still enqueue Telegram if email queueing fails', async () => {
+      notificationQueueServiceMock.enqueueDelivery
+        .mockRejectedValueOnce(new Error('Email queue unavailable'))
+        .mockResolvedValueOnce({
+          jobId: 'telegram-job',
+        });
 
-    expect(inAppInput.message).not.toContain('Keterangan:');
+      await expect(
+        service.recurringTransactionExecuted(event),
+      ).resolves.toBeUndefined();
+
+      expect(
+        notificationQueueServiceMock.enqueueDelivery,
+      ).toHaveBeenCalledTimes(2);
+    });
+
+    it('should omit the description when it is empty', async () => {
+      await service.recurringTransactionExecuted({
+        ...event,
+        description: '  ',
+      });
+
+      const inAppInput = notificationsServiceMock.create.mock.calls[0][0];
+
+      expect(inAppInput.message).not.toContain('Keterangan:');
+    });
   });
 
   describe('budgetExpenseCreated', () => {
+    const categoryId = 'category-food';
+    const childCategoryId = 'category-food-child';
+    const customCategoryId = 'category-custom';
+
     const budget = {
       id: 'budget-1',
       userId: 'user-1',
       name: 'Monthly food',
-      amount: new Prisma.Decimal(9999), // Legacy snapshot must not be used.
+      amount: new Prisma.Decimal(9999),
+      scopeType: 'ALL_EXPENSES',
+      scopeCategoryId: null,
+      categoryScopes: [],
       allocations: [
         {
           periodStart: getBudgetMonthRange(
@@ -188,20 +228,27 @@ describe('NotificationEventsService', () => {
         },
       ],
     };
+
     const expenseEvent = {
       userId: 'user-1',
       transactionId: 'transaction-budget-1',
       type: TransactionType.EXPENSE,
       amount: '80',
-      categoryId: null,
+      categoryId: null as string | null,
       transactionDate: new Date('2026-10-23T10:00:00.000Z'),
     };
 
     beforeEach(() => {
       prismaMock.budget.findMany.mockResolvedValue([budget]);
+
       prismaMock.transaction.aggregate.mockResolvedValue({
-        _sum: { amount: new Prisma.Decimal(930) },
+        _sum: {
+          amount: new Prisma.Decimal(930),
+        },
       });
+
+      budgetScopeEngineMock.resolveCategoryIds.mockResolvedValue(null);
+
       notificationsServiceMock.getMyPreferences.mockResolvedValue({
         budgetAlertEnabled: true,
         emailEnabled: true,
@@ -218,30 +265,246 @@ describe('NotificationEventsService', () => {
           channel: NotificationChannel.IN_APP,
         }),
       );
+
       expect(notificationsServiceMock.create).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'BUDGET_ALERT',
           channel: NotificationChannel.EMAIL,
         }),
       );
+
       const notificationInput = notificationsServiceMock.create.mock.calls.find(
         ([input]) =>
           input.type === 'BUDGET_ALERT' &&
           input.channel === NotificationChannel.IN_APP,
       )?.[0];
+
       expect(notificationInput.message).toContain('dari Rp1000');
       expect(notificationInput.message).not.toContain('Rp9999');
+
       expect(notificationQueueServiceMock.enqueueDelivery).toHaveBeenCalledWith(
         `notification-${NotificationChannel.EMAIL.toLowerCase()}`,
       );
     });
 
+    it('should resolve ALL_EXPENSES scope and include uncategorized transactions', async () => {
+      budgetScopeEngineMock.resolveCategoryIds.mockResolvedValue(null);
+
+      await service.budgetExpenseCreated({
+        ...expenseEvent,
+        categoryId: null,
+      });
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeType: 'ALL_EXPENSES',
+        }),
+      );
+
+      const aggregateArgs = prismaMock.transaction.aggregate.mock.calls[0][0];
+
+      expect(aggregateArgs.where).not.toHaveProperty('categoryId');
+
+      expect(notificationsServiceMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'BUDGET_ALERT',
+          channel: NotificationChannel.IN_APP,
+        }),
+      );
+    });
+
+    it('should evaluate CATEGORY scope using its resolved category ID', async () => {
+      budgetScopeEngineMock.resolveCategoryIds.mockResolvedValue([categoryId]);
+
+      const categoryBudget = {
+        ...budget,
+        scopeType: 'CATEGORY',
+        scopeCategoryId: categoryId,
+        categoryId,
+      };
+
+      prismaMock.budget.findMany.mockResolvedValue([categoryBudget]);
+
+      await service.budgetExpenseCreated({
+        ...expenseEvent,
+        categoryId,
+      });
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeType: 'CATEGORY',
+          scopeCategoryId: categoryId,
+        }),
+      );
+
+      const aggregateArgs = prismaMock.transaction.aggregate.mock.calls[0][0];
+
+      expect(aggregateArgs.where.categoryId).toEqual({
+        in: [categoryId],
+      });
+
+      expect(notificationsServiceMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'BUDGET_ALERT',
+          channel: NotificationChannel.IN_APP,
+        }),
+      );
+    });
+
+    it('should evaluate CATEGORY_GROUP scope using root and descendant category IDs', async () => {
+      budgetScopeEngineMock.resolveCategoryIds.mockResolvedValue([
+        categoryId,
+        childCategoryId,
+      ]);
+
+      const categoryGroupBudget = {
+        ...budget,
+        scopeType: 'CATEGORY_GROUP',
+        scopeCategoryId: categoryId,
+      };
+
+      prismaMock.budget.findMany.mockResolvedValue([categoryGroupBudget]);
+
+      await service.budgetExpenseCreated({
+        ...expenseEvent,
+        categoryId: childCategoryId,
+      });
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeType: 'CATEGORY_GROUP',
+          scopeCategoryId: categoryId,
+        }),
+      );
+
+      const aggregateArgs = prismaMock.transaction.aggregate.mock.calls[0][0];
+
+      expect(aggregateArgs.where.categoryId).toEqual({
+        in: [categoryId, childCategoryId],
+      });
+
+      expect(notificationsServiceMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'BUDGET_ALERT',
+          channel: NotificationChannel.IN_APP,
+        }),
+      );
+    });
+
+    it('should evaluate CUSTOM scope using selected category IDs', async () => {
+      budgetScopeEngineMock.resolveCategoryIds.mockResolvedValue([
+        categoryId,
+        customCategoryId,
+      ]);
+
+      const customBudget = {
+        ...budget,
+        scopeType: 'CUSTOM',
+        scopeCategoryId: null,
+        categoryScopes: [
+          {
+            categoryId,
+          },
+          {
+            categoryId: customCategoryId,
+          },
+        ],
+      };
+
+      prismaMock.budget.findMany.mockResolvedValue([customBudget]);
+
+      await service.budgetExpenseCreated({
+        ...expenseEvent,
+        categoryId: customCategoryId,
+      });
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeType: 'CUSTOM',
+          categoryScopes: expect.arrayContaining([
+            expect.objectContaining({
+              categoryId,
+            }),
+            expect.objectContaining({
+              categoryId: customCategoryId,
+            }),
+          ]),
+        }),
+      );
+
+      const aggregateArgs = prismaMock.transaction.aggregate.mock.calls[0][0];
+
+      expect(aggregateArgs.where.categoryId).toEqual({
+        in: [categoryId, customCategoryId],
+      });
+
+      expect(notificationsServiceMock.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'BUDGET_ALERT',
+          channel: NotificationChannel.IN_APP,
+        }),
+      );
+    });
+
+    it('should skip a scoped budget when the transaction category is not included', async () => {
+      budgetScopeEngineMock.resolveCategoryIds.mockResolvedValue([categoryId]);
+
+      const categoryBudget = {
+        ...budget,
+        scopeType: 'CATEGORY',
+        scopeCategoryId: categoryId,
+        categoryId,
+      };
+
+      prismaMock.budget.findMany.mockResolvedValue([categoryBudget]);
+
+      await service.budgetExpenseCreated({
+        ...expenseEvent,
+        categoryId: customCategoryId,
+      });
+
+      expect(prismaMock.transaction.aggregate).not.toHaveBeenCalled();
+      expect(notificationsServiceMock.create).not.toHaveBeenCalled();
+      expect(
+        notificationQueueServiceMock.enqueueDelivery,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('should not evaluate a scoped budget for an uncategorized transaction', async () => {
+      budgetScopeEngineMock.resolveCategoryIds.mockResolvedValue([categoryId]);
+
+      const categoryBudget = {
+        ...budget,
+        scopeType: 'CATEGORY',
+        scopeCategoryId: categoryId,
+        categoryId,
+      };
+
+      prismaMock.budget.findMany.mockResolvedValue([categoryBudget]);
+
+      await service.budgetExpenseCreated({
+        ...expenseEvent,
+        categoryId: null,
+      });
+
+      expect(prismaMock.transaction.aggregate).not.toHaveBeenCalled();
+      expect(notificationsServiceMock.create).not.toHaveBeenCalled();
+    });
+
     it('should not repeat an alert if usage was already above the threshold', async () => {
       prismaMock.transaction.aggregate.mockResolvedValue({
-        _sum: { amount: new Prisma.Decimal(960) },
+        _sum: {
+          amount: new Prisma.Decimal(960),
+        },
       });
-      await service.budgetExpenseCreated({ ...expenseEvent, amount: '30' });
+
+      await service.budgetExpenseCreated({
+        ...expenseEvent,
+        amount: '30',
+      });
+
       expect(notificationsServiceMock.create).not.toHaveBeenCalled();
+
       expect(
         notificationQueueServiceMock.enqueueDelivery,
       ).not.toHaveBeenCalled();
@@ -249,9 +512,16 @@ describe('NotificationEventsService', () => {
 
     it('should not alert when the threshold is not crossed', async () => {
       prismaMock.transaction.aggregate.mockResolvedValue({
-        _sum: { amount: new Prisma.Decimal(850) },
+        _sum: {
+          amount: new Prisma.Decimal(850),
+        },
       });
-      await service.budgetExpenseCreated({ ...expenseEvent, amount: '10' });
+
+      await service.budgetExpenseCreated({
+        ...expenseEvent,
+        amount: '10',
+      });
+
       expect(notificationsServiceMock.create).not.toHaveBeenCalled();
     });
 
@@ -275,13 +545,20 @@ describe('NotificationEventsService', () => {
           ],
         },
       ]);
+
       prismaMock.transaction.aggregate.mockResolvedValue({
-        _sum: { amount: new Prisma.Decimal(930) },
+        _sum: {
+          amount: new Prisma.Decimal(930),
+        },
       });
 
-      await service.budgetExpenseCreated({ ...expenseEvent, amount: '80' });
+      await service.budgetExpenseCreated({
+        ...expenseEvent,
+        amount: '80',
+      });
 
       expect(notificationsServiceMock.create).not.toHaveBeenCalled();
+
       expect(
         notificationQueueServiceMock.enqueueDelivery,
       ).not.toHaveBeenCalled();
@@ -289,7 +566,10 @@ describe('NotificationEventsService', () => {
 
     it('should ignore budgets without an allocation for the transaction month', async () => {
       prismaMock.budget.findMany.mockResolvedValue([
-        { ...budget, allocations: [] },
+        {
+          ...budget,
+          allocations: [],
+        },
       ]);
 
       await service.budgetExpenseCreated(expenseEvent);
@@ -304,7 +584,9 @@ describe('NotificationEventsService', () => {
         emailEnabled: true,
         telegramEnabled: true,
       });
+
       await service.budgetExpenseCreated(expenseEvent);
+
       expect(prismaMock.budget.findMany).not.toHaveBeenCalled();
       expect(notificationsServiceMock.create).not.toHaveBeenCalled();
     });
@@ -315,11 +597,17 @@ describe('NotificationEventsService', () => {
         emailEnabled: false,
         telegramEnabled: false,
       });
+
       await service.budgetExpenseCreated(expenseEvent);
+
       expect(notificationsServiceMock.create).toHaveBeenCalledTimes(1);
+
       expect(notificationsServiceMock.create).toHaveBeenCalledWith(
-        expect.objectContaining({ channel: NotificationChannel.IN_APP }),
+        expect.objectContaining({
+          channel: NotificationChannel.IN_APP,
+        }),
       );
+
       expect(
         notificationQueueServiceMock.enqueueDelivery,
       ).not.toHaveBeenCalled();
@@ -330,6 +618,7 @@ describe('NotificationEventsService', () => {
         ...expenseEvent,
         type: TransactionType.INCOME,
       });
+
       expect(prismaMock.budget.findMany).not.toHaveBeenCalled();
       expect(notificationsServiceMock.getMyPreferences).not.toHaveBeenCalled();
     });
@@ -338,6 +627,7 @@ describe('NotificationEventsService', () => {
       prismaMock.budget.findMany.mockRejectedValue(
         new Error('database unavailable'),
       );
+
       await expect(
         service.budgetExpenseCreated(expenseEvent),
       ).resolves.toBeUndefined();

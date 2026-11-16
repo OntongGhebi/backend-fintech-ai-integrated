@@ -7,6 +7,7 @@ import { NotificationChannel } from 'src/database/enums/notification-channel.enu
 
 import { NotificationQueueService } from './notifications-queue.service';
 import { NotificationsService } from './notifications.service';
+import { BudgetScopeEngine } from '../budgets/budget-scope.engine';
 import {
   getBudgetMonthRange,
   getZonedDateBoundary,
@@ -30,10 +31,18 @@ export class NotificationEventsService {
     private readonly notificationsService: NotificationsService,
     private readonly notificationQueueService: NotificationQueueService,
     private readonly prisma: PrismaService,
+    private readonly budgetScopeEngine: BudgetScopeEngine,
   ) {}
 
   /**
    * Mengevaluasi alert anggaran setelah transaksi pengeluaran tersimpan.
+   *
+   * Scope budget ditentukan oleh BudgetScopeEngine:
+   * - ALL_EXPENSES: seluruh pengeluaran, termasuk tanpa kategori.
+   * - CATEGORY: satu kategori.
+   * - CATEGORY_GROUP: kategori induk beserta turunannya.
+   * - CUSTOM: gabungan kategori yang dipilih.
+   *
    * Kegagalan notifikasi tidak boleh menggagalkan transaksi yang sudah tersimpan.
    */
   async budgetExpenseCreated(event: {
@@ -50,16 +59,27 @@ export class NotificationEventsService {
       const preferences = await this.notificationsService.getMyPreferences(
         event.userId,
       );
+
       if (!preferences.budgetAlertEnabled) return;
 
       const userPreference = await this.prisma.userPreference.findUnique({
         where: { userId: event.userId },
         select: { timezone: true },
       });
+
       const timezone = userPreference?.timezone ?? 'Asia/Jakarta';
       const transactionDate = new Date(event.transactionDate);
       const month = getBudgetMonthRange(transactionDate, timezone);
 
+      /**
+       * Ambil seluruh budget aktif yang masa berlakunya mencakup bulan
+       * transaksi. Filter kategori dilakukan setelah scope masing-masing
+       * budget diselesaikan oleh BudgetScopeEngine.
+       *
+       * Jangan memfilter berdasarkan categoryId di query ini karena
+       * CATEGORY_GROUP dan CUSTOM tidak dapat direpresentasikan dengan
+       * satu categoryId.
+       */
       const budgets = await this.prisma.budget.findMany({
         where: {
           userId: event.userId,
@@ -70,12 +90,6 @@ export class NotificationEventsService {
             {
               OR: [{ endDate: null }, { endDate: { gte: month.periodStart } }],
             },
-            {
-              OR: [
-                { categoryId: null },
-                ...(event.categoryId ? [{ categoryId: event.categoryId }] : []),
-              ],
-            },
           ],
         },
         include: {
@@ -83,7 +97,14 @@ export class NotificationEventsService {
             where: { periodStart: month.periodStart },
             take: 1,
           },
-          alerts: { where: { isEnabled: true } },
+          alerts: {
+            where: { isEnabled: true },
+          },
+          categoryScopes: {
+            select: {
+              categoryId: true,
+            },
+          },
         },
       });
 
@@ -91,28 +112,63 @@ export class NotificationEventsService {
 
       for (const budget of budgets) {
         const allocation = budget.allocations[0];
-        if (!allocation || allocation.amount.lessThanOrEqualTo(0)) continue;
 
-        // Respect configured budget boundaries while evaluating only the
-        // allocation month containing the newly-created expense.
+        if (!allocation || allocation.amount.lessThanOrEqualTo(0)) {
+          continue;
+        }
+
+        /**
+         * Resolve scope kategori untuk setiap budget.
+         *
+         * null berarti ALL_EXPENSES.
+         * Array berarti transaksi hanya dihitung jika categoryId termasuk
+         * dalam hasil resolusi scope.
+         */
+        const categoryIds =
+          await this.budgetScopeEngine.resolveCategoryIds(budget);
+
+        if (
+          categoryIds !== null &&
+          (!event.categoryId || !categoryIds.includes(event.categoryId))
+        ) {
+          continue;
+        }
+
+        /**
+         * Respect configured budget boundaries while evaluating only the
+         * allocation month containing the newly-created expense.
+         */
         const budgetStart = getZonedDateBoundary(budget.startDate, timezone);
+
         const budgetEndExclusive = budget.endDate
           ? getZonedNextDateBoundary(budget.endDate, timezone)
           : month.end;
+
         const rangeStart =
           budgetStart > month.start ? budgetStart : month.start;
+
         const rangeEnd =
           budgetEndExclusive < month.end ? budgetEndExclusive : month.end;
 
-        // Do not evaluate a budget for a transaction outside its configured
-        // lifetime, even when the budget overlaps another part of this month.
+        /**
+         * Do not evaluate a budget for a transaction outside its configured
+         * lifetime, even when the budget overlaps another part of this month.
+         */
         if (
           rangeStart >= rangeEnd ||
           transactionDate < rangeStart ||
           transactionDate >= rangeEnd
-        )
+        ) {
           continue;
+        }
 
+        /**
+         * Aggregate actual berdasarkan scope:
+         *
+         * - null: tidak memasang filter categoryId sehingga uncategorized
+         *   expenses ikut dihitung.
+         * - array: hanya kategori hasil resolusi scope yang dihitung.
+         */
         const aggregate = await this.prisma.transaction.aggregate({
           where: {
             userId: event.userId,
@@ -120,24 +176,48 @@ export class NotificationEventsService {
             status: 'ACTIVE',
             deletedAt: null,
             currency: 'IDR',
-            transactionDate: { gte: rangeStart, lt: rangeEnd },
-            ...(budget.categoryId ? { categoryId: budget.categoryId } : {}),
+            transactionDate: {
+              gte: rangeStart,
+              lt: rangeEnd,
+            },
+            ...(categoryIds !== null
+              ? {
+                  categoryId: {
+                    in: categoryIds,
+                  },
+                }
+              : {}),
           },
-          _sum: { amount: true },
+          _sum: {
+            amount: true,
+          },
         });
 
-        // The new transaction is already included in the aggregate.
+        /**
+         * Transaksi baru sudah termasuk dalam aggregate karena alert
+         * dievaluasi setelah transaksi berhasil disimpan.
+         */
         const actualAfter = new Prisma.Decimal(aggregate._sum.amount ?? 0);
+
         const actualBefore = actualAfter.minus(transactionAmount);
+
         const allocationAmount = new Prisma.Decimal(allocation.amount);
+
         const beforePercentage = actualBefore.div(allocationAmount).mul(100);
+
         const afterPercentage = actualAfter.div(allocationAmount).mul(100);
 
+        /**
+         * Alert hanya dikirim ketika pemakaian melewati ambang dari bawah.
+         * Tidak mengirim ulang alert jika pemakaian sebelumnya sudah berada
+         * di atas ambang yang sama.
+         */
         const crossedAlerts = budget.alerts.filter(
           (alert) =>
             beforePercentage.lessThan(alert.thresholdPercentage) &&
             afterPercentage.greaterThanOrEqualTo(alert.thresholdPercentage),
         );
+
         if (crossedAlerts.length === 0) continue;
 
         const crossedThresholds: number[] = Array.from(
@@ -145,10 +225,13 @@ export class NotificationEventsService {
             crossedAlerts.map((alert) => alert.thresholdPercentage),
           ),
         ).sort((a, b) => a - b);
+
         const thresholdText = crossedThresholds
           .map((value) => `${value}%`)
           .join(', ');
+
         const usage = afterPercentage.toDecimalPlaces(2).toString();
+
         const monthLabel = new Intl.DateTimeFormat('id-ID', {
           month: 'long',
           year: 'numeric',
@@ -156,6 +239,7 @@ export class NotificationEventsService {
         }).format(transactionDate);
 
         const title = `Peringatan anggaran: ${budget.name}`;
+
         const message =
           `Anggaran "${budget.name}" untuk ${monthLabel} telah mencapai ${usage}% pemakaian ` +
           `(Rp${actualAfter.toFixed(0)} dari Rp${allocationAmount.toFixed(0)}). ` +
@@ -165,6 +249,7 @@ export class NotificationEventsService {
           (alert) =>
             String(alert.channel) === String(NotificationChannel.IN_APP),
         );
+
         if (hasInAppAlert) {
           await this.notificationsService.create({
             userId: event.userId,
@@ -179,6 +264,7 @@ export class NotificationEventsService {
           (alert) =>
             String(alert.channel) === String(NotificationChannel.EMAIL),
         );
+
         if (preferences.emailEnabled && hasEmailAlert) {
           await this.createAndEnqueueExternalNotification({
             userId: event.userId,
@@ -193,6 +279,7 @@ export class NotificationEventsService {
           (alert) =>
             String(alert.channel) === String(NotificationChannel.TELEGRAM),
         );
+
         if (preferences.telegramEnabled && hasTelegramAlert) {
           await this.createAndEnqueueExternalNotification({
             userId: event.userId,
