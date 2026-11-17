@@ -33,13 +33,19 @@ import { UnavailableAIProvider } from './providers/unavailable-ai.provider';
 import { AIProvider } from './providers/ai-provider.interface';
 
 import { TransactionsModule } from '../transactions/transactions.module';
+import { BudgetsModule } from '../budgets/budgets.module';
 import { DatabaseModule } from 'src/database/database.module';
+
 import { AIPrivacyService } from './services/ai-privacy.service';
 import { AiController } from './ai.controller';
 import { AIFinancialContextService } from './services/ai-financial-context.service';
 
 @Module({
-  imports: [DatabaseModule, forwardRef(() => TransactionsModule)],
+  imports: [
+    DatabaseModule,
+    BudgetsModule,
+    forwardRef(() => TransactionsModule),
+  ],
   controllers: [AiController],
   providers: [
     AIService,

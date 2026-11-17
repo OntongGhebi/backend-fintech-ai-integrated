@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma } from '../../../../generated/prisma/client';
 
 import { PrismaService } from '../../../database/prisma/prisma.service';
+import { BudgetScopeEngine } from '../../budgets/budget-scope.engine';
 import { AIFinancialContextService } from './ai-financial-context.service';
 import {
   getBudgetMonthRange,
@@ -26,6 +27,44 @@ describe('AIFinancialContextService', () => {
     },
   };
 
+  const budgetScopeEngineMock = {
+    resolveCategoryIds: jest.fn(
+      async (budget: {
+        scopeType: string;
+        scopeCategoryId: string | null;
+        categoryId?: string | null;
+        categoryScopes: Array<{ categoryId: string }>;
+      }): Promise<string[] | null> => {
+        switch (budget.scopeType) {
+          case 'ALL_EXPENSES':
+            return null;
+
+          case 'CATEGORY': {
+            const categoryId =
+              budget.scopeCategoryId ?? budget.categoryId ?? null;
+
+            return categoryId ? [categoryId] : [];
+          }
+
+          case 'CATEGORY_GROUP':
+            return budget.scopeCategoryId
+              ? [budget.scopeCategoryId, 'child-category-1']
+              : [];
+
+          case 'CUSTOM':
+            return [
+              ...new Set(
+                budget.categoryScopes.map((scope) => scope.categoryId),
+              ),
+            ].sort();
+
+          default:
+            return [];
+        }
+      },
+    ),
+  };
+
   const decimal = (value: string | number) => new Prisma.Decimal(value);
 
   const makeBudget = (overrides: Record<string, unknown> = {}) => ({
@@ -44,7 +83,19 @@ describe('AIFinancialContextService', () => {
     period: 'MONTHLY',
     startDate: new Date('2026-01-01T00:00:00.000Z'),
     endDate: null,
-    categoryId: null,
+    categoryId: (overrides.categoryId as string | null | undefined) ?? null,
+    scopeType:
+      overrides.scopeType ??
+      ((overrides.categoryId as string | null | undefined)
+        ? 'CATEGORY'
+        : 'ALL_EXPENSES'),
+    scopeCategoryId:
+      (overrides.scopeCategoryId as string | null | undefined) ??
+      (overrides.categoryId as string | null | undefined) ??
+      null,
+    categoryScopes:
+      (overrides.categoryScopes as Array<{ categoryId: string }> | undefined) ??
+      [],
     ...overrides,
   });
 
@@ -109,7 +160,7 @@ describe('AIFinancialContextService', () => {
   };
 
   beforeEach(async () => {
-    jest.resetAllMocks();
+    jest.clearAllMocks();
 
     prismaMock.userPreference.findUnique.mockResolvedValue({
       currency: 'IDR',
@@ -130,6 +181,7 @@ describe('AIFinancialContextService', () => {
       providers: [
         AIFinancialContextService,
         { provide: PrismaService, useValue: prismaMock },
+        { provide: BudgetScopeEngine, useValue: budgetScopeEngineMock },
       ],
     }).compile();
 
@@ -344,6 +396,7 @@ describe('AIFinancialContextService', () => {
       await service.getContext('user-1');
 
       const query = prismaMock.budget.findMany.mock.calls[0][0];
+
       expect(query.select).toEqual(
         expect.objectContaining({
           id: true,
@@ -351,6 +404,11 @@ describe('AIFinancialContextService', () => {
           startDate: true,
           endDate: true,
           categoryId: true,
+          scopeType: true,
+          scopeCategoryId: true,
+          categoryScopes: {
+            select: { categoryId: true },
+          },
           allocations: {
             where: { periodStart: expect.any(Date) },
             take: 1,
@@ -358,7 +416,9 @@ describe('AIFinancialContextService', () => {
           },
         }),
       );
+
       expect(query.select.amount).toBeUndefined();
+
       expect(getBudgetTransactions()?.select).toEqual({
         transactionDate: true,
         amount: true,
@@ -396,10 +456,13 @@ describe('AIFinancialContextService', () => {
       expect(query).toBeDefined();
       expect(query?.where.transactionDate.gte).toBeInstanceOf(Date);
       expect(query?.where.transactionDate.lt).toBeInstanceOf(Date);
+
       const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
+
       expect(query!.where.transactionDate.gte.getTime()).toBeGreaterThanOrEqual(
         month.start.getTime(),
       );
+
       expect(query!.where.transactionDate.lt.getTime()).toBeLessThanOrEqual(
         month.end.getTime(),
       );
@@ -427,6 +490,7 @@ describe('AIFinancialContextService', () => {
 
     it('should calculate a CUSTOM budget range', async () => {
       const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
+
       await runWithBudget({
         period: 'CUSTOM',
         startDate: month.periodStart,
@@ -442,6 +506,7 @@ describe('AIFinancialContextService', () => {
 
     it('should clamp the budget range to the configured start date', async () => {
       const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
+
       const configuredStart = new Date(
         Date.UTC(
           month.periodStart.getUTCFullYear(),
@@ -464,6 +529,7 @@ describe('AIFinancialContextService', () => {
 
     it('should clamp the budget range to the configured end date', async () => {
       const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
+
       const configuredEnd = new Date(
         Date.UTC(
           month.periodStart.getUTCFullYear(),
@@ -487,6 +553,7 @@ describe('AIFinancialContextService', () => {
 
     it('should skip the batch query when all budget ranges are invalid', async () => {
       const month = getBudgetMonthRange(new Date(), 'Asia/Jakarta');
+
       await runWithBudget({
         period: 'CUSTOM',
         startDate: new Date(
@@ -621,7 +688,7 @@ describe('AIFinancialContextService', () => {
       expect(getBudgetTransactions()?.where.currency).toBe('IDR');
     });
 
-    it('should apply category matching while calculating budget spending', async () => {
+    it('should apply the resolved CATEGORY scope while calculating budget spending', async () => {
       const transactionDate = new Date();
 
       prismaMock.budget.findMany.mockResolvedValue([
@@ -653,6 +720,157 @@ describe('AIFinancialContextService', () => {
 
       expect(result.budgets[0].spent).toBe('20.00');
       expect(result.budgets[0].remaining).toBe('80.00');
+    });
+
+    it('should include uncategorized transactions for ALL_EXPENSES budgets', async () => {
+      const transactionDate = new Date();
+
+      prismaMock.budget.findMany.mockResolvedValue([
+        makeBudget({
+          amount: decimal('100.00'),
+          scopeType: 'ALL_EXPENSES',
+          scopeCategoryId: null,
+          categoryId: null,
+        }),
+      ]);
+
+      mockFindManyResults({
+        budgetTransactions: [
+          {
+            transactionDate,
+            amount: decimal('20.00'),
+            categoryId: null,
+          },
+          {
+            transactionDate,
+            amount: decimal('30.00'),
+            categoryId: 'category-1',
+          },
+        ],
+      });
+
+      const result = await service.getContext('user-1');
+
+      expect(result.budgets[0].spent).toBe('50.00');
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
+        expect.objectContaining({ scopeType: 'ALL_EXPENSES' }),
+      );
+    });
+
+    it('should apply CATEGORY_GROUP root and child category IDs', async () => {
+      const transactionDate = new Date();
+
+      prismaMock.budget.findMany.mockResolvedValue([
+        makeBudget({
+          amount: decimal('100.00'),
+          scopeType: 'CATEGORY_GROUP',
+          scopeCategoryId: 'root-category',
+          categoryId: null,
+        }),
+      ]);
+
+      mockFindManyResults({
+        budgetTransactions: [
+          {
+            transactionDate,
+            amount: decimal('10.00'),
+            categoryId: 'root-category',
+          },
+          {
+            transactionDate,
+            amount: decimal('20.00'),
+            categoryId: 'child-category-1',
+          },
+          {
+            transactionDate,
+            amount: decimal('70.00'),
+            categoryId: 'other-category',
+          },
+        ],
+      });
+
+      const result = await service.getContext('user-1');
+
+      expect(result.budgets[0].spent).toBe('30.00');
+    });
+
+    it('should apply the explicit category union for CUSTOM scopes', async () => {
+      const transactionDate = new Date();
+
+      prismaMock.budget.findMany.mockResolvedValue([
+        makeBudget({
+          amount: decimal('100.00'),
+          scopeType: 'CUSTOM',
+          scopeCategoryId: null,
+          categoryId: null,
+          categoryScopes: [
+            { categoryId: 'category-1' },
+            { categoryId: 'category-2' },
+          ],
+        }),
+      ]);
+
+      mockFindManyResults({
+        budgetTransactions: [
+          {
+            transactionDate,
+            amount: decimal('10.00'),
+            categoryId: 'category-1',
+          },
+          {
+            transactionDate,
+            amount: decimal('20.00'),
+            categoryId: 'category-2',
+          },
+          {
+            transactionDate,
+            amount: decimal('70.00'),
+            categoryId: 'category-3',
+          },
+          {
+            transactionDate,
+            amount: decimal('5.00'),
+            categoryId: null,
+          },
+        ],
+      });
+
+      const result = await service.getContext('user-1');
+
+      expect(result.budgets[0].spent).toBe('30.00');
+    });
+
+    it('should exclude uncategorized transactions from category-scoped budgets', async () => {
+      const transactionDate = new Date();
+
+      prismaMock.budget.findMany.mockResolvedValue([
+        makeBudget({
+          amount: decimal('100.00'),
+          scopeType: 'CATEGORY',
+          scopeCategoryId: 'category-1',
+          categoryId: 'category-1',
+        }),
+      ]);
+
+      mockFindManyResults({
+        budgetTransactions: [
+          {
+            transactionDate,
+            amount: decimal('20.00'),
+            categoryId: 'category-1',
+          },
+          {
+            transactionDate,
+            amount: decimal('50.00'),
+            categoryId: null,
+          },
+        ],
+      });
+
+      const result = await service.getContext('user-1');
+
+      expect(result.budgets[0].spent).toBe('20.00');
     });
 
     it('should group transactions with missing category names as Uncategorized', async () => {
@@ -711,6 +929,7 @@ describe('AIFinancialContextService', () => {
       const query = getCategoryExpenseQuery();
 
       expect(query).toBeDefined();
+
       expect(query?.[0].where).toEqual(
         expect.objectContaining({
           userId: 'user-1',

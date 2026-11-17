@@ -2,6 +2,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../../../../generated/prisma/client';
 import { PrismaService } from '../../../database/prisma/prisma.service';
+
+import { BudgetScopeEngine } from '../../budgets/budget-scope.engine';
 import {
   getBudgetMonthRange,
   getZonedDateBoundary,
@@ -23,8 +25,14 @@ interface BudgetWithRange {
     startDate: Date;
     endDate: Date | null;
     categoryId: string | null;
+    scopeType: string;
+    scopeCategoryId: string | null;
+    categoryScopes: Array<{
+      categoryId: string;
+    }>;
   };
   range: BudgetRange;
+  categoryIds: string[] | null;
 }
 
 interface FinancialContextOptions {
@@ -36,7 +44,10 @@ interface FinancialContextOptions {
 export class AIFinancialContextService {
   private readonly logger = new Logger(AIFinancialContextService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly budgetScopeEngine: BudgetScopeEngine,
+  ) {}
 
   async getContext(userId: string) {
     const preference = await this.prisma.userPreference.findUnique({
@@ -151,45 +162,63 @@ export class AIFinancialContextService {
           startDate: true,
           endDate: true,
           categoryId: true,
+          scopeType: true,
+          scopeCategoryId: true,
+          categoryScopes: {
+            select: {
+              categoryId: true,
+            },
+          },
           allocations: {
-            where: { periodStart: monthRange.periodStart },
+            where: {
+              periodStart: monthRange.periodStart,
+            },
             take: 1,
-            select: { amount: true, periodStart: true },
+            select: {
+              amount: true,
+              periodStart: true,
+            },
           },
         },
       }),
     ]);
 
-    const budgetsWithRanges: BudgetWithRange[] = budgets
-      .flatMap((budget) => {
-        const allocation = budget.allocations[0];
-        if (!allocation) return [];
+    const budgetCandidates = budgets.flatMap((budget) => {
+      const allocation = budget.allocations[0];
 
-        const budgetForContext = {
-          ...budget,
-          amount: allocation.amount,
-          period: 'MONTHLY' as const,
-          periodStart: allocation.periodStart,
-        };
+      if (!allocation) {
+        return [];
+      }
 
-        return [
-          {
-            budget: budgetForContext,
-            range: this.getBudgetRange(
-              budget,
-              monthRange,
-              now,
-              options.timezone,
-            ),
-          },
-        ];
-      })
-      .filter(({ range }) => range.start < range.end);
+      const budgetForContext = {
+        ...budget,
+        amount: allocation.amount,
+        period: 'MONTHLY' as const,
+        periodStart: allocation.periodStart,
+      };
+
+      return [
+        {
+          budget: budgetForContext,
+          range: this.getBudgetRange(budget, monthRange, now, options.timezone),
+        },
+      ];
+    });
+
+    const budgetsWithRanges: BudgetWithRange[] = (
+      await Promise.all(
+        budgetCandidates.map(async ({ budget, range }) => ({
+          budget,
+          range,
+          categoryIds: await this.budgetScopeEngine.resolveCategoryIds(budget),
+        })),
+      )
+    ).filter(({ range }) => range.start < range.end);
 
     /*
      * Optimization:
-     * Previously, each budget caused an additional aggregate query.
      * Fetch transactions once for the union of all valid budget ranges.
+     * Each budget then applies its own resolved category scope in memory.
      */
     let budgetTransactions: Array<{
       transactionDate: Date;
@@ -228,55 +257,64 @@ export class AIFinancialContextService {
       });
     }
 
-    const budgetContext = budgetsWithRanges.map(({ budget, range }) => {
-      let spentMinorUnits = 0n;
+    const budgetContext = budgetsWithRanges.map(
+      ({ budget, range, categoryIds }) => {
+        let spentMinorUnits = 0n;
 
-      for (const transaction of budgetTransactions) {
-        const transactionTime = transaction.transactionDate.getTime();
+        for (const transaction of budgetTransactions) {
+          const transactionTime = transaction.transactionDate.getTime();
 
-        if (
-          transactionTime < range.start.getTime() ||
-          transactionTime >= range.end.getTime()
-        ) {
-          continue;
+          if (
+            transactionTime < range.start.getTime() ||
+            transactionTime >= range.end.getTime()
+          ) {
+            continue;
+          }
+
+          /*
+           * null means ALL_EXPENSES.
+           * An array means only transactions belonging to the resolved scope.
+           */
+          if (
+            categoryIds !== null &&
+            (transaction.categoryId === null ||
+              !categoryIds.includes(transaction.categoryId))
+          ) {
+            continue;
+          }
+
+          spentMinorUnits += this.toMinorUnits(transaction.amount);
         }
 
-        if (
-          budget.categoryId !== null &&
-          transaction.categoryId !== budget.categoryId
-        ) {
-          continue;
-        }
+        const limitMinorUnits = this.toMinorUnits(budget.amount);
+        const remainingMinorUnits = limitMinorUnits - spentMinorUnits;
 
-        spentMinorUnits += this.toMinorUnits(transaction.amount);
-      }
+        const usagePercentage =
+          limitMinorUnits > 0n
+            ? Number((spentMinorUnits * 10000n) / limitMinorUnits) / 100
+            : 0;
 
-      const limitMinorUnits = this.toMinorUnits(budget.amount);
-      const remainingMinorUnits = limitMinorUnits - spentMinorUnits;
-
-      const usagePercentage =
-        limitMinorUnits > 0n
-          ? Number((spentMinorUnits * 10000n) / limitMinorUnits) / 100
-          : 0;
-
-      return {
-        id: budget.id,
-        name: budget.name,
-        currency: options.currency,
-        limit: this.formatMinorUnits(limitMinorUnits),
-        spent: this.formatMinorUnits(spentMinorUnits),
-        remaining: this.formatMinorUnits(remainingMinorUnits),
-        usagePercentage,
-        period: budget.period,
-        periodStart: budget.periodStart,
-        startDate: range.start,
-        endDate: range.end,
-      };
-    });
+        return {
+          id: budget.id,
+          name: budget.name,
+          currency: options.currency,
+          scopeType: budget.scopeType,
+          limit: this.formatMinorUnits(limitMinorUnits),
+          spent: this.formatMinorUnits(spentMinorUnits),
+          remaining: this.formatMinorUnits(remainingMinorUnits),
+          usagePercentage,
+          period: budget.period,
+          periodStart: budget.periodStart,
+          startDate: range.start,
+          endDate: range.end,
+        };
+      },
+    );
 
     const incomeMinorUnits = this.toMinorUnits(
       incomeAggregate._sum.amount ?? 0,
     );
+
     const expenseMinorUnits = this.toMinorUnits(
       expenseAggregate._sum.amount ?? 0,
     );
@@ -301,6 +339,7 @@ export class AIFinancialContextService {
       .sort((a, b) => {
         const amountA = BigInt(a.amount.replace('.', ''));
         const amountB = BigInt(b.amount.replace('.', ''));
+
         return amountB > amountA ? 1 : amountB < amountA ? -1 : 0;
       });
 
@@ -340,15 +379,19 @@ export class AIFinancialContextService {
     timezone: string,
   ): BudgetRange {
     const budgetStart = getZonedDateBoundary(budget.startDate, timezone);
+
     const budgetEndExclusive = budget.endDate
       ? getZonedNextDateBoundary(budget.endDate, timezone)
       : monthRange.end;
 
     const start =
       budgetStart > monthRange.start ? budgetStart : monthRange.start;
+
     const configuredEnd =
       budgetEndExclusive < monthRange.end ? budgetEndExclusive : monthRange.end;
+
     const maximumEnd = new Date(now.getTime() + 1);
+
     const end = maximumEnd < configuredEnd ? maximumEnd : configuredEnd;
 
     return { start, end };
@@ -366,6 +409,7 @@ export class AIFinancialContextService {
       typeof value.toString === 'function'
         ? value.toString()
         : undefined;
+
     const normalized =
       typeof value === 'object' && value !== null
         ? objectString !== undefined && objectString !== '[object Object]'

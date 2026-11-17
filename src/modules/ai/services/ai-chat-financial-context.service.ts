@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../../../database/prisma/prisma.service';
+import { BudgetScopeEngine } from '../../budgets/budget-scope.engine';
 
 import { AIFinancialContextService } from './ai-financial-context.service';
 
@@ -78,8 +79,11 @@ const ACTION_CENTER_STATUSES = new Set<RecommendationStatus>([
 export class AIChatFinancialContextService extends AIFinancialContextService {
   private readonly recommendationLimit = 20;
 
-  constructor(private readonly recommendationPrisma: PrismaService) {
-    super(recommendationPrisma);
+  constructor(
+    private readonly recommendationPrisma: PrismaService,
+    budgetScopeEngine: BudgetScopeEngine,
+  ) {
+    super(recommendationPrisma, budgetScopeEngine);
   }
 
   async getContext(userId: string) {
@@ -131,6 +135,7 @@ export class AIChatFinancialContextService extends AIFinancialContextService {
     );
 
     const statusCounts = this.buildStatusCounts(statusGroups);
+
     const mappedRecommendations = recommendations.map((item) =>
       this.mapRecommendation(item),
     );
