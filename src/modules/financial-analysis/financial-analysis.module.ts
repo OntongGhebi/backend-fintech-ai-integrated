@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AIModule } from '../ai/ai.module';
+import { BudgetsModule } from '../budgets/budgets.module';
 import { DashboardModule } from '../dashboard/dashboard.module';
 
 import { FinancialAnalysisController } from './financial-analysis.controller';
@@ -11,7 +12,7 @@ import { BudgetRecommendationLifecycleService } from './budget-recommendation-li
 import { FinancialWellBeingService } from './financial-well-being.service';
 
 @Module({
-  imports: [DashboardModule, AIModule],
+  imports: [DashboardModule, AIModule, BudgetsModule],
   controllers: [FinancialAnalysisController],
   providers: [
     FinancialAnalysisService,

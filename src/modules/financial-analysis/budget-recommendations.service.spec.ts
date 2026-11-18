@@ -1,7 +1,8 @@
-import { Prisma } from '../../../generated/prisma/client';
+import { BudgetScopeType, Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from 'src/database/prisma/prisma.service';
 
 import { AIService } from '../ai/services/ai.service';
+import { BudgetScopeEngine } from '../budgets/budget-scope.engine';
 
 import { BudgetRecommendationsService } from './budget-recommendations.service';
 
@@ -25,25 +26,105 @@ describe('BudgetRecommendationsService', () => {
     complete: jest.fn(),
   };
 
-  const createBudget = (overrides: Record<string, unknown> = {}) => ({
-    id: 'budget-food',
-    name: 'Food Budget',
-    categoryId: 'category-food',
-    category: {
-      id: 'category-food',
-      name: 'Food',
-      type: 'EXPENSE',
-      isActive: true,
-      deletedAt: null,
-    },
-    allocations: [
-      {
-        periodStart: new Date('2026-11-01T00:00:00.000Z'),
-        amount: new Prisma.Decimal('1500000'),
+  const budgetScopeEngineMock = {
+    resolveCategoryIds: jest.fn(
+      async (budget: {
+        scopeType: BudgetScopeType;
+        scopeCategoryId: string | null;
+        categoryId?: string | null;
+        categoryScopes: Array<{ categoryId: string }>;
+      }): Promise<string[] | null> => {
+        switch (budget.scopeType) {
+          case BudgetScopeType.ALL_EXPENSES:
+            return null;
+
+          case BudgetScopeType.CATEGORY: {
+            const categoryId =
+              budget.scopeCategoryId ?? budget.categoryId ?? null;
+
+            return categoryId ? [categoryId] : [];
+          }
+
+          case BudgetScopeType.CATEGORY_GROUP:
+            return budget.scopeCategoryId
+              ? [budget.scopeCategoryId, 'child-category-food']
+              : [];
+
+          case BudgetScopeType.CUSTOM:
+            return [
+              ...new Set(
+                budget.categoryScopes.map((scope) => scope.categoryId),
+              ),
+            ].sort();
+
+          default:
+            return [];
+        }
       },
-    ],
-    ...overrides,
-  });
+    ),
+  };
+
+  const createBudget = (overrides: Record<string, unknown> = {}) => {
+    const categoryId =
+      overrides.categoryId === undefined
+        ? 'category-food'
+        : (overrides.categoryId as string | null);
+
+    const category =
+      overrides.category === undefined
+        ? categoryId
+          ? {
+              id: categoryId,
+              name: 'Food',
+              type: 'EXPENSE',
+              isActive: true,
+              deletedAt: null,
+            }
+          : null
+        : overrides.category;
+
+    const scopeCategory =
+      overrides.scopeCategory === undefined
+        ? category
+        : overrides.scopeCategory;
+
+    const scopeType =
+      (overrides.scopeType as BudgetScopeType | undefined) ??
+      (categoryId ? BudgetScopeType.CATEGORY : BudgetScopeType.ALL_EXPENSES);
+
+    const scopeCategoryId =
+      overrides.scopeCategoryId === undefined
+        ? scopeType === BudgetScopeType.CATEGORY ||
+          scopeType === BudgetScopeType.CATEGORY_GROUP
+          ? categoryId
+          : null
+        : (overrides.scopeCategoryId as string | null);
+
+    return {
+      id: 'budget-food',
+      name: 'Food Budget',
+
+      categoryId,
+      category,
+      scopeType,
+      scopeCategoryId,
+      scopeCategory,
+      categoryScopes: [],
+
+      period: 'MONTHLY',
+      startDate: new Date('2026-01-01T00:00:00.000Z'),
+      endDate: null,
+
+      allocations: [
+        {
+          periodStart: new Date('2026-11-01T00:00:00.000Z'),
+          amount: new Prisma.Decimal('1500000'),
+        },
+      ],
+
+      ...overrides,
+    };
+  };
 
   const createTransactions = () => [
     {
@@ -123,6 +204,14 @@ describe('BudgetRecommendationsService', () => {
           isActive: true,
           deletedAt: null,
         },
+        scopeCategory: {
+          id: 'category-transport',
+          name: 'Transport',
+          type: 'EXPENSE',
+          isActive: true,
+          deletedAt: null,
+        },
+        scopeCategoryId: 'category-transport',
         allocations: [
           {
             periodStart: new Date('2026-11-01T00:00:00.000Z'),
@@ -166,6 +255,7 @@ describe('BudgetRecommendationsService', () => {
     service = new BudgetRecommendationsService(
       prismaMock as unknown as PrismaService,
       aiServiceMock as unknown as AIService,
+      budgetScopeEngineMock as unknown as BudgetScopeEngine,
     );
   });
 
@@ -181,9 +271,7 @@ describe('BudgetRecommendationsService', () => {
 
       expect(result.status).toBe('GENERATED');
       expect(result.targetMonth).toBe('2026-12');
-
       expect(result.currency).toBe('IDR');
-
       expect(result.recommendations).toHaveLength(2);
 
       expect(result.financialCapacity).toEqual(
@@ -202,6 +290,11 @@ describe('BudgetRecommendationsService', () => {
             userId: 'user-1',
             status: 'ACTIVE',
             deletedAt: null,
+          }),
+          include: expect.objectContaining({
+            scopeCategory: expect.any(Object),
+            categoryScopes: expect.any(Object),
+            allocations: expect.any(Object),
           }),
         }),
       );
@@ -369,7 +462,6 @@ describe('BudgetRecommendationsService', () => {
 
       expect(result.status).toBe('GENERATED');
       expect(result.recommendations).toHaveLength(2);
-
       expect(result.ai.status).toBe('UNAVAILABLE');
 
       expect(result.recommendations[0].reason).toBeTruthy();
@@ -416,7 +508,6 @@ describe('BudgetRecommendationsService', () => {
       );
 
       expect(food?.aiExplanation).toContain('Alokasi kategori');
-
       expect(transport?.aiExplanation).toBeNull();
     });
 
@@ -481,6 +572,519 @@ describe('BudgetRecommendationsService', () => {
           userId: 'user-1',
           feature: 'BUDGET_RECOMMENDATIONS',
         },
+      );
+    });
+  });
+
+  describe('budget scope integration', () => {
+    it('should resolve the scope of every eligible budget independently', async () => {
+      await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledTimes(2);
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeType: BudgetScopeType.CATEGORY,
+          scopeCategoryId: 'category-food',
+        }),
+      );
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeType: BudgetScopeType.CATEGORY,
+          scopeCategoryId: 'category-transport',
+        }),
+      );
+    });
+
+    it('should include uncategorized transactions for ALL_EXPENSES budgets', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-all-expenses',
+          name: 'All Expenses',
+          categoryId: null,
+          category: null,
+          scopeCategory: null,
+          scopeCategoryId: null,
+          scopeType: BudgetScopeType.ALL_EXPENSES,
+          allocations: [
+            {
+              periodStart: new Date('2026-11-01T00:00:00.000Z'),
+              amount: new Prisma.Decimal('1500000'),
+            },
+          ],
+        }),
+      ]);
+
+      prismaMock.transaction.findMany.mockResolvedValue([
+        {
+          categoryId: null,
+          amount: new Prisma.Decimal('100000'),
+          transactionDate: new Date('2026-09-15T05:00:00.000Z'),
+        },
+        {
+          categoryId: null,
+          amount: new Prisma.Decimal('200000'),
+          transactionDate: new Date('2026-10-15T05:00:00.000Z'),
+        },
+        {
+          categoryId: 'category-food',
+          amount: new Prisma.Decimal('300000'),
+          transactionDate: new Date('2026-11-15T05:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      const recommendation = result.recommendations[0];
+
+      expect(recommendation.categoryName).toBe('Semua Pengeluaran');
+      expect(recommendation.transactionCount).toBe(3);
+      expect(recommendation.averageMonthlySpend).toBe('200000');
+
+      expect(
+        prismaMock.transaction.findMany.mock.calls[0][0].where.categoryId,
+      ).toBeUndefined();
+    });
+
+    it('should include the root category and its children for CATEGORY_GROUP budgets', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-food-group',
+          name: 'Food Group Budget',
+          categoryId: null,
+          category: null,
+          scopeType: BudgetScopeType.CATEGORY_GROUP,
+          scopeCategoryId: 'root-food',
+          scopeCategory: {
+            id: 'root-food',
+            name: 'Food',
+            type: 'EXPENSE',
+            isActive: true,
+            deletedAt: null,
+          },
+          categoryScopes: [],
+        }),
+      ]);
+
+      prismaMock.transaction.findMany.mockResolvedValue([
+        {
+          categoryId: 'root-food',
+          amount: new Prisma.Decimal('100000'),
+          transactionDate: new Date('2026-09-15T05:00:00.000Z'),
+        },
+        {
+          categoryId: 'child-category-food',
+          amount: new Prisma.Decimal('200000'),
+          transactionDate: new Date('2026-10-15T05:00:00.000Z'),
+        },
+        {
+          categoryId: 'category-transport',
+          amount: new Prisma.Decimal('900000'),
+          transactionDate: new Date('2026-11-15T05:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      const recommendation = result.recommendations[0];
+
+      expect(recommendation.categoryName).toBe('Food');
+      expect(recommendation.transactionCount).toBe(2);
+      expect(recommendation.averageMonthlySpend).toBe('100000');
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeType: BudgetScopeType.CATEGORY_GROUP,
+          scopeCategoryId: 'root-food',
+        }),
+      );
+    });
+
+    it('should include only selected categories for CUSTOM budgets', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-custom',
+          name: 'Custom Budget',
+          categoryId: null,
+          category: null,
+          scopeCategory: null,
+          scopeCategoryId: null,
+          scopeType: BudgetScopeType.CUSTOM,
+          categoryScopes: [
+            {
+              categoryId: 'category-food',
+              category: {
+                id: 'category-food',
+                name: 'Food',
+                type: 'EXPENSE',
+                isActive: true,
+                deletedAt: null,
+              },
+            },
+            {
+              categoryId: 'category-transport',
+              category: {
+                id: 'category-transport',
+                name: 'Transport',
+                type: 'EXPENSE',
+                isActive: true,
+                deletedAt: null,
+              },
+            },
+          ],
+        }),
+      ]);
+
+      prismaMock.transaction.findMany.mockResolvedValue([
+        {
+          categoryId: 'category-food',
+          amount: new Prisma.Decimal('100000'),
+          transactionDate: new Date('2026-09-15T05:00:00.000Z'),
+        },
+        {
+          categoryId: 'category-transport',
+          amount: new Prisma.Decimal('200000'),
+          transactionDate: new Date('2026-10-15T05:00:00.000Z'),
+        },
+        {
+          categoryId: 'category-entertainment',
+          amount: new Prisma.Decimal('900000'),
+          transactionDate: new Date('2026-11-15T05:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      const recommendation = result.recommendations[0];
+
+      expect(recommendation.categoryName).toBe('Kategori kustom (2 kategori)');
+      expect(recommendation.transactionCount).toBe(2);
+      expect(recommendation.averageMonthlySpend).toBe('100000');
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeType: BudgetScopeType.CUSTOM,
+          categoryScopes: expect.arrayContaining([
+            expect.objectContaining({ categoryId: 'category-food' }),
+            expect.objectContaining({ categoryId: 'category-transport' }),
+          ]),
+        }),
+      );
+    });
+
+    it('should not include uncategorized transactions for category-scoped budgets', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-food',
+          scopeType: BudgetScopeType.CATEGORY,
+          categoryId: 'category-food',
+          scopeCategoryId: 'category-food',
+        }),
+      ]);
+
+      prismaMock.transaction.findMany.mockResolvedValue([
+        {
+          categoryId: 'category-food',
+          amount: new Prisma.Decimal('100000'),
+          transactionDate: new Date('2026-09-15T05:00:00.000Z'),
+        },
+        {
+          categoryId: null,
+          amount: new Prisma.Decimal('900000'),
+          transactionDate: new Date('2026-10-15T05:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(result.recommendations[0].transactionCount).toBe(1);
+      expect(result.recommendations[0].averageMonthlySpend).toBe('33333.3333');
+    });
+
+    it('should query the union of categories in one batch for category-scoped budgets', async () => {
+      await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(prismaMock.transaction.findMany).toHaveBeenCalledTimes(1);
+
+      expect(
+        prismaMock.transaction.findMany.mock.calls[0][0].where.categoryId,
+      ).toEqual({
+        in: ['category-food', 'category-transport'],
+      });
+    });
+
+    it('should not restrict the batch query when at least one budget uses ALL_EXPENSES', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-food',
+        }),
+        createBudget({
+          id: 'budget-all-expenses',
+          name: 'All Expenses',
+          categoryId: null,
+          category: null,
+          scopeCategory: null,
+          scopeCategoryId: null,
+          scopeType: BudgetScopeType.ALL_EXPENSES,
+        }),
+      ]);
+
+      await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(prismaMock.transaction.findMany).toHaveBeenCalledTimes(1);
+
+      expect(
+        prismaMock.transaction.findMany.mock.calls[0][0].where.categoryId,
+      ).toBeUndefined();
+    });
+
+    it('should detect duplicate budgets with identical resolved scopes', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-food-1',
+        }),
+        createBudget({
+          id: 'budget-food-2',
+          name: 'Food Budget Duplicate',
+        }),
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(
+        result.recommendations.every(
+          (recommendation) => recommendation.action === 'REVIEW',
+        ),
+      ).toBe(true);
+
+      expect(
+        result.recommendations.every((recommendation) =>
+          recommendation.reason.includes('cakupan pengeluaran yang sama'),
+        ),
+      ).toBe(true);
+    });
+
+    it('should treat two ALL_EXPENSES budgets as duplicate scopes', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-all-1',
+          categoryId: null,
+          category: null,
+          scopeCategory: null,
+          scopeCategoryId: null,
+          scopeType: BudgetScopeType.ALL_EXPENSES,
+        }),
+        createBudget({
+          id: 'budget-all-2',
+          categoryId: null,
+          category: null,
+          scopeCategory: null,
+          scopeCategoryId: null,
+          scopeType: BudgetScopeType.ALL_EXPENSES,
+        }),
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(
+        result.recommendations.every(
+          (recommendation) => recommendation.action === 'REVIEW',
+        ),
+      ).toBe(true);
+    });
+
+    it('should exclude CUSTOM budgets with empty category scopes', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-custom-empty',
+          categoryId: null,
+          category: null,
+          scopeCategory: null,
+          scopeCategoryId: null,
+          scopeType: BudgetScopeType.CUSTOM,
+          categoryScopes: [],
+        }),
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(result.status).toBe('NO_RECOMMENDATIONS');
+      expect(result.eligibility).toEqual(
+        expect.objectContaining({
+          totalActiveBudgets: 1,
+          eligibleBudgetCount: 0,
+          excludedBudgetCount: 1,
+        }),
+      );
+
+      expect(result.eligibility.excludedBudgets[0]).toEqual(
+        expect.objectContaining({
+          budgetId: 'budget-custom-empty',
+          reason: 'EMPTY_CUSTOM_SCOPE',
+        }),
+      );
+
+      expect(aiServiceMock.complete).not.toHaveBeenCalled();
+    });
+
+    it('should exclude CATEGORY budgets without a scope category', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-category-invalid',
+          categoryId: null,
+          category: null,
+          scopeCategory: null,
+          scopeCategoryId: null,
+          scopeType: BudgetScopeType.CATEGORY,
+        }),
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(result.status).toBe('NO_RECOMMENDATIONS');
+      expect(result.eligibility.excludedBudgets[0]).toEqual(
+        expect.objectContaining({
+          budgetId: 'budget-category-invalid',
+          reason: 'MISSING_SCOPE',
+        }),
+      );
+    });
+
+    it('should exclude CATEGORY_GROUP budgets without a root category', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-group-invalid',
+          categoryId: null,
+          category: null,
+          scopeCategory: null,
+          scopeCategoryId: null,
+          scopeType: BudgetScopeType.CATEGORY_GROUP,
+        }),
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(result.status).toBe('NO_RECOMMENDATIONS');
+      expect(result.eligibility.excludedBudgets[0]).toEqual(
+        expect.objectContaining({
+          budgetId: 'budget-group-invalid',
+          reason: 'MISSING_SCOPE',
+        }),
+      );
+    });
+
+    it('should exclude budgets that have no applicable allocation', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-no-allocation',
+          allocations: [],
+        }),
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(result.status).toBe('NO_RECOMMENDATIONS');
+      expect(result.eligibility.excludedBudgets[0]).toEqual(
+        expect.objectContaining({
+          budgetId: 'budget-no-allocation',
+          reason: 'NO_ALLOCATION',
+        }),
+      );
+    });
+
+    it('should exclude budgets that have not started by the target month', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-future',
+          startDate: new Date('2027-01-01T00:00:00.000Z'),
+        }),
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(result.status).toBe('NO_RECOMMENDATIONS');
+      expect(result.eligibility.excludedBudgets[0]).toEqual(
+        expect.objectContaining({
+          budgetId: 'budget-future',
+          reason: 'BUDGET_NOT_STARTED',
+        }),
+      );
+    });
+
+    it('should exclude budgets whose validity ended before the target month', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget({
+          id: 'budget-expired',
+          endDate: new Date('2026-11-30T00:00:00.000Z'),
+        }),
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(result.status).toBe('NO_RECOMMENDATIONS');
+      expect(result.eligibility.excludedBudgets[0]).toEqual(
+        expect.objectContaining({
+          budgetId: 'budget-expired',
+          reason: 'BUDGET_PERIOD_EXPIRED',
+        }),
+      );
+    });
+
+    it('should expose eligibility counts for generated recommendations', async () => {
+      prismaMock.budget.findMany.mockResolvedValue([
+        createBudget(),
+        createBudget({
+          id: 'budget-invalid',
+          scopeType: BudgetScopeType.CUSTOM,
+          categoryId: null,
+          category: null,
+          scopeCategory: null,
+          scopeCategoryId: null,
+          categoryScopes: [],
+        }),
+      ]);
+
+      const result = await service.generate('user-1', {
+        month: '2026-12',
+      });
+
+      expect(result.eligibility).toEqual(
+        expect.objectContaining({
+          totalActiveBudgets: 2,
+          eligibleBudgetCount: 1,
+          excludedBudgetCount: 1,
+        }),
       );
     });
   });

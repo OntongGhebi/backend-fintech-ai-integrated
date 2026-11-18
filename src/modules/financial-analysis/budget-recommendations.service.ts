@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 
-import { Prisma } from '../../../generated/prisma/client';
+import { BudgetScopeType, Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from 'src/database/prisma/prisma.service';
 
 import { AIService } from '../ai/services/ai.service';
@@ -9,6 +9,7 @@ import { AI_USAGE_FEATURES } from '../ai/constants/ai-usage.constants';
 import type { AICompletionUsage } from '../ai/types/ai.types';
 
 import { getBudgetMonthRange } from '../budgets/utils/budget-month.util';
+import { BudgetScopeEngine } from '../budgets/budget-scope.engine';
 
 import {
   buildBudgetRecommendationsMessages,
@@ -29,6 +30,8 @@ export type BudgetRecommendationExclusionReason =
   | 'BUDGET_PERIOD_EXPIRED'
   | 'BUDGET_NOT_STARTED'
   | 'MISSING_CATEGORY'
+  | 'MISSING_SCOPE'
+  | 'EMPTY_CUSTOM_SCOPE'
   | 'INVALID_CATEGORY_TYPE'
   | 'INACTIVE_CATEGORY'
   | 'NO_ALLOCATION';
@@ -57,7 +60,7 @@ export interface BudgetRecommendation {
   budgetId: string;
   budgetName: string;
 
-  categoryId: string;
+  categoryId: string | null;
   categoryName: string;
 
   action: BudgetRecommendationAction;
@@ -135,7 +138,7 @@ interface RawAIExplanationResponse {
   explanations?: unknown;
 }
 
-interface CategorySpendingAccumulator {
+interface BudgetSpendingAccumulator {
   totalAmount: Prisma.Decimal;
   transactionCount: number;
   monthlyAmounts: Map<string, Prisma.Decimal>;
@@ -145,8 +148,10 @@ interface CategorySpendingAccumulator {
 interface RecommendationCandidate {
   budgetId: string;
   budgetName: string;
-  categoryId: string;
+  categoryId: string | null;
   categoryName: string;
+  scopeType: BudgetScopeType;
+  resolvedCategoryIds: string[] | null;
 
   currentAllocation: Prisma.Decimal;
 
@@ -159,7 +164,7 @@ interface RecommendationCandidate {
 
   monthlySpending: BudgetRecommendationMonthlySpending[];
 
-  duplicateCategoryBudget: boolean;
+  duplicateScopeBudget: boolean;
 }
 
 const HISTORY_MONTHS = 3;
@@ -191,6 +196,7 @@ export class BudgetRecommendationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiService: AIService,
+    private readonly budgetScopeEngine: BudgetScopeEngine,
   ) {}
 
   async generate(
@@ -270,6 +276,32 @@ export class BudgetRecommendationsService {
             deletedAt: true,
           },
         },
+        scopeCategory: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            isActive: true,
+            deletedAt: true,
+          },
+        },
+        categoryScopes: {
+          select: {
+            categoryId: true,
+            category: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                isActive: true,
+                deletedAt: true,
+              },
+            },
+          },
+          orderBy: {
+            categoryId: 'asc',
+          },
+        },
         allocations: {
           where: {
             periodStart: {
@@ -287,10 +319,9 @@ export class BudgetRecommendationsService {
       },
     });
 
-    const candidates: Array<{
-      budgetId: string;
-      budgetName: string;
-      categoryId: string;
+    const eligibleBudgets: Array<{
+      budget: (typeof budgets)[number];
+      categoryId: string | null;
       categoryName: string;
       currentAllocation: Prisma.Decimal;
     }> = [];
@@ -298,18 +329,15 @@ export class BudgetRecommendationsService {
     const excludedBudgets: BudgetRecommendationExcludedBudget[] = [];
 
     /**
-     * Classify every active budget.
+     * Eligibility is based on the budget scope, not on the legacy categoryId.
      *
-     * Only budgets that:
-     * - are valid during the target month;
-     * - have an active EXPENSE category;
-     * - have a valid monthly allocation;
-     *
-     * can become recommendation candidates.
+     * ALL_EXPENSES budgets are valid without a category relation.
+     * CATEGORY, CATEGORY_GROUP and CUSTOM budgets are validated against
+     * their own scope configuration.
      */
     for (const budget of budgets) {
-      const category = budget.category;
       const allocation = budget.allocations[0];
+      const primaryCategory = budget.scopeCategory ?? budget.category;
 
       let exclusion: BudgetRecommendationExcludedBudget | null = null;
 
@@ -330,28 +358,6 @@ export class BudgetRecommendationsService {
           reason: 'BUDGET_PERIOD_EXPIRED',
           message: 'Masa berlaku budget berakhir sebelum bulan target dimulai.',
         };
-      } else if (!budget.categoryId || !category) {
-        exclusion = {
-          budgetId: budget.id,
-          budgetName: budget.name,
-          reason: 'MISSING_CATEGORY',
-          message: 'Budget belum memiliki kategori yang dapat dianalisis.',
-        };
-      } else if (category.type !== 'EXPENSE') {
-        exclusion = {
-          budgetId: budget.id,
-          budgetName: budget.name,
-          reason: 'INVALID_CATEGORY_TYPE',
-          message:
-            'Rekomendasi alokasi hanya berlaku untuk kategori pengeluaran.',
-        };
-      } else if (!category.isActive || category.deletedAt) {
-        exclusion = {
-          budgetId: budget.id,
-          budgetName: budget.name,
-          reason: 'INACTIVE_CATEGORY',
-          message: 'Kategori budget sedang tidak aktif atau sudah dihapus.',
-        };
       } else if (!allocation) {
         exclusion = {
           budgetId: budget.id,
@@ -360,6 +366,64 @@ export class BudgetRecommendationsService {
           message:
             'Belum tersedia alokasi bulanan untuk bulan target atau bulan sebelumnya.',
         };
+      } else if (
+        budget.scopeType === BudgetScopeType.CATEGORY &&
+        !(budget.scopeCategoryId ?? budget.categoryId)
+      ) {
+        exclusion = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          reason: 'MISSING_SCOPE',
+          message: 'Budget kategori belum memiliki kategori cakupan.',
+        };
+      } else if (
+        budget.scopeType === BudgetScopeType.CATEGORY_GROUP &&
+        !budget.scopeCategoryId
+      ) {
+        exclusion = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          reason: 'MISSING_SCOPE',
+          message: 'Budget grup kategori belum memiliki kategori induk.',
+        };
+      } else if (
+        budget.scopeType === BudgetScopeType.CUSTOM &&
+        budget.categoryScopes.length === 0
+      ) {
+        exclusion = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          reason: 'EMPTY_CUSTOM_SCOPE',
+          message: 'Budget kustom belum memiliki kategori yang dipilih.',
+        };
+      } else if (
+        budget.scopeType !== BudgetScopeType.ALL_EXPENSES &&
+        ((primaryCategory && primaryCategory.type !== 'EXPENSE') ||
+          (budget.scopeType === BudgetScopeType.CUSTOM &&
+            budget.categoryScopes.some(
+              (scope) => scope.category.type !== 'EXPENSE',
+            )))
+      ) {
+        exclusion = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          reason: 'INVALID_CATEGORY_TYPE',
+          message:
+            'Rekomendasi alokasi hanya berlaku untuk cakupan kategori pengeluaran.',
+        };
+      } else if (
+        (budget.scopeType === BudgetScopeType.CATEGORY ||
+          budget.scopeType === BudgetScopeType.CATEGORY_GROUP) &&
+        primaryCategory &&
+        (!primaryCategory.isActive || primaryCategory.deletedAt)
+      ) {
+        exclusion = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          reason: 'INACTIVE_CATEGORY',
+          message:
+            'Kategori cakupan budget sedang tidak aktif atau sudah dihapus.',
+        };
       }
 
       if (exclusion) {
@@ -367,21 +431,92 @@ export class BudgetRecommendationsService {
         continue;
       }
 
-      /**
-       * Type guard after the exclusion checks.
-       * These fields must exist for an eligible candidate.
-       */
-      if (!budget.categoryId || !category || !allocation) {
+      if (!allocation) {
         continue;
       }
 
-      candidates.push({
-        budgetId: budget.id,
-        budgetName: budget.name,
-        categoryId: budget.categoryId,
-        categoryName: category.name,
+      let categoryName: string;
+
+      switch (budget.scopeType) {
+        case BudgetScopeType.ALL_EXPENSES:
+          categoryName = 'Semua Pengeluaran';
+          break;
+
+        case BudgetScopeType.CATEGORY:
+        case BudgetScopeType.CATEGORY_GROUP:
+          categoryName = primaryCategory?.name ?? budget.name;
+          break;
+
+        case BudgetScopeType.CUSTOM:
+          categoryName = `Kategori kustom (${budget.categoryScopes.length} kategori)`;
+          break;
+
+        default:
+          categoryName = budget.name;
+      }
+
+      eligibleBudgets.push({
+        budget,
+        categoryId: budget.categoryId ?? budget.scopeCategoryId ?? null,
+        categoryName,
         currentAllocation: new Prisma.Decimal(allocation.amount),
       });
+    }
+
+    /**
+     * Resolve each eligible budget independently.
+     *
+     * null means ALL_EXPENSES, including uncategorized transactions.
+     * An array means only transactions belonging to the resolved IDs.
+     */
+    const candidates: RecommendationCandidate[] = await Promise.all(
+      eligibleBudgets.map(async (candidate) => ({
+        budgetId: candidate.budget.id,
+        budgetName: candidate.budget.name,
+        categoryId: candidate.categoryId,
+        categoryName: candidate.categoryName,
+        scopeType: candidate.budget.scopeType,
+        resolvedCategoryIds: await this.budgetScopeEngine.resolveCategoryIds({
+          scopeType: candidate.budget.scopeType,
+          scopeCategoryId: candidate.budget.scopeCategoryId,
+          categoryId: candidate.budget.categoryId,
+          categoryScopes: candidate.budget.categoryScopes,
+        }),
+        currentAllocation: candidate.currentAllocation,
+        averageMonthlySpend: new Prisma.Decimal(0),
+        transactionCount: 0,
+        monthsWithActivity: 0,
+        spendingTrend: 'UNCHANGED',
+        monthlySpending: [],
+        duplicateScopeBudget: false,
+      })),
+    );
+
+    /**
+     * Detect duplicate budgets using their resolved scope.
+     *
+     * This replaces the old categoryId-only duplicate detection.
+     * Two budgets are considered duplicates when their effective category
+     * sets are identical, or both represent ALL_EXPENSES.
+     */
+    const scopeCounts = new Map<string, number>();
+
+    for (const candidate of candidates) {
+      const scopeKey =
+        candidate.resolvedCategoryIds === null
+          ? 'ALL_EXPENSES'
+          : `CATEGORIES:${candidate.resolvedCategoryIds.join(',')}`;
+
+      scopeCounts.set(scopeKey, (scopeCounts.get(scopeKey) ?? 0) + 1);
+    }
+
+    for (const candidate of candidates) {
+      const scopeKey =
+        candidate.resolvedCategoryIds === null
+          ? 'ALL_EXPENSES'
+          : `CATEGORIES:${candidate.resolvedCategoryIds.join(',')}`;
+
+      candidate.duplicateScopeBudget = (scopeCounts.get(scopeKey) ?? 0) > 1;
     }
 
     /**
@@ -417,18 +552,36 @@ export class BudgetRecommendationsService {
           model: null,
         },
         message:
-          'Belum tersedia budget kategori pengeluaran dengan alokasi bulanan yang dapat dianalisis untuk bulan target.',
+          'Belum tersedia budget dengan cakupan pengeluaran dan alokasi bulanan yang dapat dianalisis untuk bulan target.',
       };
     }
 
-    const categoryIds = [
-      ...new Set(candidates.map((candidate) => candidate.categoryId)),
-    ];
+    /**
+     * Preserve the single batch transaction query.
+     *
+     * If at least one budget uses ALL_EXPENSES, do not restrict categoryId.
+     * This ensures uncategorized transactions are included.
+     *
+     * Otherwise, query the union of all resolved category IDs once.
+     */
+    const allExpenseScopeExists = candidates.some(
+      (candidate) => candidate.resolvedCategoryIds === null,
+    );
 
-    const transactionWhere = {
+    const categoryIdsForQuery = allExpenseScopeExists
+      ? null
+      : [
+          ...new Set(
+            candidates.flatMap(
+              (candidate) => candidate.resolvedCategoryIds ?? [],
+            ),
+          ),
+        ];
+
+    const transactionWhere: Prisma.TransactionWhereInput = {
       userId,
       deletedAt: null,
-      status: 'ACTIVE' as const,
+      status: 'ACTIVE',
       currency: 'IDR',
       transactionDate: {
         gte: historyStartRange.start,
@@ -436,7 +589,15 @@ export class BudgetRecommendationsService {
       },
     };
 
-    const [incomeAggregate, expenseAggregate, categoryTransactions] =
+    const transactionScopeWhere: Prisma.TransactionWhereInput = {
+      ...transactionWhere,
+      type: 'EXPENSE',
+      ...(categoryIdsForQuery === null
+        ? {}
+        : { categoryId: { in: categoryIdsForQuery } }),
+    };
+
+    const [incomeAggregate, expenseAggregate, scopedTransactions] =
       await Promise.all([
         this.prisma.transaction.aggregate({
           where: {
@@ -459,13 +620,7 @@ export class BudgetRecommendationsService {
         }),
 
         this.prisma.transaction.findMany({
-          where: {
-            ...transactionWhere,
-            type: 'EXPENSE',
-            categoryId: {
-              in: categoryIds,
-            },
-          },
+          where: transactionScopeWhere,
           select: {
             categoryId: true,
             amount: true,
@@ -493,31 +648,27 @@ export class BudgetRecommendationsService {
       .minus(averageMonthlyExpense)
       .toDecimalPlaces(4);
 
-    const spendingByCategory = this.buildCategorySpending(
-      categoryTransactions,
-      historyMonths,
-      timezone,
-    );
-
-    const categoryBudgetCounts = new Map<string, number>();
-
-    for (const candidate of candidates) {
-      categoryBudgetCounts.set(
-        candidate.categoryId,
-        (categoryBudgetCounts.get(candidate.categoryId) ?? 0) + 1,
-      );
-    }
-
+    /**
+     * Calculate spending separately for every budget scope.
+     *
+     * A transaction may legitimately be included in multiple budgets when
+     * their scopes overlap. Each budget is evaluated independently.
+     */
     const recommendationCandidates: RecommendationCandidate[] = candidates.map(
       (candidate) => {
-        const spending = spendingByCategory.get(candidate.categoryId);
+        const spending = this.buildScopedSpending(
+          scopedTransactions,
+          candidate.resolvedCategoryIds,
+          historyMonths,
+          timezone,
+        );
 
         const monthlySpending = historyMonths.map((month) => {
           const amount =
-            spending?.monthlyAmounts.get(month.key) ?? new Prisma.Decimal(0);
+            spending.monthlyAmounts.get(month.key) ?? new Prisma.Decimal(0);
 
           const transactionCount =
-            spending?.monthlyTransactionCounts.get(month.key) ?? 0;
+            spending.monthlyTransactionCounts.get(month.key) ?? 0;
 
           return {
             month: month.label,
@@ -526,9 +677,7 @@ export class BudgetRecommendationsService {
           };
         });
 
-        const totalAmount = spending?.totalAmount ?? new Prisma.Decimal(0);
-
-        const averageMonthlySpend = totalAmount
+        const averageMonthlySpend = spending.totalAmount
           .dividedBy(HISTORY_MONTHS)
           .toDecimalPlaces(4);
 
@@ -553,12 +702,10 @@ export class BudgetRecommendationsService {
         return {
           ...candidate,
           averageMonthlySpend,
-          transactionCount: spending?.transactionCount ?? 0,
+          transactionCount: spending.transactionCount,
           monthsWithActivity,
           spendingTrend,
           monthlySpending,
-          duplicateCategoryBudget:
-            (categoryBudgetCounts.get(candidate.categoryId) ?? 0) > 1,
         };
       },
     );
@@ -739,22 +886,41 @@ export class BudgetRecommendationsService {
     return `${year}-${month}`;
   }
 
-  private buildCategorySpending(
+  /**
+   * Calculate transaction totals for one resolved budget scope.
+   *
+   * null categoryIds means ALL_EXPENSES and deliberately includes
+   * transactions where categoryId is null.
+   */
+  private buildScopedSpending(
     transactions: Array<{
       categoryId: string | null;
       amount: Prisma.Decimal;
       transactionDate: Date;
     }>,
+    categoryIds: string[] | null,
     historyMonths: Array<{
       key: string;
       label: string;
     }>,
     timezone: string,
-  ): Map<string, CategorySpendingAccumulator> {
-    const result = new Map<string, CategorySpendingAccumulator>();
+  ): BudgetSpendingAccumulator {
+    const result: BudgetSpendingAccumulator = {
+      totalAmount: new Prisma.Decimal(0),
+      transactionCount: 0,
+      monthlyAmounts: new Map(),
+      monthlyTransactionCounts: new Map(),
+    };
+
+    const allowedCategoryIds =
+      categoryIds === null ? null : new Set(categoryIds);
 
     for (const transaction of transactions) {
-      if (!transaction.categoryId) {
+      if (
+        allowedCategoryIds !== null &&
+        (transaction.categoryId === null ||
+          !allowedCategoryIds.has(transaction.categoryId))
+      ) {
         continue;
       }
 
@@ -769,35 +935,19 @@ export class BudgetRecommendationsService {
         continue;
       }
 
-      let accumulator = result.get(transaction.categoryId);
+      result.totalAmount = result.totalAmount.plus(transaction.amount);
+      result.transactionCount += 1;
 
-      if (!accumulator) {
-        accumulator = {
-          totalAmount: new Prisma.Decimal(0),
-          transactionCount: 0,
-          monthlyAmounts: new Map(),
-          monthlyTransactionCounts: new Map(),
-        };
-
-        result.set(transaction.categoryId, accumulator);
-      }
-
-      accumulator.totalAmount = accumulator.totalAmount.plus(
-        transaction.amount,
+      result.monthlyAmounts.set(
+        monthKey,
+        (result.monthlyAmounts.get(monthKey) ?? new Prisma.Decimal(0)).plus(
+          transaction.amount,
+        ),
       );
 
-      accumulator.transactionCount += 1;
-
-      accumulator.monthlyAmounts.set(
+      result.monthlyTransactionCounts.set(
         monthKey,
-        (
-          accumulator.monthlyAmounts.get(monthKey) ?? new Prisma.Decimal(0)
-        ).plus(transaction.amount),
-      );
-
-      accumulator.monthlyTransactionCounts.set(
-        monthKey,
-        (accumulator.monthlyTransactionCounts.get(monthKey) ?? 0) + 1,
+        (result.monthlyTransactionCounts.get(monthKey) ?? 0) + 1,
       );
     }
 
@@ -822,21 +972,21 @@ export class BudgetRecommendationsService {
       'Nominal usulan dihitung dari alokasi bulanan dan transaksi aktual.',
     ];
 
-    if (candidate.duplicateCategoryBudget) {
+    if (candidate.duplicateScopeBudget) {
       action = 'REVIEW';
       reason =
-        'Terdapat lebih dari satu budget aktif untuk kategori yang sama. Struktur budget perlu ditinjau agar realisasi tidak dihitung ganda.';
+        'Terdapat lebih dari satu budget aktif dengan cakupan pengeluaran yang sama. Struktur budget perlu ditinjau agar realisasi tidak dihitung ganda.';
     } else if (
       candidate.transactionCount < MINIMUM_TRANSACTION_COUNT ||
       candidate.monthsWithActivity < MINIMUM_ACTIVE_MONTHS
     ) {
       action = 'REVIEW';
       reason =
-        'Riwayat transaksi kategori belum cukup konsisten untuk menjadi dasar perubahan alokasi.';
+        'Riwayat transaksi dalam cakupan budget belum cukup konsisten untuk menjadi dasar perubahan alokasi.';
     } else if (averageSpend.isZero()) {
       action = 'REVIEW';
       reason =
-        'Belum terdapat pengeluaran yang cukup untuk menentukan kebutuhan alokasi kategori secara andal.';
+        'Belum terdapat pengeluaran yang cukup dalam cakupan budget untuk menentukan kebutuhan alokasi secara andal.';
     } else if (averageSpend.greaterThan(current.times(INCREASE_THRESHOLD))) {
       const desiredAllocation = this.roundUpToThousand(
         averageSpend.times(INCREASE_BUFFER),
