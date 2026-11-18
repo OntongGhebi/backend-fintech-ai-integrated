@@ -795,6 +795,76 @@ describe('AIFinancialContextService', () => {
       expect(result.budgets[0].spent).toBe('30.00');
     });
 
+    it('should include transactions from deeply nested CATEGORY_GROUP descendants', async () => {
+      const transactionDate = new Date();
+
+      prismaMock.budget.findMany.mockResolvedValue([
+        makeBudget({
+          amount: decimal('100.00'),
+          scopeType: 'CATEGORY_GROUP',
+          scopeCategoryId: 'root-category',
+          categoryId: null,
+        }),
+      ]);
+
+      // Simulasi hasil BudgetScopeEngine untuk hierarki:
+      // root-category
+      //   └── child-category-1
+      //         └── grandchild-category-1
+      budgetScopeEngineMock.resolveCategoryIds.mockResolvedValueOnce([
+        'root-category',
+        'child-category-1',
+        'grandchild-category-1',
+      ]);
+
+      mockFindManyResults({
+        budgetTransactions: [
+          {
+            transactionDate,
+            amount: decimal('10.00'),
+            categoryId: 'root-category',
+          },
+          {
+            transactionDate,
+            amount: decimal('20.00'),
+            categoryId: 'child-category-1',
+          },
+          {
+            transactionDate,
+            amount: decimal('30.00'),
+            categoryId: 'grandchild-category-1',
+          },
+          {
+            transactionDate,
+            amount: decimal('40.00'),
+            categoryId: 'unrelated-category',
+          },
+          {
+            transactionDate,
+            amount: decimal('50.00'),
+            categoryId: null,
+          },
+        ],
+      });
+
+      const result = await service.getContext('user-1');
+
+      expect(result.budgets[0]).toEqual(
+        expect.objectContaining({
+          spent: '60.00',
+          remaining: '40.00',
+          usagePercentage: 60,
+        }),
+      );
+
+      expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeType: 'CATEGORY_GROUP',
+          scopeCategoryId: 'root-category',
+        }),
+      );
+    });
+
     it('should apply the explicit category union for CUSTOM scopes', async () => {
       const transactionDate = new Date();
 

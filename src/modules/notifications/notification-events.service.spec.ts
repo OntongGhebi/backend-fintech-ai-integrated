@@ -191,6 +191,7 @@ describe('NotificationEventsService', () => {
   describe('budgetExpenseCreated', () => {
     const categoryId = 'category-food';
     const childCategoryId = 'category-food-child';
+    const grandchildCategoryId = 'category-food-grandchild';
     const customCategoryId = 'category-custom';
 
     const budget = {
@@ -351,11 +352,16 @@ describe('NotificationEventsService', () => {
       );
     });
 
-    it('should evaluate CATEGORY_GROUP scope using root and descendant category IDs', async () => {
-      budgetScopeEngineMock.resolveCategoryIds.mockResolvedValue([
+    it('should evaluate CATEGORY_GROUP scope using root and deeply nested descendants', async () => {
+      const resolvedCategoryIds = [
         categoryId,
         childCategoryId,
-      ]);
+        grandchildCategoryId,
+      ];
+
+      budgetScopeEngineMock.resolveCategoryIds.mockResolvedValue(
+        resolvedCategoryIds,
+      );
 
       const categoryGroupBudget = {
         ...budget,
@@ -367,7 +373,7 @@ describe('NotificationEventsService', () => {
 
       await service.budgetExpenseCreated({
         ...expenseEvent,
-        categoryId: childCategoryId,
+        categoryId: grandchildCategoryId,
       });
 
       expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
@@ -380,7 +386,7 @@ describe('NotificationEventsService', () => {
       const aggregateArgs = prismaMock.transaction.aggregate.mock.calls[0][0];
 
       expect(aggregateArgs.where.categoryId).toEqual({
-        in: [categoryId, childCategoryId],
+        in: resolvedCategoryIds,
       });
 
       expect(notificationsServiceMock.create).toHaveBeenCalledWith(

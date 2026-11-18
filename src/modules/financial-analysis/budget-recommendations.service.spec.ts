@@ -47,7 +47,11 @@ describe('BudgetRecommendationsService', () => {
 
           case BudgetScopeType.CATEGORY_GROUP:
             return budget.scopeCategoryId
-              ? [budget.scopeCategoryId, 'child-category-food']
+              ? [
+                  budget.scopeCategoryId,
+                  'child-category-food',
+                  'grandchild-category-food',
+                ]
               : [];
 
           case BudgetScopeType.CUSTOM:
@@ -651,7 +655,7 @@ describe('BudgetRecommendationsService', () => {
       ).toBeUndefined();
     });
 
-    it('should include the root category and its children for CATEGORY_GROUP budgets', async () => {
+    it('should include root, child, and grandchild transactions for CATEGORY_GROUP budgets', async () => {
       prismaMock.budget.findMany.mockResolvedValue([
         createBudget({
           id: 'budget-food-group',
@@ -683,6 +687,11 @@ describe('BudgetRecommendationsService', () => {
           transactionDate: new Date('2026-10-15T05:00:00.000Z'),
         },
         {
+          categoryId: 'grandchild-category-food',
+          amount: new Prisma.Decimal('300000'),
+          transactionDate: new Date('2026-11-15T05:00:00.000Z'),
+        },
+        {
           categoryId: 'category-transport',
           amount: new Prisma.Decimal('900000'),
           transactionDate: new Date('2026-11-15T05:00:00.000Z'),
@@ -695,9 +704,30 @@ describe('BudgetRecommendationsService', () => {
 
       const recommendation = result.recommendations[0];
 
-      expect(recommendation.categoryName).toBe('Food');
-      expect(recommendation.transactionCount).toBe(2);
-      expect(recommendation.averageMonthlySpend).toBe('100000');
+      expect(recommendation).toEqual(
+        expect.objectContaining({
+          budgetId: 'budget-food-group',
+          categoryName: 'Food',
+          transactionCount: 3,
+          monthsWithActivity: 3,
+          averageMonthlySpend: '200000',
+        }),
+      );
+
+      expect(recommendation.monthlySpending).toEqual([
+        expect.objectContaining({
+          amount: '100000',
+          transactionCount: 1,
+        }),
+        expect.objectContaining({
+          amount: '200000',
+          transactionCount: 1,
+        }),
+        expect.objectContaining({
+          amount: '300000',
+          transactionCount: 1,
+        }),
+      ]);
 
       expect(budgetScopeEngineMock.resolveCategoryIds).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -705,6 +735,14 @@ describe('BudgetRecommendationsService', () => {
           scopeCategoryId: 'root-food',
         }),
       );
+
+      expect(prismaMock.transaction.findMany).toHaveBeenCalledTimes(1);
+
+      expect(
+        prismaMock.transaction.findMany.mock.calls[0][0].where.categoryId,
+      ).toEqual({
+        in: ['root-food', 'child-category-food', 'grandchild-category-food'],
+      });
     });
 
     it('should include only selected categories for CUSTOM budgets', async () => {
