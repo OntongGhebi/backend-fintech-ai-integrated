@@ -8,6 +8,7 @@ import {
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from 'src/database/prisma/prisma.service';
 
+import { BudgetScopeEngine } from '../budgets/budget-scope.engine';
 import { getBudgetMonthRange } from '../budgets/utils/budget-month.util';
 
 import type {
@@ -27,12 +28,11 @@ interface LifecycleOptions {
 export class BudgetRecommendationLifecycleService {
   private static readonly DEFAULT_TIMEZONE = 'Asia/Jakarta';
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly budgetScopeEngine: BudgetScopeEngine,
+  ) {}
 
-  /**
-   * Persist D.3 output as an immutable financial snapshot.
-   * Existing lifecycle records are intentionally not overwritten.
-   */
   async persistGenerated(userId: string, result: BudgetRecommendationsResult) {
     if (result.recommendations.length === 0) {
       return result;
@@ -172,7 +172,6 @@ export class BudgetRecommendationLifecycleService {
     }
 
     const timezone = await this.getTimezone(userId);
-
     const targetRange = getBudgetMonthRange(record.targetMonth, timezone);
 
     if (deferredUntil >= targetRange.start) {
@@ -205,16 +204,6 @@ export class BudgetRecommendationLifecycleService {
     return this.findOwnedOrThrow(userId, recommendationId);
   }
 
-  /**
-   * Apply an accepted recommendation to the target month's allocation.
-   *
-   * This operation is transactional:
-   * 1. Validate ownership and lifecycle status.
-   * 2. Validate budget and target month.
-   * 3. Detect allocation changes since recommendation generation.
-   * 4. Upsert BudgetAllocation.
-   * 5. Mark recommendation as APPLIED.
-   */
   async apply(userId: string, recommendationId: string) {
     return this.prisma.$transaction(
       async (tx) => {
@@ -273,9 +262,7 @@ export class BudgetRecommendationLifecycleService {
         }
 
         const timezone = await this.getTimezone(userId, tx);
-
         const targetRange = getBudgetMonthRange(targetMonth, timezone);
-
         const currentRange = getBudgetMonthRange(new Date(), timezone);
 
         if (targetRange.periodStart < currentRange.periodStart) {
@@ -383,6 +370,7 @@ export class BudgetRecommendationLifecycleService {
 
   /**
    * Evaluate an applied recommendation after its target month ends.
+   * Transaction filtering follows the source budget's configured scope.
    */
   async evaluate(userId: string, recommendationId: string) {
     const recommendation = await this.findOwnedOrThrow(
@@ -413,25 +401,51 @@ export class BudgetRecommendationLifecycleService {
       );
     }
 
-    const transactions = recommendation.categoryId
-      ? await this.prisma.transaction.findMany({
-          where: {
-            userId,
-            categoryId: recommendation.categoryId,
-            type: 'EXPENSE',
-            status: 'ACTIVE',
-            currency: 'IDR',
-            deletedAt: null,
-            transactionDate: {
-              gte: targetRange.start,
-              lt: targetRange.end,
-            },
-          },
+    const budget = await this.prisma.budget.findFirst({
+      where: {
+        id: recommendation.budgetId,
+        userId,
+      },
+      select: {
+        id: true,
+        scopeType: true,
+        scopeCategoryId: true,
+        categoryId: true,
+        categoryScopes: {
           select: {
-            amount: true,
+            categoryId: true,
           },
-        })
-      : [];
+        },
+      },
+    });
+
+    if (!budget) {
+      throw new ConflictException(
+        'The source budget for this recommendation could not be found',
+      );
+    }
+
+    const transactionWhere = await this.budgetScopeEngine.buildTransactionWhere(
+      budget,
+      {
+        userId,
+        type: 'EXPENSE',
+        status: 'ACTIVE',
+        currency: 'IDR',
+        deletedAt: null,
+        transactionDate: {
+          gte: targetRange.start,
+          lt: targetRange.end,
+        },
+      },
+    );
+
+    const transactions = await this.prisma.transaction.findMany({
+      where: transactionWhere,
+      select: {
+        amount: true,
+      },
+    });
 
     const actualSpend = transactions.reduce(
       (sum, transaction) => sum.plus(new Prisma.Decimal(transaction.amount)),
