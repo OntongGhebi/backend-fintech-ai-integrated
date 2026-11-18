@@ -18,6 +18,7 @@ describe('BudgetRecommendationLifecycleService', () => {
   const budgetId = '22222222-2222-4222-8222-222222222222';
   const categoryId = '33333333-3333-4333-8333-333333333333';
   const childCategoryId = '55555555-5555-4555-8555-555555555555';
+  const grandchildCategoryId = '77777777-7777-4777-8777-777777777777';
   const secondCategoryId = '66666666-6666-4666-8666-666666666666';
   const recommendationId = '44444444-4444-4444-8444-444444444444';
 
@@ -484,7 +485,7 @@ describe('BudgetRecommendationLifecycleService', () => {
       );
     });
 
-    it('uses the CATEGORY_GROUP budget scope when evaluating transactions', async () => {
+    it('evaluates root, child, and grandchild transactions for CATEGORY_GROUP budgets', async () => {
       const budget = sourceBudget({
         scopeType: 'CATEGORY_GROUP',
         scopeCategoryId: categoryId,
@@ -492,19 +493,112 @@ describe('BudgetRecommendationLifecycleService', () => {
         categoryScopes: [],
       });
 
-      setupEvaluation(budget);
+      const scopedCategoryIds = [
+        categoryId,
+        childCategoryId,
+        grandchildCategoryId,
+      ];
 
-      await service.evaluate(userId, recommendationId);
+      const transactions = [
+        {
+          categoryId,
+          amount: new Prisma.Decimal(100000),
+        },
+        {
+          categoryId: childCategoryId,
+          amount: new Prisma.Decimal(200000),
+        },
+        {
+          categoryId: grandchildCategoryId,
+          amount: new Prisma.Decimal(300000),
+        },
+        {
+          categoryId: secondCategoryId,
+          amount: new Prisma.Decimal(900000),
+        },
+      ];
+
+      setupEvaluation(budget, transactions);
+
+      budgetScopeEngine.buildTransactionWhere.mockImplementationOnce(
+        async (_budget: unknown, baseWhere: Record<string, unknown>) => ({
+          ...baseWhere,
+          categoryId: {
+            in: scopedCategoryIds,
+          },
+        }),
+      );
+
+      prisma.transaction.findMany.mockImplementation(async ({ where }: any) => {
+        const allowedCategoryIds = where.categoryId?.in ?? [];
+
+        return transactions.filter((transaction) =>
+          allowedCategoryIds.includes(transaction.categoryId),
+        );
+      });
+
+      const result = await service.evaluate(userId, recommendationId);
 
       expect(budgetScopeEngine.buildTransactionWhere).toHaveBeenCalledWith(
         expect.objectContaining({
+          id: budgetId,
           scopeType: 'CATEGORY_GROUP',
           scopeCategoryId: categoryId,
+          categoryId: null,
         }),
-        expect.any(Object),
+        expect.objectContaining({
+          userId,
+          type: 'EXPENSE',
+          status: 'ACTIVE',
+          currency: 'IDR',
+          deletedAt: null,
+          transactionDate: expect.objectContaining({
+            gte: expect.any(Date),
+            lt: expect.any(Date),
+          }),
+        }),
       );
 
-      expect(prisma.transaction.findMany).toHaveBeenCalled();
+      expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            categoryId: {
+              in: scopedCategoryIds,
+            },
+          }),
+          select: {
+            amount: true,
+          },
+        }),
+      );
+
+      expect(result.status).toBe('EVALUATED');
+      expect(result.evaluationStatus).toBe('WITHIN_ALLOCATION');
+
+      expect(result.evaluation).toMatchObject({
+        actualSpend: '600000',
+        proposedAllocation: '600000',
+        previousAllocation: '500000',
+        variance: '0',
+        utilizationPercentage: 100,
+        transactionCount: 3,
+      });
+
+      expect(prisma.budgetRecommendation.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: recommendationId,
+          },
+          data: expect.objectContaining({
+            status: 'EVALUATED',
+            evaluationStatus: 'WITHIN_ALLOCATION',
+            evaluation: expect.objectContaining({
+              actualSpend: '600000',
+              transactionCount: 3,
+            }),
+          }),
+        }),
+      );
     });
 
     it('uses the CUSTOM budget scope when evaluating transactions', async () => {

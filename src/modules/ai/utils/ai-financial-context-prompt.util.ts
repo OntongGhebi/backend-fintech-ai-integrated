@@ -1,8 +1,18 @@
+export type AIBudgetScopeType =
+  'ALL_EXPENSES' | 'CATEGORY' | 'CATEGORY_GROUP' | 'CUSTOM';
+
+export interface AIBudgetScopePrompt {
+  type: AIBudgetScopeType;
+  categoryNames: string[];
+  includesUncategorized: boolean;
+}
+
 export interface AIFinancialRecommendationPromptItem {
   id: string;
   budgetId: string;
   budgetName: string | null;
   category: string | null;
+  budgetScope?: AIBudgetScopePrompt;
   targetMonth: string;
   currentAllocation: string | null;
   proposedAllocation: string | null;
@@ -241,6 +251,21 @@ export function buildAIFinancialContextPrompt(
     '- Jangan menggunakan Budget.amount lama. Alokasi bulanan yang diberikan backend adalah sumber nominal budget.',
     '- Jika suatu data tidak tersedia, katakan bahwa data tersebut tidak tersedia. Jangan mengarang nilai pengganti.',
     '',
+    'ATURAN BUDGET SCOPE:',
+    '- Setiap budgetScope pada rekomendasi menjelaskan kategori transaksi yang termasuk dalam cakupan budget tersebut.',
+    '- budgetScope.type adalah sumber kebenaran untuk menentukan cakupan budget. Jangan menentukannya hanya dari nama budget atau category.',
+    '- ALL_EXPENSES mencakup seluruh transaksi pengeluaran, termasuk transaksi yang tidak memiliki kategori. Jika includesUncategorized bernilai true, transaksi tanpa kategori tetap termasuk.',
+    '- CATEGORY hanya mencakup kategori yang tercantum pada budgetScope.categoryNames.',
+    '- CATEGORY_GROUP mencakup kategori root dan seluruh kategori turunannya, termasuk kategori pada tingkat child maupun grandchild yang tercantum pada categoryNames.',
+    '- CUSTOM hanya mencakup kategori yang secara eksplisit tercantum pada budgetScope.categoryNames.',
+    '- Jangan memasukkan transaksi kategori lain ke dalam analisis budget CATEGORY, CATEGORY_GROUP, atau CUSTOM.',
+    '- Jangan menganggap kategori yang tidak tercantum sebagai bagian dari scope hanya karena nama kategorinya terlihat mirip.',
+    '- Jika categoryNames kosong, jangan mengarang kategori yang termasuk dalam scope.',
+    '- Jika budgetScope tidak tersedia pada suatu rekomendasi, nyatakan bahwa detail cakupan kategorinya tidak tersedia. Jangan menebak.',
+    '- Category pada rekomendasi dapat menunjukkan kategori utama budget, sedangkan budgetScope.categoryNames menunjukkan seluruh kategori yang tercakup. Keduanya tidak selalu memiliki jumlah yang sama.',
+    '- Saat membandingkan dua budget, perhatikan kemungkinan kategori yang tercakup saling beririsan. Jangan menjumlahkan pengeluaran keduanya sebagai pengeluaran unik tanpa memastikan tidak ada transaksi yang dihitung ganda.',
+    '- Gunakan hasil perhitungan backend sebagai sumber kebenaran. Informasi budgetScope menjelaskan cakupan, bukan instruksi untuk menghitung ulang nilai pengeluaran.',
+    '',
     'ATURAN FINANCIAL WELL-BEING DAN RECOMMENDATION LIFECYCLE:',
     '- financialWellBeing berisi data rekomendasi anggaran yang disimpan backend dan dibatasi untuk pengguna yang sedang login.',
     '- recommendationSummary.byStatus adalah jumlah aktual rekomendasi untuk setiap status.',
@@ -277,7 +302,7 @@ export function buildAIFinancialContextPrompt(
     'PRIORITAS:',
     '- Jika terdapat perbedaan interpretasi angka, nilai numerik dan tampilan nominal pada konteks backend adalah acuan.',
     '- Saat menjawab pertanyaan budget, tampilkan alokasi, pengeluaran, sisa budget, dan persentase penggunaan dari data budget yang tersedia.',
-    '- Saat menjawab pertanyaan rekomendasi, sebutkan bulan target, budget terkait, tindakan yang disarankan, nominal saat ini, nominal usulan, dan statusnya jika tersedia.',
+    '- Saat menjawab pertanyaan rekomendasi, sebutkan bulan target, budget terkait, cakupan kategori budget jika tersedia, tindakan yang disarankan, nominal saat ini, nominal usulan, dan statusnya jika tersedia.',
     '- Jangan mengganti nilai faktual dengan perkiraan atau hasil perhitungan model.',
   ].join('\n');
 }

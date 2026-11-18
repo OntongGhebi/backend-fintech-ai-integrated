@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../../../database/prisma/prisma.service';
-import { BudgetScopeEngine } from '../../budgets/budget-scope.engine';
+import {
+  BudgetScopeDescriptor,
+  BudgetScopeEngine,
+} from '../../budgets/budget-scope.engine';
 
 import { AIFinancialContextService } from './ai-financial-context.service';
 
@@ -35,6 +38,12 @@ interface RecommendationRecord {
     category: {
       name: string;
     } | null;
+    scopeType: BudgetScopeDescriptor['scopeType'];
+    scopeCategoryId: string | null;
+    categoryId: string | null;
+    categoryScopes: Array<{
+      categoryId: string;
+    }>;
   };
 }
 
@@ -60,6 +69,11 @@ interface RecommendationDelegate {
   }): Promise<RecommendationStatusGroup[]>;
 }
 
+interface ResolvedRecommendationScope {
+  item: RecommendationRecord;
+  categoryIds: string[] | null;
+}
+
 const RECOMMENDATION_STATUSES: RecommendationStatus[] = [
   'PENDING',
   'ACCEPTED',
@@ -81,7 +95,7 @@ export class AIChatFinancialContextService extends AIFinancialContextService {
 
   constructor(
     private readonly recommendationPrisma: PrismaService,
-    budgetScopeEngine: BudgetScopeEngine,
+    private readonly budgetScopeEngine: BudgetScopeEngine,
   ) {
     super(recommendationPrisma, budgetScopeEngine);
   }
@@ -127,6 +141,14 @@ export class AIChatFinancialContextService extends AIFinancialContextService {
                     name: true,
                   },
                 },
+                scopeType: true,
+                scopeCategoryId: true,
+                categoryId: true,
+                categoryScopes: {
+                  select: {
+                    categoryId: true,
+                  },
+                },
               },
             },
           },
@@ -134,11 +156,57 @@ export class AIChatFinancialContextService extends AIFinancialContextService {
       ],
     );
 
-    const statusCounts = this.buildStatusCounts(statusGroups);
-
-    const mappedRecommendations = recommendations.map((item) =>
-      this.mapRecommendation(item),
+    const resolvedScopes: ResolvedRecommendationScope[] = await Promise.all(
+      recommendations.map(async (item) => ({
+        item,
+        categoryIds: await this.budgetScopeEngine.resolveCategoryIds({
+          scopeType: item.budget.scopeType,
+          scopeCategoryId: item.budget.scopeCategoryId,
+          categoryId: item.budget.categoryId,
+          categoryScopes: item.budget.categoryScopes,
+        }),
+      })),
     );
+
+    const uniqueCategoryIds = [
+      ...new Set(
+        resolvedScopes.flatMap(({ categoryIds }) => categoryIds ?? []),
+      ),
+    ];
+
+    const categories =
+      uniqueCategoryIds.length > 0
+        ? await this.recommendationPrisma.category.findMany({
+            where: {
+              id: {
+                in: uniqueCategoryIds,
+              },
+            },
+            select: {
+              id: true,
+              name: true,
+            },
+          })
+        : [];
+
+    const categoryNamesById = new Map(
+      categories.map((category) => [category.id, category.name]),
+    );
+
+    const mappedRecommendations = resolvedScopes.map(({ item, categoryIds }) =>
+      this.mapRecommendation(item, {
+        type: item.budget.scopeType,
+        categoryNames:
+          categoryIds === null
+            ? []
+            : categoryIds
+                .map((categoryId) => categoryNamesById.get(categoryId))
+                .filter((name): name is string => Boolean(name)),
+        includesUncategorized: categoryIds === null,
+      }),
+    );
+
+    const statusCounts = this.buildStatusCounts(statusGroups);
 
     const actionCenter = mappedRecommendations
       .filter((item) => ACTION_CENTER_STATUSES.has(item.status))
@@ -187,12 +255,20 @@ export class AIChatFinancialContextService extends AIFinancialContextService {
     return counts;
   }
 
-  private mapRecommendation(item: RecommendationRecord) {
+  private mapRecommendation(
+    item: RecommendationRecord,
+    budgetScope: {
+      type: BudgetScopeDescriptor['scopeType'];
+      categoryNames: string[];
+      includesUncategorized: boolean;
+    },
+  ) {
     return {
       id: item.id,
       budgetId: item.budgetId,
       budgetName: item.budget?.name ?? null,
       category: item.budget?.category?.name ?? null,
+      budgetScope,
       targetMonth: this.formatMonth(item.targetMonth),
       currentAllocation: this.toNullableDecimalString(item.currentAllocation),
       proposedAllocation: this.toNullableDecimalString(item.proposedAllocation),

@@ -1,6 +1,7 @@
 import {
   buildAIFinancialContextPrompt,
   formatFinancialAmount,
+  type AIFinancialRecommendationPromptItem,
 } from './ai-financial-context-prompt.util';
 
 describe('formatFinancialAmount', () => {
@@ -84,6 +85,57 @@ describe('buildAIFinancialContextPrompt', () => {
     ],
   };
 
+  const createRecommendation = (
+    budgetScope: AIFinancialRecommendationPromptItem['budgetScope'],
+  ): AIFinancialRecommendationPromptItem => ({
+    id: 'recommendation-1',
+    budgetId: 'budget-1',
+    budgetName: 'Food Budget',
+    category: 'Food',
+    budgetScope,
+    targetMonth: '2026-12',
+    currentAllocation: '150000.00',
+    proposedAllocation: '200000.00',
+    changeAmount: '50000.00',
+    changePercentage: '33.33',
+    action: 'INCREASE',
+    status: 'PENDING',
+    reason: 'Pengeluaran aktual membutuhkan penyesuaian alokasi.',
+    guardrails: ['MAX_ALLOCATION_LIMIT'],
+    aiExplanation: 'Penyesuaian berdasarkan riwayat pengeluaran.',
+    deferredUntil: null,
+    rejectionReason: null,
+    appliedAt: null,
+    evaluatedAt: null,
+    evaluationStatus: null,
+    evaluation: null,
+    createdAt: '2026-11-18T10:00:00.000Z',
+  });
+
+  const createContextWithRecommendation = (
+    recommendation: AIFinancialRecommendationPromptItem,
+  ) => ({
+    ...context,
+    financialWellBeing: {
+      generatedAt: '2026-11-18T10:00:00.000Z',
+      recommendationSummary: {
+        total: 1,
+        byStatus: {
+          PENDING: 1,
+          ACCEPTED: 0,
+          REJECTED: 0,
+          DEFERRED: 0,
+          APPLIED: 0,
+          EVALUATED: 0,
+        },
+        returnedRecommendationCount: 1,
+        isTruncated: false,
+      },
+      actionCenter: [recommendation],
+      recentRecommendations: [recommendation],
+    },
+  });
+
   it('should include the original financial context JSON', () => {
     const prompt = buildAIFinancialContextPrompt(context);
 
@@ -121,6 +173,119 @@ describe('buildAIFinancialContextPrompt', () => {
     );
     expect(prompt).toContain(
       'Jangan mengganti nilai faktual dengan perkiraan atau hasil perhitungan model.',
+    );
+  });
+
+  it('should explain ALL_EXPENSES includes uncategorized transactions', () => {
+    const recommendation = createRecommendation({
+      type: 'ALL_EXPENSES',
+      categoryNames: [],
+      includesUncategorized: true,
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"type":"ALL_EXPENSES"');
+    expect(prompt).toContain('"includesUncategorized":true');
+    expect(prompt).toContain(
+      'ALL_EXPENSES mencakup seluruh transaksi pengeluaran, termasuk transaksi yang tidak memiliki kategori.',
+    );
+  });
+
+  it('should explain CATEGORY only includes its explicitly resolved category', () => {
+    const recommendation = createRecommendation({
+      type: 'CATEGORY',
+      categoryNames: ['Food'],
+      includesUncategorized: false,
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"type":"CATEGORY"');
+    expect(prompt).toContain('"categoryNames":["Food"]');
+    expect(prompt).toContain(
+      'CATEGORY hanya mencakup kategori yang tercantum pada budgetScope.categoryNames.',
+    );
+  });
+
+  it('should explain CATEGORY_GROUP includes root and nested categories', () => {
+    const recommendation = createRecommendation({
+      type: 'CATEGORY_GROUP',
+      categoryNames: ['Food', 'Groceries', 'Restaurants', 'Drinks'],
+      includesUncategorized: false,
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"type":"CATEGORY_GROUP"');
+    expect(prompt).toContain(
+      '"categoryNames":["Food","Groceries","Restaurants","Drinks"]',
+    );
+    expect(prompt).toContain(
+      'CATEGORY_GROUP mencakup kategori root dan seluruh kategori turunannya, termasuk kategori pada tingkat child maupun grandchild yang tercantum pada categoryNames.',
+    );
+  });
+
+  it('should explain CUSTOM only includes explicitly configured categories', () => {
+    const recommendation = createRecommendation({
+      type: 'CUSTOM',
+      categoryNames: ['Food', 'Transportation'],
+      includesUncategorized: false,
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"type":"CUSTOM"');
+    expect(prompt).toContain('"categoryNames":["Food","Transportation"]');
+    expect(prompt).toContain(
+      'CUSTOM hanya mencakup kategori yang secara eksplisit tercantum pada budgetScope.categoryNames.',
+    );
+  });
+
+  it('should not infer scope categories when budgetScope is unavailable', () => {
+    const recommendation = createRecommendation(undefined);
+    delete recommendation.budgetScope;
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain(
+      'Jika budgetScope tidak tersedia pada suatu rekomendasi, nyatakan bahwa detail cakupan kategorinya tidak tersedia.',
+    );
+  });
+
+  it('should preserve recommendation amount display values with budget scope', () => {
+    const recommendation = createRecommendation({
+      type: 'CATEGORY_GROUP',
+      categoryNames: ['Food', 'Groceries'],
+      includesUncategorized: false,
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"currentAllocation":"150000.00"');
+    expect(prompt).toContain('"currentAllocationDisplay":"Rp150.000"');
+    expect(prompt).toContain('"proposedAllocation":"200000.00"');
+    expect(prompt).toContain('"proposedAllocationDisplay":"Rp200.000"');
+    expect(prompt).toContain('"changeAmountDisplay":"Rp50.000"');
+  });
+
+  it('should warn against double-counting overlapping budget scopes', () => {
+    const prompt = buildAIFinancialContextPrompt(context);
+
+    expect(prompt).toContain(
+      'Jangan menjumlahkan pengeluaran keduanya sebagai pengeluaran unik tanpa memastikan tidak ada transaksi yang dihitung ganda.',
     );
   });
 });
