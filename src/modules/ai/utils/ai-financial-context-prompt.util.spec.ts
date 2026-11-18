@@ -87,6 +87,7 @@ describe('buildAIFinancialContextPrompt', () => {
 
   const createRecommendation = (
     budgetScope: AIFinancialRecommendationPromptItem['budgetScope'],
+    overrides: Partial<AIFinancialRecommendationPromptItem> = {},
   ): AIFinancialRecommendationPromptItem => ({
     id: 'recommendation-1',
     budgetId: 'budget-1',
@@ -110,6 +111,7 @@ describe('buildAIFinancialContextPrompt', () => {
     evaluationStatus: null,
     evaluation: null,
     createdAt: '2026-11-18T10:00:00.000Z',
+    ...overrides,
   });
 
   const createContextWithRecommendation = (
@@ -279,6 +281,131 @@ describe('buildAIFinancialContextPrompt', () => {
     expect(prompt).toContain('"proposedAllocation":"200000.00"');
     expect(prompt).toContain('"proposedAllocationDisplay":"Rp200.000"');
     expect(prompt).toContain('"changeAmountDisplay":"Rp50.000"');
+    expect(prompt).toContain('"allocationChangeState":"INCREASED"');
+  });
+
+  it('should identify MAINTAIN recommendations with unchanged allocations', () => {
+    const recommendation = createRecommendation(undefined, {
+      currentAllocation: '150000.00',
+      proposedAllocation: '150000.00',
+      changeAmount: '0.00',
+      changePercentage: '0.00',
+      action: 'MAINTAIN',
+      reason: 'Alokasi saat ini masih sesuai dengan kebutuhan pengeluaran.',
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"action":"MAINTAIN"');
+    expect(prompt).toContain('"currentAllocation":"150000.00"');
+    expect(prompt).toContain('"proposedAllocation":"150000.00"');
+    expect(prompt).toContain('"changeAmount":"0.00"');
+    expect(prompt).toContain('"allocationChangeState":"UNCHANGED"');
+    expect(prompt).toContain(
+      'Untuk action MAINTAIN dengan allocationChangeState UNCHANGED, jelaskan bahwa alokasi dipertahankan pada nominal yang sama.',
+    );
+    expect(prompt).toContain(
+      'Untuk MAINTAIN dengan nominal yang sama, sampaikan secara eksplisit bahwa alokasi tetap dan jelaskan alasannya berdasarkan data backend.',
+    );
+  });
+
+  it('should identify unchanged allocations for large monetary values precisely', () => {
+    const recommendation = createRecommendation(undefined, {
+      currentAllocation: '9007199254740993.00',
+      proposedAllocation: '9007199254740993.00',
+      changeAmount: '0.00',
+      changePercentage: '0.00',
+      action: 'MAINTAIN',
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"allocationChangeState":"UNCHANGED"');
+  });
+
+  it('should identify a one-cent allocation increase precisely', () => {
+    const recommendation = createRecommendation(undefined, {
+      currentAllocation: '150000.00',
+      proposedAllocation: '150000.01',
+      changeAmount: '0.01',
+      changePercentage: '0.00',
+      action: 'INCREASE',
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"allocationChangeState":"INCREASED"');
+  });
+
+  it('should flag inconsistent MAINTAIN action when allocations differ', () => {
+    const recommendation = createRecommendation(undefined, {
+      currentAllocation: '150000.00',
+      proposedAllocation: '200000.00',
+      changeAmount: '50000.00',
+      action: 'MAINTAIN',
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"action":"MAINTAIN"');
+    expect(prompt).toContain('"allocationChangeState":"INCREASED"');
+    expect(prompt).toContain(
+      'Jika action MAINTAIN tetapi allocationChangeState bukan UNCHANGED, jangan menyatakan bahwa nominalnya sama.',
+    );
+  });
+
+  it('should identify decreased allocations precisely', () => {
+    const recommendation = createRecommendation(undefined, {
+      currentAllocation: '200000.00',
+      proposedAllocation: '150000.00',
+      changeAmount: '-50000.00',
+      action: 'DECREASE',
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"allocationChangeState":"DECREASED"');
+  });
+
+  it('should mark allocation comparison unavailable when an amount is missing', () => {
+    const recommendation = createRecommendation(undefined, {
+      currentAllocation: null,
+      proposedAllocation: '150000.00',
+      action: 'MAINTAIN',
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"allocationChangeState":"UNAVAILABLE"');
+    expect(prompt).toContain(
+      'Jika allocationChangeState UNAVAILABLE, jangan menyimpulkan apakah alokasi berubah atau tetap.',
+    );
+  });
+
+  it('should mark allocation comparison unavailable when an amount is invalid', () => {
+    const recommendation = createRecommendation(undefined, {
+      currentAllocation: 'invalid',
+      proposedAllocation: '150000.00',
+      action: 'MAINTAIN',
+    });
+
+    const prompt = buildAIFinancialContextPrompt(
+      createContextWithRecommendation(recommendation),
+    );
+
+    expect(prompt).toContain('"allocationChangeState":"UNAVAILABLE"');
   });
 
   it('should warn against double-counting overlapping budget scopes', () => {

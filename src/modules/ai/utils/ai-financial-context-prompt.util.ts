@@ -90,6 +90,57 @@ export interface AIFinancialContextPromptInput {
   };
 }
 
+type AllocationChangeState =
+  'UNCHANGED' | 'INCREASED' | 'DECREASED' | 'UNAVAILABLE';
+
+/**
+ * Parses a decimal monetary string into its smallest supported unit.
+ *
+ * BigInt is used to avoid floating-point precision errors.
+ * The supported input format allows up to two decimal places.
+ */
+function parseFinancialAmountToMinorUnits(
+  amount: string | null,
+): bigint | null {
+  if (amount === null) {
+    return null;
+  }
+
+  const normalized = amount.trim();
+  const match = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(normalized);
+
+  if (!match) {
+    return null;
+  }
+
+  const sign = match[1] === '-' ? -1n : 1n;
+  const whole = BigInt(match[2]);
+  const fraction = BigInt((match[3] ?? '').padEnd(2, '0'));
+
+  return sign * (whole * 100n + fraction);
+}
+
+/**
+ * Compares current and proposed allocations without floating-point math.
+ */
+function getAllocationChangeState(
+  currentAllocation: string | null,
+  proposedAllocation: string | null,
+): AllocationChangeState {
+  const current = parseFinancialAmountToMinorUnits(currentAllocation);
+  const proposed = parseFinancialAmountToMinorUnits(proposedAllocation);
+
+  if (current === null || proposed === null) {
+    return 'UNAVAILABLE';
+  }
+
+  if (proposed === current) {
+    return 'UNCHANGED';
+  }
+
+  return proposed > current ? 'INCREASED' : 'DECREASED';
+}
+
 /**
  * Formats a decimal monetary string without converting it to JavaScript
  * floating-point numbers.
@@ -120,7 +171,6 @@ export function formatFinancialAmount(
 
   if (currency.toUpperCase() === 'IDR') {
     const decimalPart = fraction === '00' ? '' : `,${fraction}`;
-
     return `${sign}Rp${formattedWhole}${decimalPart}`;
   }
 
@@ -154,6 +204,10 @@ function mapRecommendationForPrompt(
       recommendation.changeAmount,
       currency,
     ),
+    allocationChangeState: getAllocationChangeState(
+      recommendation.currentAllocation,
+      recommendation.proposedAllocation,
+    ),
   };
 }
 
@@ -169,65 +223,53 @@ export function buildAIFinancialContextPrompt(
 ): string {
   const canonicalFacts = {
     currency: context.currency,
-
     budgets: context.budgets.map((budget) => ({
       id: budget.id,
       name: budget.name,
       currency: budget.currency,
-
       limit: budget.limit,
       limitDisplay: formatFinancialAmount(budget.limit, budget.currency),
-
       spent: budget.spent,
       spentDisplay: formatFinancialAmount(budget.spent, budget.currency),
-
       remaining: budget.remaining,
       remainingDisplay: formatFinancialAmount(
         budget.remaining,
         budget.currency,
       ),
-
       usagePercentage: budget.usagePercentage,
       period: budget.period,
       periodStart: budget.periodStart,
       startDate: budget.startDate,
       endDate: budget.endDate,
     })),
-
     recentTransactions: context.recentTransactions.map((transaction) => ({
       id: transaction.id,
       type: transaction.type,
-
       amount: transaction.amount,
       amountDisplay: formatFinancialAmount(
         transaction.amount,
         transaction.currency,
       ),
-
       currency: transaction.currency,
       description: transaction.description,
       transactionDate: transaction.transactionDate,
       category: transaction.category,
       account: transaction.account,
     })),
-
     expensesByCategory: context.expensesByCategory.map((item) => ({
       category: item.category,
       amount: item.amount,
       amountDisplay: formatFinancialAmount(item.amount, context.currency),
     })),
-
     financialWellBeing: context.financialWellBeing
       ? {
           generatedAt: context.financialWellBeing.generatedAt,
           recommendationSummary:
             context.financialWellBeing.recommendationSummary,
-
           actionCenter: context.financialWellBeing.actionCenter.map(
             (recommendation) =>
               mapRecommendationForPrompt(recommendation, context.currency),
           ),
-
           recentRecommendations:
             context.financialWellBeing.recentRecommendations.map(
               (recommendation) =>
@@ -273,6 +315,20 @@ export function buildAIFinancialContextPrompt(
     '- actionCenter berisi rekomendasi berstatus PENDING, ACCEPTED, atau DEFERRED yang masih relevan untuk ditindaklanjuti.',
     '- INCREASE berarti backend menyarankan kenaikan alokasi. DECREASE berarti backend menyarankan penurunan alokasi.',
     '- MAINTAIN berarti alokasi saat ini disarankan tetap. REVIEW berarti data atau kondisi belum cukup aman untuk perubahan otomatis.',
+    '- allocationChangeState adalah hasil perbandingan nominal currentAllocation dan proposedAllocation yang dihitung backend secara presisi.',
+    '- allocationChangeState bernilai UNCHANGED jika nominal alokasi saat ini dan usulan sama persis.',
+    '- allocationChangeState bernilai INCREASED jika nominal usulan lebih besar daripada nominal saat ini.',
+    '- allocationChangeState bernilai DECREASED jika nominal usulan lebih kecil daripada nominal saat ini.',
+    '- allocationChangeState bernilai UNAVAILABLE jika salah satu nominal tidak tersedia atau tidak dapat dibandingkan.',
+    '- Untuk action MAINTAIN dengan allocationChangeState UNCHANGED, jelaskan bahwa alokasi dipertahankan pada nominal yang sama. Tegaskan bahwa tidak ada kenaikan maupun penurunan.',
+    '- Untuk rekomendasi MAINTAIN yang nominalnya tidak berubah, jangan menyebut proposedAllocation sebagai kenaikan, penambahan, penurunan, penghematan nominal, atau perubahan alokasi.',
+    '- Jelaskan alasan mempertahankan alokasi berdasarkan reason, guardrails, aiExplanation, serta data pengeluaran yang tersedia. Jangan mengarang alasan yang tidak didukung data.',
+    '- Jika action MAINTAIN tetapi allocationChangeState bukan UNCHANGED, jangan menyatakan bahwa nominalnya sama. Jelaskan bahwa terdapat ketidaksesuaian antara tindakan rekomendasi dan nominal alokasinya.',
+    '- Jika action INCREASE tetapi allocationChangeState bukan INCREASED, atau action DECREASE tetapi allocationChangeState bukan DECREASED, jangan mengarang arah perubahan. Jelaskan ketidaksesuaian data tersebut.',
+    '- Jika allocationChangeState UNAVAILABLE, jangan menyimpulkan apakah alokasi berubah atau tetap.',
+    '- Jangan menghitung ulang allocationChangeState dari nominal menggunakan perkiraan. Gunakan nilai yang diberikan backend.',
+    '- Jika changeAmount bernilai nol dan allocationChangeState UNCHANGED, jelaskan perubahan nominal sebagai Rp0 atau tidak ada perubahan sesuai mata uang yang digunakan.',
+    '- Pembedaan action dan allocationChangeState wajib dipertahankan: action menjelaskan keputusan rekomendasi backend, sedangkan allocationChangeState menjelaskan perbandingan nominal aktual.',
     '- PENDING berarti rekomendasi belum diputuskan pengguna.',
     '- ACCEPTED berarti pengguna menyetujui rekomendasi, tetapi alokasi belum tentu sudah diterapkan.',
     '- REJECTED berarti pengguna menolak rekomendasi.',
@@ -302,7 +358,8 @@ export function buildAIFinancialContextPrompt(
     'PRIORITAS:',
     '- Jika terdapat perbedaan interpretasi angka, nilai numerik dan tampilan nominal pada konteks backend adalah acuan.',
     '- Saat menjawab pertanyaan budget, tampilkan alokasi, pengeluaran, sisa budget, dan persentase penggunaan dari data budget yang tersedia.',
-    '- Saat menjawab pertanyaan rekomendasi, sebutkan bulan target, budget terkait, cakupan kategori budget jika tersedia, tindakan yang disarankan, nominal saat ini, nominal usulan, dan statusnya jika tersedia.',
+    '- Saat menjawab pertanyaan rekomendasi, sebutkan bulan target, budget terkait, cakupan kategori budget jika tersedia, tindakan yang disarankan, nominal saat ini, nominal usulan, perbandingan perubahan nominal, dan statusnya jika tersedia.',
+    '- Untuk MAINTAIN dengan nominal yang sama, sampaikan secara eksplisit bahwa alokasi tetap dan jelaskan alasannya berdasarkan data backend.',
     '- Jangan mengganti nilai faktual dengan perkiraan atau hasil perhitungan model.',
   ].join('\n');
 }

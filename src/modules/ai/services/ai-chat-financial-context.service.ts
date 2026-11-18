@@ -95,9 +95,9 @@ export class AIChatFinancialContextService extends AIFinancialContextService {
 
   constructor(
     private readonly recommendationPrisma: PrismaService,
-    private readonly budgetScopeEngine: BudgetScopeEngine,
+    private readonly recommendationBudgetScopeEngine: BudgetScopeEngine,
   ) {
-    super(recommendationPrisma, budgetScopeEngine);
+    super(recommendationPrisma, recommendationBudgetScopeEngine);
   }
 
   async getContext(userId: string) {
@@ -159,12 +159,13 @@ export class AIChatFinancialContextService extends AIFinancialContextService {
     const resolvedScopes: ResolvedRecommendationScope[] = await Promise.all(
       recommendations.map(async (item) => ({
         item,
-        categoryIds: await this.budgetScopeEngine.resolveCategoryIds({
-          scopeType: item.budget.scopeType,
-          scopeCategoryId: item.budget.scopeCategoryId,
-          categoryId: item.budget.categoryId,
-          categoryScopes: item.budget.categoryScopes,
-        }),
+        categoryIds:
+          await this.recommendationBudgetScopeEngine.resolveCategoryIds({
+            scopeType: item.budget.scopeType,
+            scopeCategoryId: item.budget.scopeCategoryId,
+            categoryId: item.budget.categoryId,
+            categoryScopes: item.budget.categoryScopes,
+          }),
       })),
     );
 
