@@ -24,7 +24,7 @@ export class BudgetScopeEngine {
    * - string[]: transactions must belong to one of these categories.
    *
    * Historical continuity:
-   * - CATEGORY_GROUP includes archived children.
+   * - CATEGORY_GROUP includes all descendants, including archived categories.
    * - CUSTOM uses stored scope references without checking category status.
    */
   async resolveCategoryIds(
@@ -47,19 +47,7 @@ export class BudgetScopeEngine {
           return [];
         }
 
-        const children = await this.prisma.category.findMany({
-          where: {
-            parentId: rootCategoryId,
-          },
-          select: {
-            id: true,
-          },
-          orderBy: {
-            id: 'asc',
-          },
-        });
-
-        return [rootCategoryId, ...children.map((category) => category.id)];
+        return this.resolveDescendantCategoryIds(rootCategoryId);
       }
 
       case BudgetScopeType.CUSTOM: {
@@ -72,11 +60,71 @@ export class BudgetScopeEngine {
 
       default: {
         const exhaustiveCheck: never = budget.scopeType;
+
         throw new Error(
           `Unsupported budget scope type: ${String(exhaustiveCheck)}`,
         );
       }
     }
+  }
+
+  /**
+   * Resolves a category root and every descendant in its hierarchy.
+   *
+   * Uses breadth-first traversal:
+   * 1. Start with the root category.
+   * 2. Find children belonging to the current level.
+   * 3. Continue with those children as the next level.
+   * 4. Stop when no additional descendants are found.
+   *
+   * A visited set prevents duplicate IDs and protects against cyclic
+   * references if inconsistent hierarchy data is encountered.
+   *
+   * Archived categories are intentionally included to preserve historical
+   * budget scope behavior.
+   */
+  private async resolveDescendantCategoryIds(
+    rootCategoryId: string,
+  ): Promise<string[]> {
+    const visited = new Set<string>([rootCategoryId]);
+
+    let currentLevel = [rootCategoryId];
+
+    while (currentLevel.length > 0) {
+      const children = await this.prisma.category.findMany({
+        where: {
+          parentId: {
+            in: currentLevel,
+          },
+        },
+        select: {
+          id: true,
+        },
+        orderBy: {
+          id: 'asc',
+        },
+      });
+
+      const nextLevel: string[] = [];
+
+      for (const child of children) {
+        if (visited.has(child.id)) {
+          continue;
+        }
+
+        visited.add(child.id);
+        nextLevel.push(child.id);
+      }
+
+      currentLevel = nextLevel;
+    }
+
+    return [
+      rootCategoryId,
+      ...Array.from(visited)
+        .filter((categoryId) => categoryId !== rootCategoryId)
+        .sort(),
+    ];
   }
 
   /**
@@ -107,8 +155,6 @@ export class BudgetScopeEngine {
 
   /**
    * Resolves multiple budgets without changing their individual scopes.
-   * Useful when a consumer needs the union of category IDs for a single
-   * grouped transaction query.
    *
    * If any budget uses ALL_EXPENSES, the union represents all categories
    * and must not be restricted by categoryId.
