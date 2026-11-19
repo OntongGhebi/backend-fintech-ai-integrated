@@ -78,4 +78,13 @@ describe('sanitizeAIChatResponse', () => {
   it('should return an empty string for empty provider content', () => {
     expect(sanitizeAIChatResponse('   ')).toBe('');
   });
+
+  it('should return an empty string for an empty markdown code block', () => {
+    expect(sanitizeAIChatResponse('markdown\n')).toBe('');
+  });
+
+  it('should return an empty string for formatting-only provider content', () => {
+    expect(sanitizeAIChatResponse('**__~~``````')).toBe('');
+    expect(sanitizeAIChatResponse('<p></p>')).toBe('');
+  });
 });

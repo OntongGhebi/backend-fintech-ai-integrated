@@ -192,6 +192,18 @@ describe('AIChatService - Budget Scope Integration', () => {
     getContext: jest.fn(),
   };
 
+  const getSystemPrompt = (): string => {
+    const request = aiServiceMock.complete.mock.calls[0][0];
+
+    const systemMessage = request.messages.find(
+      (message: { role: string }) => message.role === 'system',
+    );
+
+    expect(systemMessage).toBeDefined();
+
+    return systemMessage.content as string;
+  };
+
   beforeEach(async () => {
     jest.resetAllMocks();
 
@@ -262,15 +274,7 @@ describe('AIChatService - Budget Scope Integration', () => {
 
     expect(aiServiceMock.complete).toHaveBeenCalledTimes(1);
 
-    const request = aiServiceMock.complete.mock.calls[0][0];
-
-    const systemMessage = request.messages.find(
-      (message: { role: string }) => message.role === 'system',
-    );
-
-    expect(systemMessage).toBeDefined();
-
-    const prompt = systemMessage.content as string;
+    const prompt = getSystemPrompt();
 
     expect(prompt).toContain('"type":"ALL_EXPENSES"');
     expect(prompt).toContain('"type":"CATEGORY"');
@@ -289,19 +293,86 @@ describe('AIChatService - Budget Scope Integration', () => {
       'Jelaskan rekomendasi anggaran bulan depan.',
     );
 
-    const request = aiServiceMock.complete.mock.calls[0][0];
-
-    const systemMessage = request.messages.find(
-      (message: { role: string }) => message.role === 'system',
-    );
-
-    const prompt = systemMessage.content as string;
+    const prompt = getSystemPrompt();
 
     expect(prompt).toContain('"targetMonth":"2026-12"');
     expect(prompt).toContain('"currentAllocation":"500000.00"');
     expect(prompt).toContain('"proposedAllocation":"450000.00"');
     expect(prompt).toContain('"status":"PENDING"');
     expect(prompt).toContain('"action":"DECREASE"');
+  });
+
+  it('should preserve MAINTAIN recommendation with unchanged allocation', async () => {
+    await service.sendMessage(
+      userId,
+      conversationId,
+      'Mengapa alokasi Internet tidak berubah?',
+    );
+
+    const prompt = getSystemPrompt();
+
+    expect(prompt).toContain('"id":"recommendation-custom"');
+    expect(prompt).toContain('"action":"MAINTAIN"');
+
+    expect(prompt).toContain('"currentAllocation":"200000.00"');
+    expect(prompt).toContain('"proposedAllocation":"200000.00"');
+
+    expect(prompt).toContain('"currentAllocationDisplay":"Rp200.000"');
+    expect(prompt).toContain('"proposedAllocationDisplay":"Rp200.000"');
+
+    expect(prompt).toContain('"changeAmount":"0.00"');
+    expect(prompt).toContain('"changeAmountDisplay":"Rp0"');
+
+    expect(prompt).toContain('"changePercentage":"0.00"');
+    expect(prompt).toContain('"reason":"Alokasi tetap dipertahankan."');
+
+    expect(prompt).toContain(
+      'MAINTAIN berarti alokasi saat ini disarankan tetap.',
+    );
+  });
+
+  it('should preserve zero allocation change without converting it into an increase or decrease', async () => {
+    await service.sendMessage(
+      userId,
+      conversationId,
+      'Apakah ada perubahan pada anggaran Internet?',
+    );
+
+    const prompt = getSystemPrompt();
+
+    expect(prompt).toContain('"action":"MAINTAIN"');
+    expect(prompt).toContain('"currentAllocation":"200000.00"');
+    expect(prompt).toContain('"proposedAllocation":"200000.00"');
+    expect(prompt).toContain('"changeAmount":"0.00"');
+    expect(prompt).toContain('"changePercentage":"0.00"');
+
+    expect(prompt).toContain(
+      'MAINTAIN berarti alokasi saat ini disarankan tetap.',
+    );
+  });
+
+  it('should preserve INCREASE and DECREASE actions with their allocation values', async () => {
+    await service.sendMessage(
+      userId,
+      conversationId,
+      'Bandingkan rekomendasi kenaikan dan penurunan anggaran.',
+    );
+
+    const prompt = getSystemPrompt();
+
+    // INCREASE recommendation
+    expect(prompt).toContain('"id":"recommendation-all"');
+    expect(prompt).toContain('"action":"INCREASE"');
+    expect(prompt).toContain('"currentAllocation":"1000000.00"');
+    expect(prompt).toContain('"proposedAllocation":"1100000.00"');
+    expect(prompt).toContain('"changeAmount":"100000.00"');
+
+    // DECREASE recommendation
+    expect(prompt).toContain('"id":"recommendation-category"');
+    expect(prompt).toContain('"action":"DECREASE"');
+    expect(prompt).toContain('"currentAllocation":"500000.00"');
+    expect(prompt).toContain('"proposedAllocation":"450000.00"');
+    expect(prompt).toContain('"changeAmount":"-50000.00"');
   });
 
   it('should retain the AI chat usage feature and user identity', async () => {

@@ -86,7 +86,7 @@ export class AIChatService {
 
     if (key.length < 8 || key.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(key)) {
       throw new BadRequestException(
-        'Idempotency-Key must be 8–128 characters and contain only letters, numbers, ".", "_", ":" or "-".',
+        'Idempotency-Key must be 8–128 characters and contain only letters, numbers, ".", "_" , ":" or "-".',
       );
     }
 
@@ -252,6 +252,13 @@ export class AIChatService {
     // Normalize every assistant response before returning or persisting it.
     // The same normalized content is used by regular and idempotent requests.
     const assistantContent = sanitizeAIChatResponse(completion.content);
+
+    // Never persist or return an empty assistant response.
+    if (!assistantContent) {
+      throw new ServiceUnavailableException(
+        'AI provider returned an empty response.',
+      );
+    }
 
     if (idempotencyRequestId) {
       return this.aiConversationService.addIdempotentAssistantMessageAndCompleteRequest(

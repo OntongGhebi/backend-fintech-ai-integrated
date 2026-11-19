@@ -159,7 +159,7 @@ function decodeHtmlEntities(value: string): string {
 export function sanitizeAIChatResponse(content: string): string {
   let normalized = content.trim();
 
-  if (!normalized) {
+  if (!normalized || /^markdown\s*$/i.test(normalized)) {
     return '';
   }
 
@@ -194,5 +194,7 @@ export function sanitizeAIChatResponse(content: string): string {
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
 
-  return normalized || content.trim();
+  // Jangan mengembalikan konten asli ketika sanitasi menghasilkan string kosong.
+  // Konten seperti blok Markdown kosong harus ditolak oleh validasi AIChatService.
+  return normalized;
 }
