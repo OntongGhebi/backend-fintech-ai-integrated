@@ -10,15 +10,18 @@ import { FinancialInsightsService } from './financial-insights.service';
 import { BudgetRecommendationsService } from './budget-recommendations.service';
 import { BudgetRecommendationLifecycleService } from './budget-recommendation-lifecycle.service';
 import { FinancialWellBeingService } from './financial-well-being.service';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { BudgetRecommendationNotificationService } from './budget-recommendation-notification.service';
 
 @Module({
-  imports: [DashboardModule, AIModule, BudgetsModule],
+  imports: [DashboardModule, AIModule, BudgetsModule, NotificationsModule],
   controllers: [FinancialAnalysisController],
   providers: [
     FinancialAnalysisService,
     FinancialInsightsService,
     BudgetRecommendationsService,
     BudgetRecommendationLifecycleService,
+    BudgetRecommendationNotificationService,
     FinancialWellBeingService,
   ],
   exports: [
@@ -26,6 +29,7 @@ import { FinancialWellBeingService } from './financial-well-being.service';
     FinancialInsightsService,
     BudgetRecommendationsService,
     BudgetRecommendationLifecycleService,
+    BudgetRecommendationNotificationService,
     FinancialWellBeingService,
   ],
 })

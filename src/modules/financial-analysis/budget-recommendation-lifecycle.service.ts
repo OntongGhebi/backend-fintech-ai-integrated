@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 
@@ -10,6 +11,8 @@ import { PrismaService } from 'src/database/prisma/prisma.service';
 
 import { BudgetScopeEngine } from '../budgets/budget-scope.engine';
 import { getBudgetMonthRange } from '../budgets/utils/budget-month.util';
+
+import { BudgetRecommendationNotificationService } from './budget-recommendation-notification.service';
 
 import type {
   BudgetRecommendation,
@@ -28,9 +31,14 @@ interface LifecycleOptions {
 export class BudgetRecommendationLifecycleService {
   private static readonly DEFAULT_TIMEZONE = 'Asia/Jakarta';
 
+  private readonly logger = new Logger(
+    BudgetRecommendationLifecycleService.name,
+  );
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly budgetScopeEngine: BudgetScopeEngine,
+    private readonly recommendationNotificationService: BudgetRecommendationNotificationService,
   ) {}
 
   async persistGenerated(userId: string, result: BudgetRecommendationsResult) {
@@ -201,11 +209,15 @@ export class BudgetRecommendationLifecycleService {
       );
     }
 
-    return this.findOwnedOrThrow(userId, recommendationId);
+    const updatedRecord = await this.findOwnedOrThrow(userId, recommendationId);
+
+    await this.notifyLifecycleChange(updatedRecord, 'DEFERRED', deferredUntil);
+
+    return updatedRecord;
   }
 
   async apply(userId: string, recommendationId: string) {
-    return this.prisma.$transaction(
+    const appliedRecommendation = await this.prisma.$transaction(
       async (tx) => {
         const recommendation = await tx.budgetRecommendation.findFirst({
           where: {
@@ -366,6 +378,12 @@ export class BudgetRecommendationLifecycleService {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       },
     );
+
+    if (appliedRecommendation) {
+      await this.notifyLifecycleChange(appliedRecommendation, 'APPLIED');
+    }
+
+    return appliedRecommendation;
   }
 
   /**
@@ -480,17 +498,22 @@ export class BudgetRecommendationLifecycleService {
       evaluatedAt: new Date().toISOString(),
     } as Prisma.InputJsonValue;
 
-    return this.prisma.budgetRecommendation.update({
-      where: {
-        id: recommendationId,
-      },
-      data: {
-        status: 'EVALUATED',
-        evaluationStatus,
-        evaluation,
-        evaluatedAt: new Date(),
-      },
-    });
+    const evaluatedRecommendation =
+      await this.prisma.budgetRecommendation.update({
+        where: {
+          id: recommendationId,
+        },
+        data: {
+          status: 'EVALUATED',
+          evaluationStatus,
+          evaluation,
+          evaluatedAt: new Date(),
+        },
+      });
+
+    await this.notifyLifecycleChange(evaluatedRecommendation, 'EVALUATED');
+
+    return evaluatedRecommendation;
   }
 
   private async transition(
@@ -524,7 +547,49 @@ export class BudgetRecommendationLifecycleService {
       );
     }
 
-    return this.findOwnedOrThrow(userId, recommendationId);
+    const updatedRecord = await this.findOwnedOrThrow(userId, recommendationId);
+
+    if (data.status === 'ACCEPTED' || data.status === 'REJECTED') {
+      await this.notifyLifecycleChange(updatedRecord, data.status);
+    }
+
+    return updatedRecord;
+  }
+
+  /**
+   * Notifications are best-effort side effects.
+   * A notification failure must never roll back a successful lifecycle change.
+   */
+  private async notifyLifecycleChange(
+    recommendation: {
+      id: string;
+      userId: string;
+      budgetName: string | null;
+      targetMonth: Date;
+      currentAllocation: Prisma.Decimal;
+      proposedAllocation: Prisma.Decimal;
+    },
+    status: 'ACCEPTED' | 'REJECTED' | 'DEFERRED' | 'APPLIED' | 'EVALUATED',
+    deferredUntil?: Date | null,
+  ): Promise<void> {
+    try {
+      await this.recommendationNotificationService.notifyLifecycleChanged({
+        userId: recommendation.userId,
+        recommendationId: recommendation.id,
+        budgetName: recommendation.budgetName,
+        targetMonth: recommendation.targetMonth,
+        status,
+        currentAllocation: recommendation.currentAllocation.toString(),
+        proposedAllocation: recommendation.proposedAllocation.toString(),
+        deferredUntil,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.error(
+        `Failed to trigger budget recommendation notification for ${recommendation.id}: ${message}`,
+      );
+    }
   }
 
   private async findOwnedOrThrow(userId: string, recommendationId: string) {

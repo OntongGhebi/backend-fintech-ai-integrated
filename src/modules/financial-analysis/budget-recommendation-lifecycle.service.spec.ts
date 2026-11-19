@@ -27,6 +27,9 @@ describe('BudgetRecommendationLifecycleService', () => {
   let budgetScopeEngine: {
     buildTransactionWhere: jest.Mock;
   };
+  let recommendationNotificationService: {
+    notifyLifecycleChanged: jest.Mock;
+  };
 
   const recommendationRecord = (overrides: Record<string, unknown> = {}) => ({
     id: recommendationId,
@@ -125,11 +128,16 @@ describe('BudgetRecommendationLifecycleService', () => {
       ),
     };
 
+    recommendationNotificationService = {
+      notifyLifecycleChanged: jest.fn().mockResolvedValue(undefined),
+    };
+
     prisma.budget.findFirst.mockResolvedValue(sourceBudget());
 
     service = new BudgetRecommendationLifecycleService(
       prisma as unknown as PrismaService,
       budgetScopeEngine as unknown as BudgetScopeEngine,
+      recommendationNotificationService as any,
     );
   });
 
