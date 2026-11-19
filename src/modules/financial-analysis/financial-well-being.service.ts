@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../../database/prisma/prisma.service';
 
@@ -300,14 +300,14 @@ export class FinancialWellBeingService {
     const match = /^(\d{4})-(\d{2})$/.exec(month);
 
     if (!match) {
-      throw new Error('month must use YYYY-MM format');
+      throw new BadRequestException('month must use YYYY-MM format');
     }
 
     const year = Number(match[1]);
     const monthNumber = Number(match[2]);
 
     if (!Number.isInteger(year) || monthNumber < 1 || monthNumber > 12) {
-      throw new Error('Invalid month');
+      throw new BadRequestException('month must be a valid calendar month');
     }
 
     const startDate = new Date(`${year}-${match[2]}-01T00:00:00.000+07:00`);

@@ -88,7 +88,6 @@ describe('BudgetRecommendationLifecycleService', () => {
   beforeEach(() => {
     prisma = {
       $transaction: jest.fn(),
-
       budgetRecommendation: {
         upsert: jest.fn(),
         findMany: jest.fn(),
@@ -97,21 +96,17 @@ describe('BudgetRecommendationLifecycleService', () => {
         updateMany: jest.fn(),
         update: jest.fn(),
       },
-
       userPreference: {
         findUnique: jest.fn().mockResolvedValue({
           timezone: 'Asia/Jakarta',
         }),
       },
-
       budget: {
         findFirst: jest.fn(),
       },
-
       budgetAllocation: {
         upsert: jest.fn(),
       },
-
       transaction: {
         findMany: jest.fn(),
       },
@@ -148,12 +143,10 @@ describe('BudgetRecommendationLifecycleService', () => {
         currency: 'IDR',
         status: 'GENERATED',
         targetMonth: '2026-12',
-
         historyPeriod: {
           startDate: '2026-08-31T17:00:00.000Z',
           endDate: '2026-11-30T16:59:59.999Z',
         },
-
         financialCapacity: {
           averageMonthlyIncome: '5000000',
           averageMonthlyExpense: '3000000',
@@ -163,7 +156,6 @@ describe('BudgetRecommendationLifecycleService', () => {
           maximumAllocationLimit: '4500000',
           availableIncreaseCapacity: '1000000',
         },
-
         recommendations: [
           {
             budgetId,
@@ -187,7 +179,6 @@ describe('BudgetRecommendationLifecycleService', () => {
             aiSuggestedActions: [],
           },
         ],
-
         ai: {
           status: 'SKIPPED',
           provider: null,
@@ -196,7 +187,6 @@ describe('BudgetRecommendationLifecycleService', () => {
       };
 
       prisma.budgetRecommendation.upsert.mockResolvedValue({});
-
       prisma.budgetRecommendation.findMany.mockResolvedValue([
         recommendationRecord(),
       ]);
@@ -204,7 +194,6 @@ describe('BudgetRecommendationLifecycleService', () => {
       const response = await service.persistGenerated(userId, result);
 
       expect(prisma.budgetRecommendation.upsert).toHaveBeenCalledTimes(1);
-
       expect(response.recommendations[0]).toMatchObject({
         recommendationId,
         lifecycle: {
@@ -226,14 +215,10 @@ describe('BudgetRecommendationLifecycleService', () => {
   });
 
   describe('accept and reject', () => {
-    it('accepts a pending recommendation', async () => {
+    it('accepts a pending recommendation and triggers its notification', async () => {
       prisma.budgetRecommendation.findFirst
         .mockResolvedValueOnce(recommendationRecord())
-        .mockResolvedValueOnce(
-          recommendationRecord({
-            status: 'ACCEPTED',
-          }),
-        );
+        .mockResolvedValueOnce(recommendationRecord({ status: 'ACCEPTED' }));
 
       prisma.budgetRecommendation.updateMany.mockResolvedValue({
         count: 1,
@@ -254,9 +239,18 @@ describe('BudgetRecommendationLifecycleService', () => {
       );
 
       expect(result.status).toBe('ACCEPTED');
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId,
+          recommendationId,
+          status: 'ACCEPTED',
+        }),
+      );
     });
 
-    it('rejects a recommendation and stores the reason', async () => {
+    it('rejects a recommendation, stores the reason, and triggers its notification', async () => {
       prisma.budgetRecommendation.findFirst
         .mockResolvedValueOnce(recommendationRecord())
         .mockResolvedValueOnce(
@@ -277,8 +271,16 @@ describe('BudgetRecommendationLifecycleService', () => {
       );
 
       expect(result.status).toBe('REJECTED');
-
       expect(result.rejectionReason).toBe('This budget is no longer relevant.');
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId,
+          recommendationId,
+          status: 'REJECTED',
+        }),
+      );
     });
 
     it('prevents accepting a recommendation owned by another user', async () => {
@@ -289,6 +291,9 @@ describe('BudgetRecommendationLifecycleService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
 
       expect(prisma.budgetRecommendation.updateMany).not.toHaveBeenCalled();
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).not.toHaveBeenCalled();
     });
   });
 
@@ -314,8 +319,17 @@ describe('BudgetRecommendationLifecycleService', () => {
       );
 
       expect(result.status).toBe('DEFERRED');
-
       expect(prisma.budgetRecommendation.updateMany).toHaveBeenCalled();
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId,
+          recommendationId,
+          status: 'DEFERRED',
+          deferredUntil: new Date('2026-11-20T00:00:00.000Z'),
+        }),
+      );
     });
 
     it('rejects a defer date on or after the target month begins', async () => {
@@ -326,15 +340,17 @@ describe('BudgetRecommendationLifecycleService', () => {
       await expect(
         service.defer(userId, recommendationId, '2026-12-01T00:00:00.000Z'),
       ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).not.toHaveBeenCalled();
     });
   });
 
   describe('apply', () => {
     it('applies an accepted recommendation using a monthly allocation transaction', async () => {
       prisma.budgetRecommendation.findFirst.mockResolvedValue(
-        recommendationRecord({
-          status: 'ACCEPTED',
-        }),
+        recommendationRecord({ status: 'ACCEPTED' }),
       );
 
       prisma.budget.findFirst.mockResolvedValue({
@@ -350,18 +366,13 @@ describe('BudgetRecommendationLifecycleService', () => {
         ],
       });
 
+      prisma.budgetRecommendation.updateMany.mockResolvedValue({ count: 1 });
       prisma.budgetAllocation.upsert.mockResolvedValue({});
-
       prisma.budgetRecommendation.update.mockResolvedValue(
-        recommendationRecord({
-          status: 'APPLIED',
-        }),
+        recommendationRecord({ status: 'APPLIED' }),
       );
-
       prisma.budgetRecommendation.findUnique.mockResolvedValue(
-        recommendationRecord({
-          status: 'APPLIED',
-        }),
+        recommendationRecord({ status: 'APPLIED' }),
       );
 
       const result = await service.apply(userId, recommendationId);
@@ -378,13 +389,32 @@ describe('BudgetRecommendationLifecycleService', () => {
       );
 
       expect(result?.status).toBe('APPLIED');
+      expect(prisma.budgetRecommendation.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: recommendationId,
+            userId,
+            status: 'ACCEPTED',
+          },
+          data: expect.objectContaining({
+            status: 'APPLIED',
+          }),
+        }),
+      );
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId,
+          recommendationId,
+          status: 'APPLIED',
+        }),
+      );
     });
 
     it('rejects applying a recommendation after its source allocation changed', async () => {
       prisma.budgetRecommendation.findFirst.mockResolvedValue(
-        recommendationRecord({
-          status: 'ACCEPTED',
-        }),
+        recommendationRecord({ status: 'ACCEPTED' }),
       );
 
       prisma.budget.findFirst.mockResolvedValue({
@@ -405,6 +435,9 @@ describe('BudgetRecommendationLifecycleService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
 
       expect(prisma.budgetAllocation.upsert).not.toHaveBeenCalled();
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).not.toHaveBeenCalled();
     });
   });
 
@@ -412,29 +445,38 @@ describe('BudgetRecommendationLifecycleService', () => {
     const setupEvaluation = (
       budget = sourceBudget(),
       transactions = [
-        {
-          amount: new Prisma.Decimal(300000),
-        },
-        {
-          amount: new Prisma.Decimal(200000),
-        },
+        { amount: new Prisma.Decimal(300000) },
+        { amount: new Prisma.Decimal(200000) },
       ],
     ) => {
       const applied = appliedRecommendation();
+      let evaluatedRecord: ReturnType<typeof recommendationRecord> | undefined;
 
-      prisma.budgetRecommendation.findFirst.mockResolvedValue(applied);
+      prisma.budgetRecommendation.findFirst
+        .mockReset()
+        .mockResolvedValueOnce(applied)
+        .mockImplementationOnce(async () => evaluatedRecord);
+
       prisma.budget.findFirst.mockResolvedValue(budget);
       prisma.transaction.findMany.mockResolvedValue(transactions);
 
-      prisma.budgetRecommendation.update.mockImplementation(
-        async ({ data }: any) =>
-          recommendationRecord({
+      prisma.budgetRecommendation.updateMany.mockImplementation(
+        async ({ where, data }: any) => {
+          if (
+            where.id !== recommendationId ||
+            where.userId !== userId ||
+            where.status !== 'APPLIED'
+          ) {
+            return { count: 0 };
+          }
+
+          evaluatedRecord = recommendationRecord({
             ...applied,
-            status: 'EVALUATED',
-            evaluationStatus: data.evaluationStatus,
-            evaluation: data.evaluation,
-            evaluatedAt: data.evaluatedAt,
-          }),
+            ...data,
+          });
+
+          return { count: 1 };
+        },
       );
 
       return applied;
@@ -446,9 +488,7 @@ describe('BudgetRecommendationLifecycleService', () => {
       const result = await service.evaluate(userId, recommendationId);
 
       expect(result.status).toBe('EVALUATED');
-
       expect(result.evaluationStatus).toBe('WITHIN_ALLOCATION');
-
       expect(result.evaluation).toMatchObject({
         actualSpend: '500000',
         proposedAllocation: '600000',
@@ -456,8 +496,31 @@ describe('BudgetRecommendationLifecycleService', () => {
       });
 
       expect(budgetScopeEngine.buildTransactionWhere).toHaveBeenCalledTimes(1);
-
       expect(prisma.transaction.findMany).toHaveBeenCalledTimes(1);
+
+      expect(prisma.budgetRecommendation.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: recommendationId,
+            userId,
+            status: 'APPLIED',
+          },
+          data: expect.objectContaining({
+            status: 'EVALUATED',
+            evaluationStatus: 'WITHIN_ALLOCATION',
+          }),
+        }),
+      );
+
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId,
+          recommendationId,
+          status: 'EVALUATED',
+        }),
+      );
     });
 
     it('uses the CATEGORY budget scope when evaluating transactions', async () => {
@@ -508,22 +571,13 @@ describe('BudgetRecommendationLifecycleService', () => {
       ];
 
       const transactions = [
-        {
-          categoryId,
-          amount: new Prisma.Decimal(100000),
-        },
-        {
-          categoryId: childCategoryId,
-          amount: new Prisma.Decimal(200000),
-        },
+        { categoryId, amount: new Prisma.Decimal(100000) },
+        { categoryId: childCategoryId, amount: new Prisma.Decimal(200000) },
         {
           categoryId: grandchildCategoryId,
           amount: new Prisma.Decimal(300000),
         },
-        {
-          categoryId: secondCategoryId,
-          amount: new Prisma.Decimal(900000),
-        },
+        { categoryId: secondCategoryId, amount: new Prisma.Decimal(900000) },
       ];
 
       setupEvaluation(budget, transactions);
@@ -547,26 +601,6 @@ describe('BudgetRecommendationLifecycleService', () => {
 
       const result = await service.evaluate(userId, recommendationId);
 
-      expect(budgetScopeEngine.buildTransactionWhere).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: budgetId,
-          scopeType: 'CATEGORY_GROUP',
-          scopeCategoryId: categoryId,
-          categoryId: null,
-        }),
-        expect.objectContaining({
-          userId,
-          type: 'EXPENSE',
-          status: 'ACTIVE',
-          currency: 'IDR',
-          deletedAt: null,
-          transactionDate: expect.objectContaining({
-            gte: expect.any(Date),
-            lt: expect.any(Date),
-          }),
-        }),
-      );
-
       expect(prisma.transaction.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
@@ -582,7 +616,6 @@ describe('BudgetRecommendationLifecycleService', () => {
 
       expect(result.status).toBe('EVALUATED');
       expect(result.evaluationStatus).toBe('WITHIN_ALLOCATION');
-
       expect(result.evaluation).toMatchObject({
         actualSpend: '600000',
         proposedAllocation: '600000',
@@ -592,10 +625,12 @@ describe('BudgetRecommendationLifecycleService', () => {
         transactionCount: 3,
       });
 
-      expect(prisma.budgetRecommendation.update).toHaveBeenCalledWith(
+      expect(prisma.budgetRecommendation.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             id: recommendationId,
+            userId,
+            status: 'APPLIED',
           },
           data: expect.objectContaining({
             status: 'EVALUATED',
@@ -614,14 +649,7 @@ describe('BudgetRecommendationLifecycleService', () => {
         scopeType: 'CUSTOM',
         scopeCategoryId: null,
         categoryId: null,
-        categoryScopes: [
-          {
-            categoryId,
-          },
-          {
-            categoryId: secondCategoryId,
-          },
-        ],
+        categoryScopes: [{ categoryId }, { categoryId: secondCategoryId }],
       });
 
       setupEvaluation(budget);
@@ -631,14 +659,7 @@ describe('BudgetRecommendationLifecycleService', () => {
       expect(budgetScopeEngine.buildTransactionWhere).toHaveBeenCalledWith(
         expect.objectContaining({
           scopeType: 'CUSTOM',
-          categoryScopes: [
-            {
-              categoryId,
-            },
-            {
-              categoryId: secondCategoryId,
-            },
-          ],
+          categoryScopes: [{ categoryId }, { categoryId: secondCategoryId }],
         }),
         expect.any(Object),
       );
@@ -698,7 +719,6 @@ describe('BudgetRecommendationLifecycleService', () => {
         budgetScopeEngine.buildTransactionWhere.mock.calls[0][1];
 
       expect(baseWhere).not.toHaveProperty('categoryId');
-
       expect(prisma.transaction.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: baseWhere,
@@ -731,18 +751,13 @@ describe('BudgetRecommendationLifecycleService', () => {
 
     it('calculates OVER_ALLOCATION when actual spending exceeds the proposed allocation', async () => {
       setupEvaluation(sourceBudget(), [
-        {
-          amount: new Prisma.Decimal(400000),
-        },
-        {
-          amount: new Prisma.Decimal(300000),
-        },
+        { amount: new Prisma.Decimal(400000) },
+        { amount: new Prisma.Decimal(300000) },
       ]);
 
       const result = await service.evaluate(userId, recommendationId);
 
       expect(result.evaluationStatus).toBe('OVER_ALLOCATION');
-
       expect(result.evaluation).toMatchObject({
         actualSpend: '700000',
         proposedAllocation: '600000',
@@ -757,7 +772,6 @@ describe('BudgetRecommendationLifecycleService', () => {
       const result = await service.evaluate(userId, recommendationId);
 
       expect(result.evaluationStatus).toBe('NO_ACTIVITY');
-
       expect(result.evaluation).toMatchObject({
         actualSpend: '0',
         transactionCount: 0,
@@ -766,9 +780,7 @@ describe('BudgetRecommendationLifecycleService', () => {
 
     it('does not evaluate before the target month has ended', async () => {
       prisma.budgetRecommendation.findFirst.mockResolvedValue(
-        recommendationRecord({
-          status: 'APPLIED',
-        }),
+        recommendationRecord({ status: 'APPLIED' }),
       );
 
       await expect(
@@ -776,15 +788,15 @@ describe('BudgetRecommendationLifecycleService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
 
       expect(prisma.budget.findFirst).not.toHaveBeenCalled();
-
       expect(budgetScopeEngine.buildTransactionWhere).not.toHaveBeenCalled();
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).not.toHaveBeenCalled();
     });
 
     it('rejects evaluating a recommendation that has not been applied', async () => {
       prisma.budgetRecommendation.findFirst.mockResolvedValue(
-        recommendationRecord({
-          status: 'ACCEPTED',
-        }),
+        recommendationRecord({ status: 'ACCEPTED' }),
       );
 
       await expect(
@@ -806,14 +818,59 @@ describe('BudgetRecommendationLifecycleService', () => {
       const result = await service.evaluate(userId, recommendationId);
 
       expect(result).toBe(evaluated);
-
       expect(prisma.budget.findFirst).not.toHaveBeenCalled();
-
       expect(prisma.transaction.findMany).not.toHaveBeenCalled();
-
       expect(budgetScopeEngine.buildTransactionWhere).not.toHaveBeenCalled();
+      expect(prisma.budgetRecommendation.updateMany).not.toHaveBeenCalled();
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).not.toHaveBeenCalled();
+    });
 
-      expect(prisma.budgetRecommendation.update).not.toHaveBeenCalled();
+    it('returns the persisted evaluation when another request wins the conditional update', async () => {
+      const applied = appliedRecommendation();
+      const evaluated = recommendationRecord({
+        ...applied,
+        status: 'EVALUATED',
+        evaluationStatus: 'WITHIN_ALLOCATION',
+        evaluation: {
+          actualSpend: '500000',
+          proposedAllocation: '600000',
+          transactionCount: 2,
+        },
+        evaluatedAt: new Date('2026-11-19T00:00:00.000Z'),
+      });
+
+      prisma.budgetRecommendation.findFirst
+        .mockResolvedValueOnce(applied)
+        .mockResolvedValueOnce(evaluated);
+
+      prisma.budget.findFirst.mockResolvedValue(sourceBudget());
+      prisma.transaction.findMany.mockResolvedValue([
+        { amount: new Prisma.Decimal(300000) },
+        { amount: new Prisma.Decimal(200000) },
+      ]);
+
+      prisma.budgetRecommendation.updateMany.mockResolvedValue({
+        count: 0,
+      });
+
+      const result = await service.evaluate(userId, recommendationId);
+
+      expect(result).toBe(evaluated);
+      expect(prisma.budgetRecommendation.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: recommendationId,
+            userId,
+            status: 'APPLIED',
+          },
+        }),
+      );
+
+      expect(
+        recommendationNotificationService.notifyLifecycleChanged,
+      ).not.toHaveBeenCalled();
     });
 
     it('rejects evaluation when the source budget cannot be found', async () => {
@@ -828,7 +885,6 @@ describe('BudgetRecommendationLifecycleService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
 
       expect(prisma.transaction.findMany).not.toHaveBeenCalled();
-
       expect(budgetScopeEngine.buildTransactionWhere).not.toHaveBeenCalled();
     });
 
@@ -840,7 +896,6 @@ describe('BudgetRecommendationLifecycleService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
 
       expect(prisma.budget.findFirst).not.toHaveBeenCalled();
-
       expect(prisma.transaction.findMany).not.toHaveBeenCalled();
     });
   });

@@ -333,6 +333,29 @@ export class BudgetRecommendationLifecycleService {
           );
         }
 
+        /*
+         * Compare-and-set:
+         * Only one request can claim ACCEPTED -> APPLIED.
+         * This update is part of the same transaction as the allocation change.
+         */
+        const claimResult = await tx.budgetRecommendation.updateMany({
+          where: {
+            id: recommendationId,
+            userId,
+            status: 'ACCEPTED',
+          },
+          data: {
+            status: 'APPLIED',
+            appliedAt: new Date(),
+          },
+        });
+
+        if (claimResult.count !== 1) {
+          throw new ConflictException(
+            'Recommendation was already applied or changed by another request.',
+          );
+        }
+
         const proposed = new Prisma.Decimal(recommendation.proposedAllocation);
 
         await tx.budgetAllocation.upsert({
@@ -358,16 +381,6 @@ export class BudgetRecommendationLifecycleService {
           },
         });
 
-        await tx.budgetRecommendation.update({
-          where: {
-            id: recommendationId,
-          },
-          data: {
-            status: 'APPLIED',
-            appliedAt: new Date(),
-          },
-        });
-
         return tx.budgetRecommendation.findUnique({
           where: {
             id: recommendationId,
@@ -386,10 +399,6 @@ export class BudgetRecommendationLifecycleService {
     return appliedRecommendation;
   }
 
-  /**
-   * Evaluate an applied recommendation after its target month ends.
-   * Transaction filtering follows the source budget's configured scope.
-   */
   async evaluate(userId: string, recommendationId: string) {
     const recommendation = await this.findOwnedOrThrow(
       userId,
@@ -498,18 +507,39 @@ export class BudgetRecommendationLifecycleService {
       evaluatedAt: new Date().toISOString(),
     } as Prisma.InputJsonValue;
 
-    const evaluatedRecommendation =
-      await this.prisma.budgetRecommendation.update({
-        where: {
-          id: recommendationId,
-        },
-        data: {
-          status: 'EVALUATED',
-          evaluationStatus,
-          evaluation,
-          evaluatedAt: new Date(),
-        },
-      });
+    const updateResult = await this.prisma.budgetRecommendation.updateMany({
+      where: {
+        id: recommendationId,
+        userId,
+        status: 'APPLIED',
+      },
+      data: {
+        status: 'EVALUATED',
+        evaluationStatus,
+        evaluation,
+        evaluatedAt: new Date(),
+      },
+    });
+
+    if (updateResult.count !== 1) {
+      const latestRecommendation = await this.findOwnedOrThrow(
+        userId,
+        recommendationId,
+      );
+
+      if (latestRecommendation.status === 'EVALUATED') {
+        return latestRecommendation;
+      }
+
+      throw new ConflictException(
+        `Recommendation cannot be evaluated from ${latestRecommendation.status} status`,
+      );
+    }
+
+    const evaluatedRecommendation = await this.findOwnedOrThrow(
+      userId,
+      recommendationId,
+    );
 
     await this.notifyLifecycleChange(evaluatedRecommendation, 'EVALUATED');
 
@@ -556,10 +586,6 @@ export class BudgetRecommendationLifecycleService {
     return updatedRecord;
   }
 
-  /**
-   * Notifications are best-effort side effects.
-   * A notification failure must never roll back a successful lifecycle change.
-   */
   private async notifyLifecycleChange(
     recommendation: {
       id: string;
