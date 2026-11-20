@@ -12,6 +12,7 @@ import {
 
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -234,10 +235,14 @@ export class FinancialAnalysisController {
   @ApiOperation({
     summary: 'Apply an accepted budget recommendation to its target month',
     description:
-      'Applies an accepted INCREASE or DECREASE recommendation to BudgetAllocation in a database transaction.',
+      'Applies an accepted INCREASE or DECREASE recommendation to BudgetAllocation in a database transaction. REVIEW recommendations cannot modify budget allocations.',
   })
   @ApiOkResponse({
     description: 'Recommendation applied to monthly budget allocation.',
+  })
+  @ApiConflictResponse({
+    description:
+      'The recommendation cannot be applied. This occurs when the recommendation action is REVIEW, the recommendation is not in an applicable lifecycle status, or its source allocation has changed.',
   })
   async applyBudgetRecommendation(
     @CurrentUser('id') userId: string,
