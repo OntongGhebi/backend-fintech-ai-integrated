@@ -19,8 +19,11 @@ import { telegramConfig } from './config/telegram.config';
 
 import { RequestMiddleware } from './common/middlewares/request-id.middleware';
 import { RequestLoggerMiddleware } from './common/middlewares/request-logger.middleware';
+import { RedisThrottlerStorage } from './common/guards/redis-throttler.storage';
 
 import { RedisModule } from '../docker/redis/redis.module';
+import { RedisService } from '../docker/redis/redis.service';
+
 import { QueueModule } from './queue/queue.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
@@ -61,16 +64,24 @@ import { FinancialAnalysisModule } from './modules/financial-analysis/financial-
       ],
     }),
 
-    ThrottlerModule.forRoot([
-      {
-        name: 'default',
-        ttl: 60_000,
-        limit: 100,
-      },
-    ]),
+    RedisModule,
+
+    ThrottlerModule.forRootAsync({
+      imports: [RedisModule],
+      inject: [RedisService],
+      useFactory: (redisService: RedisService) => ({
+        throttlers: [
+          {
+            name: 'default',
+            ttl: 60_000,
+            limit: 100,
+          },
+        ],
+        storage: new RedisThrottlerStorage(redisService),
+      }),
+    }),
 
     DatabaseModule,
-    RedisModule,
     QueueModule,
     HealthModule,
 
