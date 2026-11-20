@@ -298,6 +298,15 @@ describe('BudgetRecommendationLifecycleService', () => {
   });
 
   describe('defer', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-11-19T00:00:00.000Z'));
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     it('defers a pending recommendation before its target month', async () => {
       prisma.budgetRecommendation.findFirst
         .mockResolvedValueOnce(recommendationRecord())
