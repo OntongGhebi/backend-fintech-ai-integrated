@@ -131,10 +131,14 @@ describe('TransactionsRepository transfer balance validation', () => {
   it('returns an existing Telegram transfer when the confirmation is retried', async () => {
     const existingSource = {
       id: 'source-transaction-id',
+      userId,
+      accountId,
       transferGroupId: 'confirmation-id',
     };
     const existingDestination = {
       id: 'destination-transaction-id',
+      userId,
+      accountId: destinationAccountId,
       transferGroupId: 'confirmation-id',
     };
     transactionClient.transaction.findUnique.mockResolvedValue(existingSource);

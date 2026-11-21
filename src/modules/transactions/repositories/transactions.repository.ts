@@ -41,14 +41,25 @@ export class TransactionsRepository {
             },
           });
 
-        if (!confirmation) {
+        if (
+          !confirmation ||
+          confirmation.userId !== params.transactionData.userId
+        ) {
           throw new Error('TELEGRAM_CONFIRMATION_NOT_FOUND');
         }
 
-        // A completed confirmation must never create another transaction.
         if (confirmation.status === 'COMPLETED') {
-          if (confirmation.transaction) {
+          if (
+            confirmation.transaction &&
+            confirmation.transaction.userId === params.transactionData.userId
+          ) {
             return confirmation.transaction;
+          }
+
+          if (confirmation.transaction) {
+            throw new Error(
+              'TELEGRAM_CONFIRMATION_TRANSACTION_OWNERSHIP_MISMATCH',
+            );
           }
 
           throw new Error('TELEGRAM_COMPLETED_WITHOUT_TRANSACTION');
@@ -91,7 +102,6 @@ export class TransactionsRepository {
         return transaction;
       });
     } catch (error: unknown) {
-      // Concurrent retries can race on the unique confirmation FK.
       const isUniqueViolation =
         typeof error === 'object' &&
         error !== null &&
@@ -112,11 +122,10 @@ export class TransactionsRepository {
         },
       });
 
-      if (existing) {
+      if (existing && existing.userId === params.transactionData.userId) {
         return existing;
       }
 
-      // The unique violation may have come from another unique field.
       throw error;
     }
   }
@@ -259,43 +268,119 @@ export class TransactionsRepository {
       PrismaService['transaction']['create']
     >[0]['data'],
   ) {
+    const userId = sourceData.userId;
+    const sourceAccountId = sourceData.accountId;
+    const destinationAccountId = destinationData.accountId;
+
+    if (
+      typeof userId !== 'string' ||
+      typeof sourceAccountId !== 'string' ||
+      typeof destinationAccountId !== 'string'
+    ) {
+      throw new BadRequestException('Invalid transfer account information');
+    }
+
+    if (destinationData.userId !== userId) {
+      throw new BadRequestException(
+        'Transfer accounts must belong to the same user',
+      );
+    }
+
+    if (sourceAccountId === destinationAccountId) {
+      throw new BadRequestException(
+        'Source and destination accounts must be different',
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
-      // Serialize transfers from the same source account so two concurrent
-      // requests cannot both spend the same available balance.
+      // Serialize transfers from the same source account so concurrent
+      // requests cannot spend the same available balance.
       await tx.$queryRaw<Array<{ id: string }>>`
         SELECT id
         FROM accounts
-        WHERE id = ${String(sourceData.accountId)}::uuid
-          AND "userId" = ${String(sourceData.userId)}::uuid
+        WHERE id = ${sourceAccountId}::uuid
+          AND "userId" = ${userId}::uuid
           AND "deletedAt" IS NULL
         FOR UPDATE
       `;
 
-      // Telegram transfers use the confirmation UUID as an idempotency key.
-      // The source account row lock serializes retries for the same source account.
-      const telegramConfirmationId =
-        typeof sourceData.telegramConfirmationId === 'string'
-          ? sourceData.telegramConfirmationId
-          : undefined;
+      // Both accounts must be active and owned by the authenticated user.
+      const [sourceAccount, destinationAccount] = await Promise.all([
+        tx.account.findFirst({
+          where: {
+            id: sourceAccountId,
+            userId,
+            deletedAt: null,
+          },
+          select: {
+            openingBalance: true,
+          },
+        }),
+        tx.account.findFirst({
+          where: {
+            id: destinationAccountId,
+            userId,
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+          },
+        }),
+      ]);
 
-      if (telegramConfirmationId) {
+      if (!sourceAccount) {
+        throw new BadRequestException('Source account is not available');
+      }
+
+      if (!destinationAccount) {
+        throw new BadRequestException('Destination account is not available');
+      }
+
+      // Telegram transfers use the confirmation UUID as an idempotency key.
+      if (typeof sourceData.telegramConfirmationId === 'string') {
+        const telegramConfirmationId = sourceData.telegramConfirmationId;
+
         const existingSource = await tx.transaction.findUnique({
-          where: { telegramConfirmationId },
-          include: { account: true, category: true },
+          where: {
+            telegramConfirmationId,
+          },
+          include: {
+            account: true,
+            category: true,
+          },
         });
 
         if (existingSource) {
+          // Do not return an existing transfer belonging to another user,
+          // source account, or destination account.
+          if (
+            existingSource.userId !== userId ||
+            existingSource.accountId !== sourceAccountId
+          ) {
+            throw new BadRequestException('Transfer is not available');
+          }
+
           const existingDestination = await tx.transaction.findFirst({
             where: {
-              userId: sourceData.userId as string,
+              userId,
+              accountId: destinationAccountId,
               transferGroupId: existingSource.transferGroupId,
-              id: { not: existingSource.id },
+              id: {
+                not: existingSource.id,
+              },
               deletedAt: null,
             },
-            include: { account: true, category: true },
+            include: {
+              account: true,
+              category: true,
+            },
           });
 
-          if (!existingDestination) {
+          if (
+            !existingDestination ||
+            existingDestination.userId !== userId ||
+            existingDestination.accountId !== destinationAccountId
+          ) {
             throw new Error('TELEGRAM_TRANSFER_INCOMPLETE');
           }
 
@@ -306,23 +391,10 @@ export class TransactionsRepository {
         }
       }
 
-      const sourceAccount = await tx.account.findFirst({
-        where: {
-          id: sourceData.accountId as string,
-          userId: sourceData.userId as string,
-          deletedAt: null,
-        },
-        select: { openingBalance: true },
-      });
-
-      if (!sourceAccount) {
-        throw new BadRequestException('Source account is not available');
-      }
-
       const sourceTransactions = await tx.transaction.findMany({
         where: {
-          accountId: sourceData.accountId as string,
-          userId: sourceData.userId as string,
+          accountId: sourceAccountId,
+          userId,
           status: 'ACTIVE',
           deletedAt: null,
         },
@@ -337,6 +409,7 @@ export class TransactionsRepository {
         sourceAccount.openingBalance,
         sourceTransactions,
       );
+
       const transferAmount = new Prisma.Decimal(String(sourceData.amount));
 
       if (currentBalance.lte(0)) {
