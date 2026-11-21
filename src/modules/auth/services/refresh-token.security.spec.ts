@@ -1,4 +1,3 @@
-import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { createHash } from 'crypto';
@@ -19,46 +18,41 @@ describe('RefreshTokenService security regression', () => {
     },
   };
 
-  const jwtServiceMock = {
+  const jwtMock = {
     signAsync: jest.fn(),
     verifyAsync: jest.fn(),
     decode: jest.fn(),
   };
 
-  const configServiceMock = {
-    get: jest.fn((key: string) => {
-      const values: Record<string, string> = {
-        'jwt.accessSecret': 'test-access-secret',
-        'jwt.accessExpiresIn': '15m',
-        'jwt.refreshSecret': 'test-refresh-secret',
-        'jwt.refreshExpiresIn': '7d',
-      };
-
-      return values[key];
-    }),
+  const configMock = {
+    get: jest.fn(),
   };
 
   const refreshToken = 'valid-refresh-token';
   const userId = '11111111-1111-4111-8111-111111111111';
   const sessionId = '22222222-2222-4222-8222-222222222222';
 
-  const activeSession = (overrides: Record<string, unknown> = {}) => ({
+  const hash = (token: string) =>
+    createHash('sha256').update(token).digest('hex');
+
+  const activeSession = (overrides: Record<string, any> = {}) => ({
     id: sessionId,
     userId,
-    refreshTokenHash: createHash('sha256').update(refreshToken).digest('hex'),
+    refreshTokenHash: hash(refreshToken),
     expiresAt: new Date(Date.now() + 60_000),
     revokedAt: null,
     user: {
       id: userId,
       status: 'ACTIVE',
+      deletedAt: null,
     },
     ...overrides,
   });
 
   beforeEach(async () => {
-    jest.resetAllMocks();
+    jest.clearAllMocks();
 
-    configServiceMock.get.mockImplementation((key: string) => {
+    configMock.get.mockImplementation((key: string) => {
       const values: Record<string, string> = {
         'jwt.accessSecret': 'test-access-secret',
         'jwt.accessExpiresIn': '15m',
@@ -72,24 +66,15 @@ describe('RefreshTokenService security regression', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RefreshTokenService,
-        {
-          provide: PrismaService,
-          useValue: prismaMock,
-        },
-        {
-          provide: JwtService,
-          useValue: jwtServiceMock,
-        },
-        {
-          provide: ConfigService,
-          useValue: configServiceMock,
-        },
+        { provide: PrismaService, useValue: prismaMock },
+        { provide: JwtService, useValue: jwtMock },
+        { provide: ConfigService, useValue: configMock },
       ],
     }).compile();
 
-    service = module.get<RefreshTokenService>(RefreshTokenService);
+    service = module.get(RefreshTokenService);
 
-    jwtServiceMock.verifyAsync.mockResolvedValue({
+    jwtMock.verifyAsync.mockResolvedValue({
       sub: userId,
       sid: sessionId,
       jti: 'refresh-token-jti',
@@ -99,14 +84,14 @@ describe('RefreshTokenService security regression', () => {
   });
 
   describe('JWT verification', () => {
-    it('restricts refresh-token verification to HS256', async () => {
+    it('restricts refresh token verification to HS256', async () => {
       prismaMock.session.findUnique.mockResolvedValue(null);
 
       await expect(service.rotateSession(refreshToken)).rejects.toThrow(
         'Invalid refresh token',
       );
 
-      expect(jwtServiceMock.verifyAsync).toHaveBeenCalledWith(refreshToken, {
+      expect(jwtMock.verifyAsync).toHaveBeenCalledWith(refreshToken, {
         secret: 'test-refresh-secret',
         algorithms: ['HS256'],
       });
@@ -125,19 +110,17 @@ describe('RefreshTokenService security regression', () => {
       ['non-string jti', { sub: userId, sid: sessionId, jti: 123 }],
       ['null payload', null],
     ])('rejects a token payload with %s', async (_label, payload) => {
-      jwtServiceMock.verifyAsync.mockResolvedValueOnce(payload);
+      jwtMock.verifyAsync.mockResolvedValueOnce(payload);
 
       await expect(service.rotateSession(refreshToken)).rejects.toThrow(
-        new UnauthorizedException('Invalid refresh token'),
+        'Invalid refresh token',
       );
 
       expect(prismaMock.session.findUnique).not.toHaveBeenCalled();
     });
 
     it('rejects a token signed with an invalid signature', async () => {
-      jwtServiceMock.verifyAsync.mockRejectedValueOnce(
-        new Error('invalid signature'),
-      );
+      jwtMock.verifyAsync.mockRejectedValueOnce(new Error('invalid signature'));
 
       await expect(service.rotateSession(refreshToken)).rejects.toThrow(
         'Invalid refresh token',
@@ -151,9 +134,7 @@ describe('RefreshTokenService security regression', () => {
     it('rejects a refresh token whose hash differs from the stored hash', async () => {
       prismaMock.session.findUnique.mockResolvedValue(
         activeSession({
-          refreshTokenHash: createHash('sha256')
-            .update('a-different-token')
-            .digest('hex'),
+          refreshTokenHash: hash('different-token'),
         }),
       );
 
@@ -162,8 +143,7 @@ describe('RefreshTokenService security regression', () => {
       );
 
       expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
-
-      expect(jwtServiceMock.signAsync).not.toHaveBeenCalled();
+      expect(jwtMock.signAsync).not.toHaveBeenCalled();
     });
 
     it('rejects a session owned by a different user', async () => {
@@ -173,6 +153,7 @@ describe('RefreshTokenService security regression', () => {
           user: {
             id: '33333333-3333-4333-8333-333333333333',
             status: 'ACTIVE',
+            deletedAt: null,
           },
         }),
       );
@@ -186,9 +167,7 @@ describe('RefreshTokenService security regression', () => {
 
     it('does not rotate a revoked session', async () => {
       prismaMock.session.findUnique.mockResolvedValue(
-        activeSession({
-          revokedAt: new Date(),
-        }),
+        activeSession({ revokedAt: new Date() }),
       );
 
       await expect(service.rotateSession(refreshToken)).rejects.toThrow(
@@ -198,12 +177,30 @@ describe('RefreshTokenService security regression', () => {
       expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
     });
 
+    it('does not rotate a deleted user session', async () => {
+      prismaMock.session.findUnique.mockResolvedValue(
+        activeSession({
+          user: {
+            id: userId,
+            status: 'ACTIVE',
+            deletedAt: new Date(),
+          },
+        }),
+      );
+
+      await expect(service.rotateSession(refreshToken)).rejects.toThrow(
+        'User account is not active',
+      );
+
+      expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
+    });
+
     it('rejects replay when another request has already rotated the token', async () => {
-      jwtServiceMock.signAsync
+      jwtMock.signAsync
         .mockResolvedValueOnce('new-refresh-token')
         .mockResolvedValueOnce('new-access-token');
 
-      jwtServiceMock.decode.mockReturnValue({
+      jwtMock.decode.mockReturnValue({
         exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7,
       });
 
@@ -219,9 +216,7 @@ describe('RefreshTokenService security regression', () => {
         where: {
           id: sessionId,
           userId,
-          refreshTokenHash: createHash('sha256')
-            .update(refreshToken)
-            .digest('hex'),
+          refreshTokenHash: hash(refreshToken),
           revokedAt: null,
           expiresAt: {
             gt: expect.any(Date),
@@ -238,9 +233,8 @@ describe('RefreshTokenService security regression', () => {
 
   describe('session ownership during revocation', () => {
     it('does not allow a user to revoke another user session', async () => {
-      prismaMock.session.updateMany.mockResolvedValue({
-        count: 0,
-      });
+      prismaMock.session.updateMany.mockResolvedValue({ count: 0 });
+
       prismaMock.session.findUnique.mockResolvedValue({
         id: sessionId,
         userId: '33333333-3333-4333-8333-333333333333',
@@ -255,9 +249,8 @@ describe('RefreshTokenService security regression', () => {
     });
 
     it('does not update a session that is already revoked', async () => {
-      prismaMock.session.updateMany.mockResolvedValue({
-        count: 0,
-      });
+      prismaMock.session.updateMany.mockResolvedValue({ count: 0 });
+
       prismaMock.session.findUnique.mockResolvedValue({
         id: sessionId,
         userId,

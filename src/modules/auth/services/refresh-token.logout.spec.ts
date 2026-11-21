@@ -1,6 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { createHash } from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { PrismaService } from '../../../database/prisma/prisma.service';
@@ -16,28 +17,24 @@ describe('RefreshTokenService logout consistency', () => {
     },
   };
 
-  const jwtServiceMock = {
+  const jwtMock = {
     verifyAsync: jest.fn(),
   };
 
-  const configServiceMock = {
-    get: jest.fn((key: string) => {
-      if (key === 'jwt.refreshSecret') {
-        return 'test-refresh-secret';
-      }
-
-      return undefined;
-    }),
+  const configMock = {
+    get: jest.fn(),
   };
 
   const userId = '11111111-1111-4111-8111-111111111111';
   const sessionId = '22222222-2222-4222-8222-222222222222';
   const refreshToken = 'valid-refresh-token';
 
-  beforeEach(async () => {
-    jest.resetAllMocks();
+  const tokenHash = createHash('sha256').update(refreshToken).digest('hex');
 
-    configServiceMock.get.mockImplementation((key: string) => {
+  beforeEach(async () => {
+    jest.clearAllMocks();
+
+    configMock.get.mockImplementation((key: string) => {
       if (key === 'jwt.refreshSecret') {
         return 'test-refresh-secret';
       }
@@ -45,7 +42,7 @@ describe('RefreshTokenService logout consistency', () => {
       return undefined;
     });
 
-    jwtServiceMock.verifyAsync.mockResolvedValue({
+    jwtMock.verifyAsync.mockResolvedValue({
       sub: userId,
       sid: sessionId,
       jti: 'refresh-token-jti',
@@ -54,29 +51,18 @@ describe('RefreshTokenService logout consistency', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RefreshTokenService,
-        {
-          provide: PrismaService,
-          useValue: prismaMock,
-        },
-        {
-          provide: JwtService,
-          useValue: jwtServiceMock,
-        },
-        {
-          provide: ConfigService,
-          useValue: configServiceMock,
-        },
+        { provide: PrismaService, useValue: prismaMock },
+        { provide: JwtService, useValue: jwtMock },
+        { provide: ConfigService, useValue: configMock },
       ],
     }).compile();
 
-    service = module.get<RefreshTokenService>(RefreshTokenService);
+    service = module.get(RefreshTokenService);
   });
 
   describe('revokeSession', () => {
-    it('revokes an active session atomically', async () => {
-      prismaMock.session.updateMany.mockResolvedValue({
-        count: 1,
-      });
+    it('revokes an active, unexpired session atomically', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({ count: 1 });
 
       await expect(
         service.revokeSession(sessionId, userId),
@@ -87,6 +73,9 @@ describe('RefreshTokenService logout consistency', () => {
           id: sessionId,
           userId,
           revokedAt: null,
+          expiresAt: {
+            gt: expect.any(Date),
+          },
         },
         data: {
           revokedAt: expect.any(Date),
@@ -96,10 +85,8 @@ describe('RefreshTokenService logout consistency', () => {
       expect(prismaMock.session.findUnique).not.toHaveBeenCalled();
     });
 
-    it('allows idempotent logout when session is already revoked', async () => {
-      prismaMock.session.updateMany.mockResolvedValue({
-        count: 0,
-      });
+    it('allows idempotent revocation when the session is already revoked', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({ count: 0 });
 
       prismaMock.session.findUnique.mockResolvedValue({
         id: sessionId,
@@ -112,11 +99,8 @@ describe('RefreshTokenService logout consistency', () => {
       ).resolves.toBeUndefined();
     });
 
-    it('rejects when session does not exist', async () => {
-      prismaMock.session.updateMany.mockResolvedValue({
-        count: 0,
-      });
-
+    it('rejects when the session does not exist', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({ count: 0 });
       prismaMock.session.findUnique.mockResolvedValue(null);
 
       await expect(service.revokeSession(sessionId, userId)).rejects.toThrow(
@@ -124,10 +108,8 @@ describe('RefreshTokenService logout consistency', () => {
       );
     });
 
-    it('rejects when session belongs to another user', async () => {
-      prismaMock.session.updateMany.mockResolvedValue({
-        count: 0,
-      });
+    it('rejects when the session belongs to another user', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({ count: 0 });
 
       prismaMock.session.findUnique.mockResolvedValue({
         id: sessionId,
@@ -140,10 +122,8 @@ describe('RefreshTokenService logout consistency', () => {
       );
     });
 
-    it('does not silently succeed if an unexpected active-session race occurs', async () => {
-      prismaMock.session.updateMany.mockResolvedValue({
-        count: 0,
-      });
+    it('rejects when an unexpected active-session race occurs', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({ count: 0 });
 
       prismaMock.session.findUnique.mockResolvedValue({
         id: sessionId,
@@ -158,16 +138,14 @@ describe('RefreshTokenService logout consistency', () => {
   });
 
   describe('revokeSessionByRefreshToken', () => {
-    it('revokes the session associated with a valid refresh token', async () => {
-      prismaMock.session.updateMany.mockResolvedValue({
-        count: 1,
-      });
+    it('revokes the session using the matching refresh token and identity', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({ count: 1 });
 
       await expect(
-        service.revokeSessionByRefreshToken(refreshToken, userId),
+        service.revokeSessionByRefreshToken(refreshToken, userId, sessionId),
       ).resolves.toBeUndefined();
 
-      expect(jwtServiceMock.verifyAsync).toHaveBeenCalledWith(refreshToken, {
+      expect(jwtMock.verifyAsync).toHaveBeenCalledWith(refreshToken, {
         secret: 'test-refresh-secret',
         algorithms: ['HS256'],
       });
@@ -176,7 +154,11 @@ describe('RefreshTokenService logout consistency', () => {
         where: {
           id: sessionId,
           userId,
+          refreshTokenHash: tokenHash,
           revokedAt: null,
+          expiresAt: {
+            gt: expect.any(Date),
+          },
         },
         data: {
           revokedAt: expect.any(Date),
@@ -185,42 +167,62 @@ describe('RefreshTokenService logout consistency', () => {
     });
 
     it('rejects a refresh token belonging to another user', async () => {
-      jwtServiceMock.verifyAsync.mockResolvedValueOnce({
+      jwtMock.verifyAsync.mockResolvedValueOnce({
         sub: '33333333-3333-4333-8333-333333333333',
         sid: sessionId,
         jti: 'another-user-jti',
       });
 
       await expect(
-        service.revokeSessionByRefreshToken(refreshToken, userId),
+        service.revokeSessionByRefreshToken(refreshToken, userId, sessionId),
+      ).rejects.toThrow(new UnauthorizedException('Invalid refresh token'));
+
+      expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects a refresh token belonging to another session', async () => {
+      jwtMock.verifyAsync.mockResolvedValueOnce({
+        sub: userId,
+        sid: 'another-session-id',
+        jti: 'refresh-token-jti',
+      });
+
+      await expect(
+        service.revokeSessionByRefreshToken(refreshToken, userId, sessionId),
       ).rejects.toThrow(new UnauthorizedException('Invalid refresh token'));
 
       expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
     });
 
     it('rejects a malformed refresh token', async () => {
-      jwtServiceMock.verifyAsync.mockRejectedValueOnce(
-        new Error('invalid signature'),
-      );
+      jwtMock.verifyAsync.mockRejectedValueOnce(new Error('invalid signature'));
 
       await expect(
-        service.revokeSessionByRefreshToken('invalid-token', userId),
+        service.revokeSessionByRefreshToken('invalid-token', userId, sessionId),
       ).rejects.toThrow(new UnauthorizedException('Invalid refresh token'));
 
       expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
     });
 
     it('rejects a token without jti', async () => {
-      jwtServiceMock.verifyAsync.mockResolvedValueOnce({
+      jwtMock.verifyAsync.mockResolvedValueOnce({
         sub: userId,
         sid: sessionId,
       });
 
       await expect(
-        service.revokeSessionByRefreshToken(refreshToken, userId),
+        service.revokeSessionByRefreshToken(refreshToken, userId, sessionId),
       ).rejects.toThrow(new UnauthorizedException('Invalid refresh token'));
 
       expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the stored refresh token hash does not match', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.revokeSessionByRefreshToken(refreshToken, userId, sessionId),
+      ).rejects.toThrow(new UnauthorizedException('Invalid refresh token'));
     });
   });
 });
