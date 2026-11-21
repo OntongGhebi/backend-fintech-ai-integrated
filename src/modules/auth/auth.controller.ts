@@ -144,8 +144,21 @@ export class AuthController {
     status: HttpStatus.UNAUTHORIZED,
     description: 'Missing/invalid access token or refresh token',
   })
-  async logout(@Body() dto: RefreshTokenDto, @CurrentUser() userId: string) {
-    return this.authService.logout(dto.refreshToken, userId);
+  async logout(
+    @Body() dto: RefreshTokenDto,
+    @Req()
+    request: Request & {
+      user: {
+        id: string;
+        sid: string;
+      };
+    },
+  ) {
+    return this.authService.logout(
+      dto.refreshToken,
+      request.user.id,
+      request.user.sid,
+    );
   }
 
   @Get('me')

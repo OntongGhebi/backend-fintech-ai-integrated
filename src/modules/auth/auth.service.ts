@@ -112,20 +112,19 @@ export class AuthService {
       user.passwordHash,
     );
 
-    if (!passwordMatches) {
+    if (!passwordMatches || user.status !== 'ACTIVE' || !user.emailVerifiedAt) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    if (user.status !== 'ACTIVE') {
-      throw new UnauthorizedException('Invalid email or password');
-    }
-
-    if (!user.emailVerifiedAt) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
+    const session = await this.refreshTokenService.createSession(
+      user.id,
+      ipAddress,
+      userAgent,
+    );
 
     const payload: JwtPayload = {
       sub: user.id,
+      sid: session.sessionId,
     };
 
     const accessSecret =
@@ -135,22 +134,14 @@ export class AuthService {
       'jwt.accessExpiresIn',
     ) as JwtSignOptions['expiresIn'];
 
-    const jwtOptions: JwtSignOptions = {
+    const accessToken = await this.jwtService.signAsync(payload, {
       secret: accessSecret,
       expiresIn: accessExpiresIn,
-    };
-
-    const accessToken = await this.jwtService.signAsync(payload, jwtOptions);
-
-    const refreshToken = await this.refreshTokenService.createSession(
-      user.id,
-      ipAddress,
-      userAgent,
-    );
+    });
 
     return {
       accessToken,
-      refreshToken,
+      refreshToken: session.refreshToken,
       user: {
         id: user.id,
         email: user.email,
@@ -167,10 +158,12 @@ export class AuthService {
   async logout(
     refreshToken: string,
     userId: string,
+    sessionId: string,
   ): Promise<{ message: string }> {
     await this.refreshTokenService.revokeSessionByRefreshToken(
       refreshToken,
       userId,
+      sessionId,
     );
 
     return {

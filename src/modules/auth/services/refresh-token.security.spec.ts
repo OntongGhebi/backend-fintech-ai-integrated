@@ -113,12 +113,16 @@ describe('RefreshTokenService security regression', () => {
     });
 
     it.each([
-      ['missing subject', { sid: sessionId }],
-      ['empty subject', { sub: '', sid: sessionId }],
-      ['missing session id', { sub: userId }],
-      ['empty session id', { sub: userId, sid: '' }],
-      ['non-string subject', { sub: 123, sid: sessionId }],
-      ['non-string session id', { sub: userId, sid: 123 }],
+      ['missing subject', { sid: sessionId, jti: 'jti' }],
+      ['empty subject', { sub: '', sid: sessionId, jti: 'jti' }],
+      ['missing session id', { sub: userId, jti: 'jti' }],
+      ['empty session id', { sub: userId, sid: '', jti: 'jti' }],
+      ['non-string subject', { sub: 123, sid: sessionId, jti: 'jti' }],
+      ['non-string session id', { sub: userId, sid: 123, jti: 'jti' }],
+      ['missing jti', { sub: userId, sid: sessionId }],
+      ['empty jti', { sub: userId, sid: sessionId, jti: '' }],
+      ['whitespace jti', { sub: userId, sid: sessionId, jti: '   ' }],
+      ['non-string jti', { sub: userId, sid: sessionId, jti: 123 }],
       ['null payload', null],
     ])('rejects a token payload with %s', async (_label, payload) => {
       jwtServiceMock.verifyAsync.mockResolvedValueOnce(payload);
@@ -158,6 +162,7 @@ describe('RefreshTokenService security regression', () => {
       );
 
       expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
+
       expect(jwtServiceMock.signAsync).not.toHaveBeenCalled();
     });
 
@@ -218,6 +223,9 @@ describe('RefreshTokenService security regression', () => {
             .update(refreshToken)
             .digest('hex'),
           revokedAt: null,
+          expiresAt: {
+            gt: expect.any(Date),
+          },
         },
         data: {
           refreshTokenHash: expect.any(String),
@@ -230,6 +238,9 @@ describe('RefreshTokenService security regression', () => {
 
   describe('session ownership during revocation', () => {
     it('does not allow a user to revoke another user session', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({
+        count: 0,
+      });
       prismaMock.session.findUnique.mockResolvedValue({
         id: sessionId,
         userId: '33333333-3333-4333-8333-333333333333',
@@ -244,6 +255,9 @@ describe('RefreshTokenService security regression', () => {
     });
 
     it('does not update a session that is already revoked', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({
+        count: 0,
+      });
       prismaMock.session.findUnique.mockResolvedValue({
         id: sessionId,
         userId,

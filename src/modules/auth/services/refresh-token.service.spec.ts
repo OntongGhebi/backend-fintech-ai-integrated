@@ -54,6 +54,17 @@ describe('RefreshTokenService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
 
+    configServiceMock.get.mockImplementation((key: string) => {
+      const values: Record<string, string> = {
+        'jwt.accessSecret': 'test-access-secret',
+        'jwt.accessExpiresIn': '15m',
+        'jwt.refreshSecret': 'test-refresh-secret',
+        'jwt.refreshExpiresIn': '7d',
+      };
+
+      return values[key];
+    });
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RefreshTokenService,
@@ -157,6 +168,7 @@ describe('RefreshTokenService', () => {
       jwtServiceMock.verifyAsync.mockResolvedValue({
         sub: 'user-id',
         sid: 'session-id',
+        jti: 'refresh-token-jti',
       });
 
       jwtServiceMock.signAsync.mockReset();
@@ -164,8 +176,9 @@ describe('RefreshTokenService', () => {
       prismaMock.session.findUnique.mockResolvedValue({
         id: 'session-id',
         userId: 'user-id',
-        refreshTokenHash:
-          '9f8f4f5f6f4f4c7f4a8c9c3c7d4d3d2d4f3e2f1f0e9d8c7b6a5a4a3a2a1',
+        refreshTokenHash: createHash('sha256')
+          .update(refreshToken)
+          .digest('hex'),
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
         revokedAt: null,
         user: {
@@ -253,16 +266,21 @@ describe('RefreshTokenService', () => {
       await expect(service.rotateSession(refreshToken)).rejects.toThrow(
         'Refresh token has expired',
       );
+
+      expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
     });
 
     it('should reject rotation when conditional session update affects zero rows', async () => {
-      const refreshToken = 'valid-refresh-token';
+      const token = 'valid-refresh-token';
       const userId = 'user-123';
       const sessionId = 'session-123';
+
+      const oldHash = createHash('sha256').update(token).digest('hex');
 
       jwtServiceMock.verifyAsync.mockResolvedValue({
         sub: userId,
         sid: sessionId,
+        jti: 'refresh-token-jti',
       });
 
       jwtServiceMock.signAsync
@@ -276,9 +294,7 @@ describe('RefreshTokenService', () => {
       prismaMock.session.findUnique.mockResolvedValue({
         id: sessionId,
         userId,
-        refreshTokenHash: createHash('sha256')
-          .update(refreshToken)
-          .digest('hex'),
+        refreshTokenHash: oldHash,
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
         revokedAt: null,
         user: {
@@ -291,7 +307,7 @@ describe('RefreshTokenService', () => {
         count: 0,
       });
 
-      await expect(service.rotateSession(refreshToken)).rejects.toThrow(
+      await expect(service.rotateSession(token)).rejects.toThrow(
         'Refresh token has already been rotated or revoked',
       );
 
@@ -299,16 +315,17 @@ describe('RefreshTokenService', () => {
         where: {
           id: sessionId,
           userId,
-          refreshTokenHash: createHash('sha256')
-            .update(refreshToken)
-            .digest('hex'),
+          refreshTokenHash: oldHash,
           revokedAt: null,
+          expiresAt: {
+            gt: expect.any(Date),
+          },
         },
-        data: expect.objectContaining({
+        data: {
           refreshTokenHash: expect.any(String),
           expiresAt: expect.any(Date),
           lastUsedAt: expect.any(Date),
-        }),
+        },
       });
     });
 
@@ -316,7 +333,9 @@ describe('RefreshTokenService', () => {
       prismaMock.session.findUnique.mockResolvedValue({
         id: 'session-id',
         userId: 'user-id',
-        refreshTokenHash: 'different-hash',
+        refreshTokenHash: createHash('sha256')
+          .update(refreshToken)
+          .digest('hex'),
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
         revokedAt: null,
         user: {
@@ -328,15 +347,32 @@ describe('RefreshTokenService', () => {
       await expect(service.rotateSession(refreshToken)).rejects.toThrow(
         'User account is not active',
       );
+
+      expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('should reject a token whose stored hash does not match', async () => {
+      prismaMock.session.findUnique.mockResolvedValue({
+        id: 'session-id',
+        userId: 'user-id',
+        refreshTokenHash: 'different-hash',
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        revokedAt: null,
+        user: {
+          id: 'user-id',
+          status: 'ACTIVE',
+        },
+      });
+
+      await expect(service.rotateSession(refreshToken)).rejects.toThrow(
+        'Invalid refresh token',
+      );
+
+      expect(prismaMock.session.updateMany).not.toHaveBeenCalled();
     });
 
     it('should update the session after successful rotation', async () => {
-      const crypto = require('crypto');
-
-      const oldHash = crypto
-        .createHash('sha256')
-        .update(refreshToken)
-        .digest('hex');
+      const oldHash = createHash('sha256').update(refreshToken).digest('hex');
 
       prismaMock.session.findUnique.mockResolvedValue({
         id: 'session-id',
@@ -367,6 +403,9 @@ describe('RefreshTokenService', () => {
           userId: 'user-id',
           refreshTokenHash: oldHash,
           revokedAt: null,
+          expiresAt: {
+            gt: expect.any(Date),
+          },
         },
         data: {
           refreshTokenHash: expect.any(String),
@@ -374,27 +413,78 @@ describe('RefreshTokenService', () => {
           lastUsedAt: expect.any(Date),
         },
       });
+
+      expect(jwtServiceMock.signAsync).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('revokeSession', () => {
-    it('should revoke an active session', async () => {
-      prismaMock.session.findUnique.mockResolvedValue({
-        id: 'session-id',
-        userId: 'user-id',
-        revokedAt: null,
+    it('should revoke an active session atomically', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({
+        count: 1,
       });
 
       await service.revokeSession('session-id', 'user-id');
 
-      expect(prismaMock.session.update).toHaveBeenCalledWith({
+      expect(prismaMock.session.updateMany).toHaveBeenCalledWith({
         where: {
           id: 'session-id',
+          userId: 'user-id',
+          revokedAt: null,
         },
         data: {
           revokedAt: expect.any(Date),
         },
       });
+
+      expect(prismaMock.session.findUnique).not.toHaveBeenCalled();
+      expect(prismaMock.session.update).not.toHaveBeenCalled();
+    });
+
+    it('should allow repeated logout when session is already revoked', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({
+        count: 0,
+      });
+
+      prismaMock.session.findUnique.mockResolvedValue({
+        id: 'session-id',
+        userId: 'user-id',
+        revokedAt: new Date(),
+      });
+
+      await expect(
+        service.revokeSession('session-id', 'user-id'),
+      ).resolves.toBeUndefined();
+
+      expect(prismaMock.session.update).not.toHaveBeenCalled();
+    });
+
+    it('should reject when session does not exist', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({
+        count: 0,
+      });
+
+      prismaMock.session.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.revokeSession('session-id', 'user-id'),
+      ).rejects.toThrow('Invalid refresh token');
+    });
+
+    it('should reject when session belongs to another user', async () => {
+      prismaMock.session.updateMany.mockResolvedValue({
+        count: 0,
+      });
+
+      prismaMock.session.findUnique.mockResolvedValue({
+        id: 'session-id',
+        userId: 'another-user-id',
+        revokedAt: null,
+      });
+
+      await expect(
+        service.revokeSession('session-id', 'user-id'),
+      ).rejects.toThrow('Invalid refresh token');
     });
   });
 });

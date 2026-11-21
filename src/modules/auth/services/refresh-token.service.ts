@@ -18,27 +18,26 @@ export class RefreshTokenService {
     userId: string,
     ipAddress?: string,
     userAgent?: string,
-  ): Promise<string> {
+  ): Promise<{ sessionId: string; refreshToken: string }> {
     const sessionId = randomUUID();
 
     const refreshToken = await this.generateRefreshToken(userId, sessionId);
-
-    const refreshTokenHash = this.hashToken(refreshToken);
-
-    const expiresAt = this.getRefreshTokenExpiration(refreshToken);
 
     await this.prisma.session.create({
       data: {
         id: sessionId,
         userId,
-        refreshTokenHash,
-        expiresAt,
+        refreshTokenHash: this.hashToken(refreshToken),
+        expiresAt: this.getRefreshTokenExpiration(refreshToken),
         ipAddress: ipAddress ?? null,
         userAgent: userAgent ?? null,
       },
     });
 
-    return refreshToken;
+    return {
+      sessionId,
+      refreshToken,
+    };
   }
 
   async rotateSession(refreshToken: string): Promise<{
@@ -61,16 +60,13 @@ export class RefreshTokenService {
           select: {
             id: true,
             status: true,
+            deletedAt: true,
           },
         },
       },
     });
 
-    if (!session) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    if (session.userId !== payload.sub) {
+    if (!session || session.userId !== payload.sub) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -82,7 +78,10 @@ export class RefreshTokenService {
       throw new UnauthorizedException('Refresh token has expired');
     }
 
-    if (session.user.status !== 'ACTIVE') {
+    if (
+      session.user.status !== 'ACTIVE' ||
+      session.user.deletedAt !== null
+    ) {
       throw new UnauthorizedException('User account is not active');
     }
 
@@ -98,7 +97,6 @@ export class RefreshTokenService {
     );
 
     const newRefreshTokenHash = this.hashToken(newRefreshToken);
-
     const newExpiresAt = this.getRefreshTokenExpiration(newRefreshToken);
 
     const updateResult = await this.prisma.session.updateMany({
@@ -107,6 +105,9 @@ export class RefreshTokenService {
         userId: session.userId,
         refreshTokenHash: incomingTokenHash,
         revokedAt: null,
+        expiresAt: {
+          gt: new Date(),
+        },
       },
       data: {
         refreshTokenHash: newRefreshTokenHash,
@@ -121,7 +122,10 @@ export class RefreshTokenService {
       );
     }
 
-    const accessToken = await this.generateAccessToken(session.userId);
+    const accessToken = await this.generateAccessToken(
+      session.userId,
+      session.id,
+    );
 
     return {
       accessToken,
@@ -130,53 +134,92 @@ export class RefreshTokenService {
   }
 
   async revokeSession(sessionId: string, userId: string): Promise<void> {
-    const session = await this.prisma.session.findUnique({
+    const result = await this.prisma.session.updateMany({
       where: {
         id: sessionId,
-      },
-      select: {
-        id: true,
-        userId: true,
-        revokedAt: true,
-      },
-    });
-
-    if (!session) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    if (session.userId !== userId) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    if (session.revokedAt) {
-      return;
-    }
-
-    await this.prisma.session.update({
-      where: {
-        id: session.id,
+        userId,
+        revokedAt: null,
+        expiresAt: {
+          gt: new Date(),
+        },
       },
       data: {
         revokedAt: new Date(),
       },
     });
+
+    if (result.count > 1) {
+      throw new Error(
+        'Session revocation affected an unexpected number of records',
+      );
+    }
+
+    if (result.count === 0) {
+      const session = await this.prisma.session.findUnique({
+        where: {
+          id: sessionId,
+        },
+        select: {
+          id: true,
+          userId: true,
+          revokedAt: true,
+        },
+      });
+
+      if (!session || session.userId !== userId) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      if (session.revokedAt) {
+        return;
+      }
+
+      throw new UnauthorizedException(
+        'Unable to revoke authentication session',
+      );
+    }
   }
 
   async revokeSessionByRefreshToken(
     refreshToken: string,
     userId: string,
+    expectedSessionId: string,
   ): Promise<void> {
     const payload = await this.verifyRefreshToken(refreshToken);
 
-    if (payload.sub !== userId) {
+    if (
+      payload.sub !== userId ||
+      payload.sid !== expectedSessionId
+    ) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    await this.revokeSession(payload.sid, userId);
+    const incomingTokenHash = this.hashToken(refreshToken);
+
+    const result = await this.prisma.session.updateMany({
+      where: {
+        id: expectedSessionId,
+        userId,
+        refreshTokenHash: incomingTokenHash,
+        revokedAt: null,
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    if (result.count !== 1) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
   }
 
-  private async generateAccessToken(userId: string): Promise<string> {
+  private async generateAccessToken(
+    userId: string,
+    sessionId: string,
+  ): Promise<string> {
     const accessSecret = this.configService.get<string>('jwt.accessSecret');
 
     const accessExpiresIn = this.configService.get<string>(
@@ -194,6 +237,7 @@ export class RefreshTokenService {
     return this.jwtService.signAsync(
       {
         sub: userId,
+        sid: sessionId,
       },
       {
         secret: accessSecret,
@@ -254,9 +298,11 @@ export class RefreshTokenService {
         !payload ||
         typeof payload !== 'object' ||
         typeof payload.sub !== 'string' ||
-        payload.sub.length === 0 ||
+        payload.sub.trim().length === 0 ||
         typeof payload.sid !== 'string' ||
-        payload.sid.length === 0
+        payload.sid.trim().length === 0 ||
+        typeof payload.jti !== 'string' ||
+        payload.jti.trim().length === 0
       ) {
         throw new UnauthorizedException('Invalid refresh token');
       }
