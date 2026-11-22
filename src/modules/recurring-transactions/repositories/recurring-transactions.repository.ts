@@ -133,15 +133,6 @@ export class RecurringTransactionsRepository {
     });
   }
 
-  /**
-   * Updates a recurring transaction owned by the specified user.
-   *
-   * IMPORTANT:
-   * The data argument must contain scalar field updates,
-   * such as accountId and categoryId. Do not pass nested
-   * relation operations such as account.connect or category.connect
-   * to updateMany().
-   */
   async update(
     recurringTransactionId: string,
     userId: string,
@@ -190,6 +181,17 @@ export class RecurringTransactionsRepository {
     isActive: boolean,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      // Serialize concurrent executions for the same recurring transaction.
+      // The lock is held until this database transaction commits or rolls back.
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id
+        FROM recurring_transactions
+        WHERE id = ${recurringTransactionId}::uuid
+        FOR UPDATE
+      `;
+
+      // Read only after acquiring the lock so a waiting worker sees the
+      // committed state from the worker that acquired the lock first.
       const recurringTransaction = await tx.recurringTransaction.findUnique({
         where: {
           id: recurringTransactionId,
@@ -259,7 +261,7 @@ export class RecurringTransactionsRepository {
         },
       });
 
-      if (updated.count === 0) {
+      if (updated.count !== 1) {
         throw new Error(
           'Recurring transaction execution state changed unexpectedly',
         );

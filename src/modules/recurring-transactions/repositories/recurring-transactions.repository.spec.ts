@@ -1,9 +1,9 @@
 import { Prisma } from '../../../../generated/prisma/client';
 
 import { TransactionDomainService } from 'src/modules/transactions/transaction-domain.service.js';
+import { PrismaService } from 'src/database/prisma/prisma.service';
 
 import { RecurringTransactionsRepository } from './recurring-transactions.repository';
-import { PrismaService } from 'src/database/prisma/prisma.service';
 
 describe('RecurringTransactionsRepository', () => {
   let repository: RecurringTransactionsRepository;
@@ -12,8 +12,10 @@ describe('RecurringTransactionsRepository', () => {
   const recurringTransactionFindUniqueMock = jest.fn();
   const recurringTransactionUpdateManyMock = jest.fn();
   const transactionFindUniqueMock = jest.fn();
+  const queryRawMock = jest.fn();
 
   const prismaTransaction = {
+    $queryRaw: queryRawMock,
     recurringTransaction: {
       findUnique: recurringTransactionFindUniqueMock,
       updateMany: recurringTransactionUpdateManyMock,
@@ -40,6 +42,8 @@ describe('RecurringTransactionsRepository', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
+    queryRawMock.mockResolvedValue([]);
+
     repository = new RecurringTransactionsRepository(
       prisma,
       transactionDomainService,
@@ -48,15 +52,11 @@ describe('RecurringTransactionsRepository', () => {
 
   describe('executeDueTransaction', () => {
     const recurringTransactionId = '11111111-1111-4111-8111-111111111111';
-
     const userId = '22222222-2222-4222-8222-222222222222';
-
     const accountId = '33333333-3333-4333-8333-333333333333';
-
     const categoryId = '44444444-4444-4444-8444-444444444444';
 
     const scheduledAt = new Date('2026-09-23T00:00:00.000Z');
-
     const nextRunAt = new Date('2026-10-23T00:00:00.000Z');
 
     const recurringTransaction = {
@@ -70,6 +70,26 @@ describe('RecurringTransactionsRepository', () => {
       isActive: true,
       nextRunAt: scheduledAt,
     };
+
+    it('should acquire a row lock before reading recurring transaction state', async () => {
+      recurringTransactionFindUniqueMock.mockResolvedValue(null);
+
+      await repository.executeDueTransaction(
+        recurringTransactionId,
+        scheduledAt,
+        nextRunAt,
+        true,
+      );
+
+      expect(queryRawMock).toHaveBeenCalledTimes(1);
+      expect(recurringTransactionFindUniqueMock).toHaveBeenCalledTimes(1);
+
+      const lockOrder = queryRawMock.mock.invocationCallOrder[0];
+      const readOrder =
+        recurringTransactionFindUniqueMock.mock.invocationCallOrder[0];
+
+      expect(lockOrder).toBeLessThan(readOrder);
+    });
 
     it('should execute a due recurring transaction successfully', async () => {
       const createdTransaction = {
@@ -114,6 +134,8 @@ describe('RecurringTransactionsRepository', () => {
       );
 
       const recurringExecutionKey = `${recurringTransactionId}:${scheduledAt.toISOString()}`;
+
+      expect(queryRawMock).toHaveBeenCalledTimes(1);
 
       expect(transactionFindUniqueMock).toHaveBeenCalledWith({
         where: {
@@ -171,7 +193,6 @@ describe('RecurringTransactionsRepository', () => {
       );
 
       expect(result).toBeNull();
-
       expect(transactionFindUniqueMock).not.toHaveBeenCalled();
 
       expect(
@@ -193,7 +214,6 @@ describe('RecurringTransactionsRepository', () => {
       );
 
       expect(result).toBeNull();
-
       expect(transactionFindUniqueMock).not.toHaveBeenCalled();
 
       expect(
@@ -288,6 +308,40 @@ describe('RecurringTransactionsRepository', () => {
       ).rejects.toThrow(
         'Recurring transaction execution state changed unexpectedly',
       );
+    });
+
+    it('should not create a transaction when the occurrence already exists after acquiring the lock', async () => {
+      const existingTransaction = {
+        id: '55555555-5555-4555-8555-555555555555',
+        recurringTransactionId,
+        recurringExecutionKey: `${recurringTransactionId}:${scheduledAt.toISOString()}`,
+        source: 'SYSTEM',
+      };
+
+      recurringTransactionFindUniqueMock.mockResolvedValue(
+        recurringTransaction,
+      );
+      transactionFindUniqueMock.mockResolvedValue(existingTransaction);
+
+      const result = await repository.executeDueTransaction(
+        recurringTransactionId,
+        scheduledAt,
+        nextRunAt,
+        true,
+      );
+
+      expect(queryRawMock).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({
+        transaction: existingTransaction,
+        recurringTransaction,
+        alreadyExecuted: true,
+      });
+
+      expect(
+        transactionDomainService.createSystemTransaction,
+      ).not.toHaveBeenCalled();
+
+      expect(recurringTransactionUpdateManyMock).not.toHaveBeenCalled();
     });
   });
 });
