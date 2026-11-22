@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../../../../generated/prisma/client.js';
 import { PrismaService } from 'src/database/prisma/prisma.service';
 
+import { runSerializableTransaction } from '../utils/serializable-transaction.util';
+
 type BudgetCreateData = Prisma.BudgetCreateInput;
 type BudgetUpdateData = Prisma.BudgetUncheckedUpdateManyInput;
 
@@ -246,6 +248,9 @@ export class BudgetsRepository {
    * allocations:
    * - null: do not modify monthly allocations.
    * - array: upsert the supplied monthly allocations.
+   *
+   * Serializable retries ensure previousAmount is calculated against
+   * the latest committed allocation after a concurrent write conflict.
    */
   async updateWithAllocationsAndScopes(
     budgetId: string,
@@ -254,91 +259,86 @@ export class BudgetsRepository {
     allocations: BudgetAllocationInput[] | null,
     categoryIds?: string[],
   ) {
-    return this.prisma.$transaction(
-      async (tx) => {
-        const updated = await tx.budget.updateMany({
-          where: {
-            id: budgetId,
-            userId,
-            deletedAt: null,
-          },
-          data,
-        });
+    return runSerializableTransaction(this.prisma, async (tx) => {
+      const updated = await tx.budget.updateMany({
+        where: {
+          id: budgetId,
+          userId,
+          deletedAt: null,
+        },
+        data,
+      });
 
-        if (updated.count === 0) {
-          return null;
-        }
+      if (updated.count === 0) {
+        return null;
+      }
 
-        if (allocations) {
-          for (const allocation of allocations) {
-            const existing = await tx.budgetAllocation.findUnique({
-              where: {
-                budgetId_periodStart: {
-                  budgetId,
-                  periodStart: allocation.periodStart,
-                },
-              },
-              select: {
-                amount: true,
-              },
-            });
-
-            await tx.budgetAllocation.upsert({
-              where: {
-                budgetId_periodStart: {
-                  budgetId,
-                  periodStart: allocation.periodStart,
-                },
-              },
-              create: {
+      if (allocations) {
+        for (const allocation of allocations) {
+          const existing = await tx.budgetAllocation.findUnique({
+            where: {
+              budgetId_periodStart: {
                 budgetId,
                 periodStart: allocation.periodStart,
-                amount: allocation.amount,
-                source: 'MANUAL',
-                previousAmount: null,
-                recommendationId: null,
               },
-              update: {
-                amount: allocation.amount,
-                source: 'MANUAL',
-                previousAmount: existing?.amount ?? null,
-                recommendationId: null,
-              },
-            });
-          }
-        }
-
-        if (categoryIds !== undefined) {
-          await tx.budgetCategoryScope.deleteMany({
-            where: {
-              budgetId,
+            },
+            select: {
+              amount: true,
             },
           });
 
-          if (categoryIds.length > 0) {
-            await tx.budgetCategoryScope.createMany({
-              data: categoryIds.map((categoryId) => ({
+          await tx.budgetAllocation.upsert({
+            where: {
+              budgetId_periodStart: {
                 budgetId,
-                categoryId,
-              })),
-              skipDuplicates: true,
-            });
-          }
+                periodStart: allocation.periodStart,
+              },
+            },
+            create: {
+              budgetId,
+              periodStart: allocation.periodStart,
+              amount: allocation.amount,
+              source: 'MANUAL',
+              previousAmount: null,
+              recommendationId: null,
+            },
+            update: {
+              amount: allocation.amount,
+              source: 'MANUAL',
+              previousAmount: existing?.amount ?? null,
+              recommendationId: null,
+            },
+          });
         }
+      }
 
-        return tx.budget.findFirst({
+      if (categoryIds !== undefined) {
+        await tx.budgetCategoryScope.deleteMany({
           where: {
-            id: budgetId,
-            userId,
-            deletedAt: null,
+            budgetId,
           },
-          include: this.budgetInclude,
         });
-      },
-      {
-        isolationLevel: 'Serializable',
-      },
-    );
+
+        if (categoryIds.length > 0) {
+          await tx.budgetCategoryScope.createMany({
+            data: categoryIds.map((categoryId) => ({
+              budgetId,
+              categoryId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
+      return tx.budget.findFirst({
+        where: {
+          id: budgetId,
+          userId,
+          deletedAt: null,
+        },
+        include: this.budgetInclude,
+      });
+    });
   }
 
   /**
