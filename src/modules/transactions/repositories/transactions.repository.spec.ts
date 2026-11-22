@@ -118,6 +118,7 @@ describe('TransactionsRepository — Telegram idempotency', () => {
     ).toHaveBeenCalledWith({
       where: {
         id: 'confirmation-id',
+        userId: 'user-id',
         status: {
           in: ['CONFIRMED', 'PROCESSING'],
         },

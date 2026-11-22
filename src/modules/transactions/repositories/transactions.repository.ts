@@ -6,6 +6,51 @@ import { PrismaService } from 'src/database/prisma/prisma.service';
 import { calculateAccountBalance } from '../../accounts/account-balance.util';
 import { GetTransactionsQueryDto } from '../dto/get-transaction-query.dto';
 
+type TransactionUpdateData = Parameters<
+  PrismaService['transaction']['updateMany']
+>[0]['data'];
+
+interface TransferPairRow {
+  id: string;
+  type: string;
+  status: string;
+  metadata: Prisma.JsonValue | null;
+}
+
+function getTransferDirection(
+  metadata: Prisma.JsonValue | null,
+): string | null {
+  if (
+    metadata === null ||
+    typeof metadata !== 'object' ||
+    Array.isArray(metadata)
+  ) {
+    return null;
+  }
+
+  const direction = metadata.direction;
+
+  return typeof direction === 'string' ? direction : null;
+}
+
+function isValidTransferPair(rows: TransferPairRow[]): boolean {
+  if (rows.length !== 2) {
+    return false;
+  }
+
+  if (rows.some((row) => row.type !== 'TRANSFER' || row.status !== 'ACTIVE')) {
+    return false;
+  }
+
+  const directions = rows.map((row) => getTransferDirection(row.metadata));
+
+  return (
+    directions.includes('OUT') &&
+    directions.includes('IN') &&
+    directions[0] !== directions[1]
+  );
+}
+
 @Injectable()
 export class TransactionsRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -86,6 +131,7 @@ export class TransactionsRepository {
         const updated = await tx.telegramTransactionConfirmation.updateMany({
           where: {
             id: params.confirmationId,
+            userId: params.transactionData.userId,
             status: {
               in: ['CONFIRMED', 'PROCESSING'],
             },
@@ -215,33 +261,230 @@ export class TransactionsRepository {
     };
   }
 
+  /**
+   * Updates a normal transaction or both legs of a transfer atomically.
+   *
+   * Transfer account/category changes are intentionally rejected because
+   * changing only one leg would break the transfer relationship.
+   */
   async update(
     transactionId: string,
     userId: string,
-    data: Parameters<PrismaService['transaction']['updateMany']>[0]['data'],
+    data: TransactionUpdateData,
   ) {
-    return this.prisma.transaction.updateMany({
-      where: {
-        id: transactionId,
-        userId,
-        deletedAt: null,
-        status: 'ACTIVE',
-      },
-      data,
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.transaction.findFirst({
+        where: {
+          id: transactionId,
+          userId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          type: true,
+          transferGroupId: true,
+        },
+      });
+
+      if (!current) {
+        return { count: 0 };
+      }
+
+      if (current.type !== 'TRANSFER') {
+        await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM transactions
+          WHERE id = ${transactionId}::uuid
+            AND "userId" = ${userId}::uuid
+            AND "deletedAt" IS NULL
+          FOR UPDATE
+        `;
+
+        return tx.transaction.updateMany({
+          where: {
+            id: transactionId,
+            userId,
+            deletedAt: null,
+            status: 'ACTIVE',
+            type: {
+              not: 'TRANSFER',
+            },
+          },
+          data,
+        });
+      }
+
+      if (data.accountId !== undefined || data.categoryId !== undefined) {
+        throw new BadRequestException(
+          'Transfer account and category cannot be changed through transaction update',
+        );
+      }
+
+      if (!current.transferGroupId) {
+        throw new BadRequestException(
+          'Transfer transaction is missing its transfer group',
+        );
+      }
+
+      // Lock both legs in a deterministic order to avoid opposite-order
+      // locking when two requests target different legs of the same transfer.
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id
+        FROM transactions
+        WHERE "transferGroupId" = ${current.transferGroupId}::uuid
+          AND "userId" = ${userId}::uuid
+          AND "deletedAt" IS NULL
+        ORDER BY id
+        FOR UPDATE
+      `;
+
+      const pair = await tx.transaction.findMany({
+        where: {
+          transferGroupId: current.transferGroupId,
+          userId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          type: true,
+          status: true,
+          metadata: true,
+        },
+      });
+
+      if (!isValidTransferPair(pair)) {
+        throw new BadRequestException(
+          'Transfer pair is incomplete or inconsistent',
+        );
+      }
+
+      const updated = await tx.transaction.updateMany({
+        where: {
+          id: {
+            in: pair.map((row) => row.id),
+          },
+          userId,
+          transferGroupId: current.transferGroupId,
+          type: 'TRANSFER',
+          status: 'ACTIVE',
+          deletedAt: null,
+        },
+        data,
+      });
+
+      if (updated.count !== 2) {
+        throw new Error('TRANSFER_PAIR_UPDATE_CONFLICT');
+      }
+
+      return updated;
     });
   }
 
+  /**
+   * Voids a normal transaction or both legs of a transfer atomically.
+   */
   async voidTransaction(transactionId: string, userId: string) {
-    return this.prisma.transaction.updateMany({
-      where: {
-        id: transactionId,
-        userId,
-        deletedAt: null,
-        status: 'ACTIVE',
-      },
-      data: {
-        status: 'VOIDED',
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.transaction.findFirst({
+        where: {
+          id: transactionId,
+          userId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          type: true,
+          transferGroupId: true,
+        },
+      });
+
+      if (!current) {
+        return { count: 0 };
+      }
+
+      if (current.type !== 'TRANSFER') {
+        await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM transactions
+          WHERE id = ${transactionId}::uuid
+            AND "userId" = ${userId}::uuid
+            AND "deletedAt" IS NULL
+          FOR UPDATE
+        `;
+
+        return tx.transaction.updateMany({
+          where: {
+            id: transactionId,
+            userId,
+            deletedAt: null,
+            status: 'ACTIVE',
+            type: {
+              not: 'TRANSFER',
+            },
+          },
+          data: {
+            status: 'VOIDED',
+          },
+        });
+      }
+
+      if (!current.transferGroupId) {
+        throw new BadRequestException(
+          'Transfer transaction is missing its transfer group',
+        );
+      }
+
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id
+        FROM transactions
+        WHERE "transferGroupId" = ${current.transferGroupId}::uuid
+          AND "userId" = ${userId}::uuid
+          AND "deletedAt" IS NULL
+        ORDER BY id
+        FOR UPDATE
+      `;
+
+      const pair = await tx.transaction.findMany({
+        where: {
+          transferGroupId: current.transferGroupId,
+          userId,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          type: true,
+          status: true,
+          metadata: true,
+        },
+      });
+
+      if (!isValidTransferPair(pair)) {
+        throw new BadRequestException(
+          'Transfer pair is incomplete or inconsistent',
+        );
+      }
+
+      const updated = await tx.transaction.updateMany({
+        where: {
+          id: {
+            in: pair.map((row) => row.id),
+          },
+          userId,
+          transferGroupId: current.transferGroupId,
+          type: 'TRANSFER',
+          status: 'ACTIVE',
+          deletedAt: null,
+        },
+        data: {
+          status: 'VOIDED',
+        },
+      });
+
+      if (updated.count !== 2) {
+        throw new Error('TRANSFER_PAIR_VOID_CONFLICT');
+      }
+
+      return updated;
     });
   }
 
@@ -293,8 +536,6 @@ export class TransactionsRepository {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      // Serialize transfers from the same source account so concurrent
-      // requests cannot spend the same available balance.
       await tx.$queryRaw<Array<{ id: string }>>`
         SELECT id
         FROM accounts
@@ -304,7 +545,6 @@ export class TransactionsRepository {
         FOR UPDATE
       `;
 
-      // Both accounts must be active and owned by the authenticated user.
       const [sourceAccount, destinationAccount] = await Promise.all([
         tx.account.findFirst({
           where: {
@@ -336,7 +576,6 @@ export class TransactionsRepository {
         throw new BadRequestException('Destination account is not available');
       }
 
-      // Telegram transfers use the confirmation UUID as an idempotency key.
       if (typeof sourceData.telegramConfirmationId === 'string') {
         const telegramConfirmationId = sourceData.telegramConfirmationId;
 
@@ -351,8 +590,6 @@ export class TransactionsRepository {
         });
 
         if (existingSource) {
-          // Do not return an existing transfer belonging to another user,
-          // source account, or destination account.
           if (
             existingSource.userId !== userId ||
             existingSource.accountId !== sourceAccountId
@@ -376,11 +613,7 @@ export class TransactionsRepository {
             },
           });
 
-          if (
-            !existingDestination ||
-            existingDestination.userId !== userId ||
-            existingDestination.accountId !== destinationAccountId
-          ) {
+          if (!existingDestination) {
             throw new Error('TELEGRAM_TRANSFER_INCOMPLETE');
           }
 

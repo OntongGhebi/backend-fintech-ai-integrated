@@ -30,6 +30,7 @@ describe('Ownership and IDOR regression', () => {
       payment: createModelMock(),
       subscriptionEvent: createModelMock(),
       transaction: createModelMock(),
+      $queryRaw: jest.fn().mockResolvedValue([]),
     };
 
     const prisma = {
@@ -176,6 +177,11 @@ describe('Ownership and IDOR regression', () => {
 
     it('scopes transaction updates to the authenticated owner', async () => {
       const { prisma } = createPrismaMock();
+      prisma.transaction.findFirst.mockResolvedValue({
+        id: resourceId,
+        type: 'EXPENSE',
+        transferGroupId: null,
+      });
       const repository = new TransactionsRepository(prisma as never);
 
       await repository.update(resourceId, ownerUserId, {
@@ -188,6 +194,9 @@ describe('Ownership and IDOR regression', () => {
           userId: ownerUserId,
           deletedAt: null,
           status: 'ACTIVE',
+          type: {
+            not: 'TRANSFER',
+          },
         },
         data: {
           description: 'Updated transaction',
@@ -197,6 +206,11 @@ describe('Ownership and IDOR regression', () => {
 
     it('scopes transaction voiding to the authenticated owner', async () => {
       const { prisma } = createPrismaMock();
+      prisma.transaction.findFirst.mockResolvedValue({
+        id: resourceId,
+        type: 'EXPENSE',
+        transferGroupId: null,
+      });
       const repository = new TransactionsRepository(prisma as never);
 
       await repository.voidTransaction(resourceId, ownerUserId);
@@ -207,6 +221,9 @@ describe('Ownership and IDOR regression', () => {
           userId: ownerUserId,
           deletedAt: null,
           status: 'ACTIVE',
+          type: {
+            not: 'TRANSFER',
+          },
         },
         data: {
           status: 'VOIDED',
