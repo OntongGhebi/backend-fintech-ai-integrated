@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '../../../../generated/prisma/client';
 
 import { PrismaService } from 'src/database/prisma/prisma.service';
 import { NotificationChannel } from 'src/database/enums/notification-channel.enum';
@@ -25,12 +26,42 @@ export class NotificationsRepository {
     return this.prisma.notification.create({ data });
   }
 
+  async createIdempotently(
+    data: Parameters<PrismaService['notification']['create']>[0]['data'],
+  ) {
+    const rawIdempotencyKey: unknown = data.idempotencyKey;
+    const idempotencyKey =
+      typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey : undefined;
+
+    if (!idempotencyKey) {
+      return this.create(data);
+    }
+
+    try {
+      return await this.prisma.notification.create({ data });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const existing = await this.prisma.notification.findFirst({
+          where: {
+            userId: data.userId,
+            channel: data.channel,
+            idempotencyKey,
+          },
+        });
+
+        if (existing) return existing;
+      }
+
+      throw error;
+    }
+  }
+
   async findByIdAndUserId(notificationId: string, userId: string) {
     return this.prisma.notification.findFirst({
-      where: {
-        id: notificationId,
-        userId,
-      },
+      where: { id: notificationId, userId },
     });
   }
 
@@ -43,14 +74,7 @@ export class NotificationsRepository {
         ...(options.status !== undefined ? { status: options.status } : {}),
         ...(options.channel !== undefined ? { channel: options.channel } : {}),
       },
-      orderBy: [
-        {
-          createdAt: 'desc',
-        },
-        {
-          id: 'desc',
-        },
-      ],
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       skip,
       take: options.limit,
     });
@@ -127,11 +151,22 @@ export class NotificationsRepository {
   ) {
     return this.prisma.notificationPreference.upsert({
       where: { userId },
-      create: {
-        userId,
-        ...data,
-      },
+      create: { userId, ...data },
       update: data,
+    });
+  }
+
+  async findPendingExternalDeliveries(limit = 100) {
+    return this.prisma.notification.findMany({
+      where: {
+        channel: {
+          in: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+        },
+        status: NotificationStatus.PENDING,
+      },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
     });
   }
 }

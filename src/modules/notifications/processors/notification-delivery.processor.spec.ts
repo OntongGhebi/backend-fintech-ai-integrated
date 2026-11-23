@@ -12,6 +12,7 @@ import {
   NOTIFICATION_DELIVERY_JOB,
   NOTIFICATION_JOB_ATTEMPTS,
 } from '../notifications.constants';
+import { NotificationQueueService } from '../notifications-queue.service';
 import { NotificationDeliveryJob } from '../types/notification-delivery-job.type';
 import { NotificationDeliveryProcessor } from './notification-delivery.processor';
 
@@ -21,7 +22,8 @@ describe('NotificationDeliveryProcessor', () => {
   const prisma = {
     notification: {
       findUnique: jest.fn(),
-      update: jest.fn(),
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
     },
   };
 
@@ -33,11 +35,15 @@ describe('NotificationDeliveryProcessor', () => {
     sendMessage: jest.fn(),
   };
 
+  const notificationQueueService = {
+    enqueueDelivery: jest.fn(),
+  };
+
   const notification = {
     id: 'notification-1',
     userId: 'user-1',
     channel: NotificationChannel.EMAIL,
-    status: NotificationStatus.FAILED,
+    status: NotificationStatus.PENDING,
     title: 'Budget alert',
     message: 'Your budget is almost exhausted.',
     user: {
@@ -76,6 +82,7 @@ describe('NotificationDeliveryProcessor', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
 
+    prisma.notification.findMany.mockResolvedValue([]);
     prisma.notification.findUnique.mockResolvedValue({
       ...notification,
       user: {
@@ -84,7 +91,7 @@ describe('NotificationDeliveryProcessor', () => {
       },
     });
 
-    prisma.notification.update.mockResolvedValue({});
+    prisma.notification.updateMany.mockResolvedValue({ count: 1 });
     emailService.sendNotificationEmail.mockResolvedValue(undefined);
     telegramService.sendMessage.mockResolvedValue(undefined);
 
@@ -102,6 +109,10 @@ describe('NotificationDeliveryProcessor', () => {
         {
           provide: TelegramService,
           useValue: telegramService,
+        },
+        {
+          provide: NotificationQueueService,
+          useValue: notificationQueueService,
         },
       ],
     }).compile();
@@ -138,34 +149,28 @@ describe('NotificationDeliveryProcessor', () => {
 
     await expect(processor.process(createJob())).resolves.toBeUndefined();
 
-    expect(prisma.notification.update).not.toHaveBeenCalled();
+    expect(prisma.notification.updateMany).toHaveBeenCalledTimes(1);
     expect(emailService.sendNotificationEmail).not.toHaveBeenCalled();
   });
 
   it('should not externally deliver an in-app notification', async () => {
-    prisma.notification.findUnique.mockResolvedValueOnce({
-      ...notification,
-      channel: NotificationChannel.IN_APP,
-    });
+    prisma.notification.updateMany.mockResolvedValueOnce({ count: 0 });
 
     await processor.process(createJob());
 
     expect(emailService.sendNotificationEmail).not.toHaveBeenCalled();
     expect(telegramService.sendMessage).not.toHaveBeenCalled();
-    expect(prisma.notification.update).not.toHaveBeenCalled();
+    expect(prisma.notification.findUnique).not.toHaveBeenCalled();
   });
 
   it('should not send a notification that is already SENT', async () => {
-    prisma.notification.findUnique.mockResolvedValueOnce({
-      ...notification,
-      status: NotificationStatus.SENT,
-    });
+    prisma.notification.updateMany.mockResolvedValueOnce({ count: 0 });
 
     await processor.process(createJob());
 
     expect(emailService.sendNotificationEmail).not.toHaveBeenCalled();
     expect(telegramService.sendMessage).not.toHaveBeenCalled();
-    expect(prisma.notification.update).not.toHaveBeenCalled();
+    expect(prisma.notification.findUnique).not.toHaveBeenCalled();
   });
 
   it('should send an email and update the status to SENT', async () => {
@@ -178,9 +183,16 @@ describe('NotificationDeliveryProcessor', () => {
       'Your budget is almost exhausted.',
     );
 
-    expect(prisma.notification.update).toHaveBeenCalledWith({
-      where: { id: 'notification-1' },
-      data: { status: NotificationStatus.SENT },
+    expect(prisma.notification.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: 'notification-1',
+        status: NotificationStatus.PROCESSING,
+        processingStartedAt: expect.any(Date),
+      },
+      data: {
+        status: NotificationStatus.SENT,
+        processingStartedAt: null,
+      },
     });
 
     expect(telegramService.sendMessage).not.toHaveBeenCalled();
@@ -200,7 +212,17 @@ describe('NotificationDeliveryProcessor', () => {
       'Temporary email provider failure',
     );
 
-    expect(prisma.notification.update).not.toHaveBeenCalled();
+    expect(prisma.notification.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: 'notification-1',
+        status: NotificationStatus.PROCESSING,
+        processingStartedAt: expect.any(Date),
+      },
+      data: {
+        status: NotificationStatus.PENDING,
+        processingStartedAt: null,
+      },
+    });
   });
 
   it('should mark the notification FAILED after the final failed attempt', async () => {
@@ -217,9 +239,16 @@ describe('NotificationDeliveryProcessor', () => {
       'Email provider unavailable',
     );
 
-    expect(prisma.notification.update).toHaveBeenCalledWith({
-      where: { id: 'notification-1' },
-      data: { status: NotificationStatus.FAILED },
+    expect(prisma.notification.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: 'notification-1',
+        status: NotificationStatus.PROCESSING,
+        processingStartedAt: expect.any(Date),
+      },
+      data: {
+        status: NotificationStatus.FAILED,
+        processingStartedAt: null,
+      },
     });
   });
 
@@ -239,9 +268,16 @@ describe('NotificationDeliveryProcessor', () => {
       UnrecoverableError,
     );
 
-    expect(prisma.notification.update).toHaveBeenCalledWith({
-      where: { id: 'notification-1' },
-      data: { status: NotificationStatus.FAILED },
+    expect(prisma.notification.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: 'notification-1',
+        status: NotificationStatus.PROCESSING,
+        processingStartedAt: expect.any(Date),
+      },
+      data: {
+        status: NotificationStatus.FAILED,
+        processingStartedAt: null,
+      },
     });
   });
 
@@ -258,9 +294,16 @@ describe('NotificationDeliveryProcessor', () => {
       text: 'Budget alert\n\nYour budget is almost exhausted.',
     });
 
-    expect(prisma.notification.update).toHaveBeenCalledWith({
-      where: { id: 'notification-1' },
-      data: { status: NotificationStatus.SENT },
+    expect(prisma.notification.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: 'notification-1',
+        status: NotificationStatus.PROCESSING,
+        processingStartedAt: expect.any(Date),
+      },
+      data: {
+        status: NotificationStatus.SENT,
+        processingStartedAt: null,
+      },
     });
 
     expect(emailService.sendNotificationEmail).not.toHaveBeenCalled();
@@ -282,18 +325,25 @@ describe('NotificationDeliveryProcessor', () => {
       UnrecoverableError,
     );
 
-    expect(prisma.notification.update).toHaveBeenCalledWith({
-      where: { id: 'notification-1' },
-      data: { status: NotificationStatus.FAILED },
+    expect(prisma.notification.updateMany).toHaveBeenLastCalledWith({
+      where: {
+        id: 'notification-1',
+        status: NotificationStatus.PROCESSING,
+        processingStartedAt: expect.any(Date),
+      },
+      data: {
+        status: NotificationStatus.FAILED,
+        processingStartedAt: null,
+      },
     });
 
     expect(telegramService.sendMessage).not.toHaveBeenCalled();
   });
 
   it('should not mark a notification SENT if persisting the success status fails', async () => {
-    prisma.notification.update.mockRejectedValueOnce(
-      new Error('Database write failed'),
-    );
+    prisma.notification.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockRejectedValueOnce(new Error('Database write failed'));
 
     await expect(processor.process(createJob())).rejects.toThrow(
       'Database write failed',

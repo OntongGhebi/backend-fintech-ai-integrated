@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from 'src/database/prisma/prisma.service';
-import { TransactionType } from 'src/database/enums/transaction-type.enum';
 import { Prisma } from '../../../generated/prisma/client.js';
 
+import { PrismaService } from 'src/database/prisma/prisma.service';
+import { TransactionType } from 'src/database/enums/transaction-type.enum';
 import { NotificationChannel } from 'src/database/enums/notification-channel.enum';
 
 import { NotificationQueueService } from './notifications-queue.service';
@@ -34,17 +34,6 @@ export class NotificationEventsService {
     private readonly budgetScopeEngine: BudgetScopeEngine,
   ) {}
 
-  /**
-   * Mengevaluasi alert anggaran setelah transaksi pengeluaran tersimpan.
-   *
-   * Scope budget ditentukan oleh BudgetScopeEngine:
-   * - ALL_EXPENSES: seluruh pengeluaran, termasuk tanpa kategori.
-   * - CATEGORY: satu kategori.
-   * - CATEGORY_GROUP: kategori induk beserta turunannya.
-   * - CUSTOM: gabungan kategori yang dipilih.
-   *
-   * Kegagalan notifikasi tidak boleh menggagalkan transaksi yang sudah tersimpan.
-   */
   async budgetExpenseCreated(event: {
     userId: string;
     transactionId: string;
@@ -71,15 +60,6 @@ export class NotificationEventsService {
       const transactionDate = new Date(event.transactionDate);
       const month = getBudgetMonthRange(transactionDate, timezone);
 
-      /**
-       * Ambil seluruh budget aktif yang masa berlakunya mencakup bulan
-       * transaksi. Filter kategori dilakukan setelah scope masing-masing
-       * budget diselesaikan oleh BudgetScopeEngine.
-       *
-       * Jangan memfilter berdasarkan categoryId di query ini karena
-       * CATEGORY_GROUP dan CUSTOM tidak dapat direpresentasikan dengan
-       * satu categoryId.
-       */
       const budgets = await this.prisma.budget.findMany({
         where: {
           userId: event.userId,
@@ -101,9 +81,7 @@ export class NotificationEventsService {
             where: { isEnabled: true },
           },
           categoryScopes: {
-            select: {
-              categoryId: true,
-            },
+            select: { categoryId: true },
           },
         },
       });
@@ -117,13 +95,6 @@ export class NotificationEventsService {
           continue;
         }
 
-        /**
-         * Resolve scope kategori untuk setiap budget.
-         *
-         * null berarti ALL_EXPENSES.
-         * Array berarti transaksi hanya dihitung jika categoryId termasuk
-         * dalam hasil resolusi scope.
-         */
         const categoryIds =
           await this.budgetScopeEngine.resolveCategoryIds(budget);
 
@@ -134,10 +105,6 @@ export class NotificationEventsService {
           continue;
         }
 
-        /**
-         * Respect configured budget boundaries while evaluating only the
-         * allocation month containing the newly-created expense.
-         */
         const budgetStart = getZonedDateBoundary(budget.startDate, timezone);
 
         const budgetEndExclusive = budget.endDate
@@ -150,10 +117,6 @@ export class NotificationEventsService {
         const rangeEnd =
           budgetEndExclusive < month.end ? budgetEndExclusive : month.end;
 
-        /**
-         * Do not evaluate a budget for a transaction outside its configured
-         * lifetime, even when the budget overlaps another part of this month.
-         */
         if (
           rangeStart >= rangeEnd ||
           transactionDate < rangeStart ||
@@ -162,13 +125,6 @@ export class NotificationEventsService {
           continue;
         }
 
-        /**
-         * Aggregate actual berdasarkan scope:
-         *
-         * - null: tidak memasang filter categoryId sehingga uncategorized
-         *   expenses ikut dihitung.
-         * - array: hanya kategori hasil resolusi scope yang dihitung.
-         */
         const aggregate = await this.prisma.transaction.aggregate({
           where: {
             userId: event.userId,
@@ -181,37 +137,19 @@ export class NotificationEventsService {
               lt: rangeEnd,
             },
             ...(categoryIds !== null
-              ? {
-                  categoryId: {
-                    in: categoryIds,
-                  },
-                }
+              ? { categoryId: { in: categoryIds } }
               : {}),
           },
-          _sum: {
-            amount: true,
-          },
+          _sum: { amount: true },
         });
 
-        /**
-         * Transaksi baru sudah termasuk dalam aggregate karena alert
-         * dievaluasi setelah transaksi berhasil disimpan.
-         */
         const actualAfter = new Prisma.Decimal(aggregate._sum.amount ?? 0);
-
         const actualBefore = actualAfter.minus(transactionAmount);
-
         const allocationAmount = new Prisma.Decimal(allocation.amount);
 
         const beforePercentage = actualBefore.div(allocationAmount).mul(100);
-
         const afterPercentage = actualAfter.div(allocationAmount).mul(100);
 
-        /**
-         * Alert hanya dikirim ketika pemakaian melewati ambang dari bawah.
-         * Tidak mengirim ulang alert jika pemakaian sebelumnya sudah berada
-         * di atas ambang yang sama.
-         */
         const crossedAlerts = budget.alerts.filter(
           (alert) =>
             beforePercentage.lessThan(alert.thresholdPercentage) &&
@@ -220,10 +158,8 @@ export class NotificationEventsService {
 
         if (crossedAlerts.length === 0) continue;
 
-        const crossedThresholds: number[] = Array.from(
-          new Set<number>(
-            crossedAlerts.map((alert) => alert.thresholdPercentage),
-          ),
+        const crossedThresholds = Array.from(
+          new Set(crossedAlerts.map((alert) => alert.thresholdPercentage)),
         ).sort((a, b) => a - b);
 
         const thresholdText = crossedThresholds
@@ -245,9 +181,25 @@ export class NotificationEventsService {
           `(Rp${actualAfter.toFixed(0)} dari Rp${allocationAmount.toFixed(0)}). ` +
           `Ambang terlampaui: ${thresholdText}.`;
 
+        const detailData = {
+          budgetId: budget.id,
+          budgetName: budget.name,
+          transactionId: event.transactionId,
+          categoryId: event.categoryId,
+          targetMonth: month.periodStart.toISOString(),
+          monthEnd: month.end.toISOString(),
+          allocation: allocationAmount.toFixed(0),
+          actualBefore: actualBefore.toFixed(0),
+          actualAfter: actualAfter.toFixed(0),
+          usagePercentage: usage,
+          crossedThresholds,
+          currency: 'IDR',
+        };
+
+        const idempotencySuffix = crossedThresholds.join('-');
+
         const hasInAppAlert = crossedAlerts.some(
-          (alert) =>
-            String(alert.channel) === String(NotificationChannel.IN_APP),
+          (alert) => alert.channel === 'IN_APP',
         );
 
         if (hasInAppAlert) {
@@ -257,12 +209,13 @@ export class NotificationEventsService {
             title,
             message,
             channel: NotificationChannel.IN_APP,
+            idempotencyKey: `budget-alert:${budget.id}:${event.transactionId}:IN_APP:${idempotencySuffix}`,
+            data: detailData,
           });
         }
 
         const hasEmailAlert = crossedAlerts.some(
-          (alert) =>
-            String(alert.channel) === String(NotificationChannel.EMAIL),
+          (alert) => alert.channel === 'EMAIL',
         );
 
         if (preferences.emailEnabled && hasEmailAlert) {
@@ -272,12 +225,13 @@ export class NotificationEventsService {
             title,
             message,
             channel: NotificationChannel.EMAIL,
+            idempotencyKey: `budget-alert:${budget.id}:${event.transactionId}:EMAIL:${idempotencySuffix}`,
+            data: detailData,
           });
         }
 
         const hasTelegramAlert = crossedAlerts.some(
-          (alert) =>
-            String(alert.channel) === String(NotificationChannel.TELEGRAM),
+          (alert) => alert.channel === 'TELEGRAM',
         );
 
         if (preferences.telegramEnabled && hasTelegramAlert) {
@@ -287,6 +241,8 @@ export class NotificationEventsService {
             title,
             message,
             channel: NotificationChannel.TELEGRAM,
+            idempotencyKey: `budget-alert:${budget.id}:${event.transactionId}:TELEGRAM:${idempotencySuffix}`,
+            data: detailData,
           });
         }
       }
@@ -305,6 +261,7 @@ export class NotificationEventsService {
   async recurringTransactionExecuted(
     event: RecurringTransactionExecutedEvent,
   ): Promise<void> {
+    const title = 'Transaksi berulang berhasil';
     const message = [
       'Transaksi berulang berhasil dicatat.',
       `Jenis: ${event.transactionType}.`,
@@ -314,12 +271,23 @@ export class NotificationEventsService {
         : []),
     ].join('\n');
 
+    const detailData = {
+      recurringTransactionId: event.recurringTransactionId,
+      transactionId: event.transactionId,
+      transactionType: event.transactionType,
+      amount: event.amount,
+      description: event.description,
+      currency: 'IDR',
+    };
+
     await this.notificationsService.create({
       userId: event.userId,
       type: 'RECURRING_TRANSACTION_EXECUTED',
-      title: 'Transaksi berulang berhasil',
+      title,
       message,
       channel: NotificationChannel.IN_APP,
+      idempotencyKey: `recurring-executed:${event.recurringTransactionId}:${event.transactionId}:IN_APP`,
+      data: detailData,
     });
 
     const preferences = await this.notificationsService.getMyPreferences(
@@ -330,9 +298,11 @@ export class NotificationEventsService {
       await this.createAndEnqueueExternalNotification({
         userId: event.userId,
         type: 'RECURRING_TRANSACTION_EXECUTED',
-        title: 'Transaksi berulang berhasil',
+        title,
         message,
         channel: NotificationChannel.EMAIL,
+        idempotencyKey: `recurring-executed:${event.recurringTransactionId}:${event.transactionId}:EMAIL`,
+        data: detailData,
       });
     }
 
@@ -340,9 +310,11 @@ export class NotificationEventsService {
       await this.createAndEnqueueExternalNotification({
         userId: event.userId,
         type: 'RECURRING_TRANSACTION_EXECUTED',
-        title: 'Transaksi berulang berhasil',
+        title,
         message,
         channel: NotificationChannel.TELEGRAM,
+        idempotencyKey: `recurring-executed:${event.recurringTransactionId}:${event.transactionId}:TELEGRAM`,
+        data: detailData,
       });
     }
 
@@ -357,6 +329,8 @@ export class NotificationEventsService {
     title: string;
     message: string;
     channel: NotificationChannel.EMAIL | NotificationChannel.TELEGRAM;
+    idempotencyKey: string;
+    data: Prisma.InputJsonValue;
   }): Promise<void> {
     try {
       const notification = await this.notificationsService.create({
@@ -365,6 +339,8 @@ export class NotificationEventsService {
         title: input.title,
         message: input.message,
         channel: input.channel,
+        idempotencyKey: input.idempotencyKey,
+        data: input.data,
       });
 
       await this.notificationQueueService.enqueueDelivery(notification.id);

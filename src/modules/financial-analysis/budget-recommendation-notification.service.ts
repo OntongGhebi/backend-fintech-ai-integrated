@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '../../../generated/prisma/client';
 
 import { NotificationChannel } from 'src/database/enums/notification-channel.enum';
 
@@ -29,6 +30,8 @@ interface ExternalNotificationInput {
   type: string;
   content: NotificationContent;
   channel: NotificationChannel.EMAIL | NotificationChannel.TELEGRAM;
+  idempotencyKey: string;
+  data: Prisma.InputJsonValue;
 }
 
 @Injectable()
@@ -48,6 +51,19 @@ export class BudgetRecommendationNotificationService {
     const content = this.buildContent(input);
     const type = `BUDGET_RECOMMENDATION_${input.status}`;
 
+    const detailData = {
+      recommendationId: input.recommendationId,
+      budgetName: input.budgetName,
+      targetMonth: input.targetMonth.toISOString(),
+      status: input.status,
+      currentAllocation: input.currentAllocation,
+      proposedAllocation: input.proposedAllocation,
+      deferredUntil: input.deferredUntil?.toISOString() ?? null,
+      currency: 'IDR',
+    };
+
+    const idempotencyBase = `budget-recommendation:${input.recommendationId}:${input.status}`;
+
     try {
       await this.notificationsService.create({
         userId: input.userId,
@@ -55,6 +71,8 @@ export class BudgetRecommendationNotificationService {
         title: content.title,
         message: content.message,
         channel: NotificationChannel.IN_APP,
+        idempotencyKey: `${idempotencyBase}:IN_APP`,
+        data: detailData,
       });
     } catch (error) {
       this.logNotificationError('IN_APP', input.recommendationId, error);
@@ -79,6 +97,8 @@ export class BudgetRecommendationNotificationService {
         type,
         content,
         channel: NotificationChannel.EMAIL,
+        idempotencyKey: `${idempotencyBase}:EMAIL`,
+        data: detailData,
       });
     }
 
@@ -88,6 +108,8 @@ export class BudgetRecommendationNotificationService {
         type,
         content,
         channel: NotificationChannel.TELEGRAM,
+        idempotencyKey: `${idempotencyBase}:TELEGRAM`,
+        data: detailData,
       });
     }
   }
@@ -104,7 +126,6 @@ export class BudgetRecommendationNotificationService {
     }).format(input.targetMonth);
 
     const currentAllocation = this.formatRupiah(input.currentAllocation);
-
     const proposedAllocation = this.formatRupiah(input.proposedAllocation);
 
     switch (input.status) {
@@ -169,6 +190,8 @@ export class BudgetRecommendationNotificationService {
         title: input.content.title,
         message: input.content.message,
         channel: input.channel,
+        idempotencyKey: input.idempotencyKey,
+        data: input.data,
       });
 
       await this.notificationQueueService.enqueueDelivery(notification.id);

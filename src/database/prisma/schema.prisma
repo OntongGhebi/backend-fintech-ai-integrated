@@ -194,6 +194,8 @@ enum AIMessageRole {
 enum NotificationStatus {
   UNREAD
   READ
+  PENDING
+  PROCESSING
   SENT
   FAILED
 }
@@ -1014,16 +1016,21 @@ model Notification {
   channel NotificationChannel
   status  NotificationStatus
 
-  readAt DateTime? @db.Timestamptz(6)
+  idempotencyKey     String?  @db.VarChar(255)
+  data               Json?    @db.JsonB
+  actionUrl          String?  @db.VarChar(500)
+  processingStartedAt DateTime? @db.Timestamptz(6)
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  readAt    DateTime? @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
 
-  // Relations
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, channel, idempotencyKey])
   @@index([userId])
   @@index([userId, status])
   @@index([userId, createdAt])
+  @@index([channel, status, processingStartedAt])
   @@map("notifications")
 }
 

@@ -3,10 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  NotificationsRepository,
-  UpdateNotificationPreferencesInput,
-} from './repositories/notifications.repository';
+
+import { NotificationsRepository } from './repositories/notifications.repository';
+import { UpdateNotificationPreferencesInput } from './repositories/notifications.repository';
 import { CreateNotificationInput } from './types/create-notification-input.type';
 import { Notification } from '../../../generated/prisma/client';
 import { NotificationChannel } from 'src/database/enums/notification-channel.enum';
@@ -27,15 +26,34 @@ export class NotificationsService {
       input.status ??
       (input.channel === NotificationChannel.IN_APP
         ? NotificationStatus.UNREAD
-        : NotificationStatus.FAILED);
+        : NotificationStatus.PENDING);
 
-    return this.notificationsRepository.create({
+    if (
+      input.actionUrl !== undefined &&
+      input.actionUrl !== null &&
+      (!input.actionUrl.startsWith('/') ||
+        input.actionUrl.startsWith('//') ||
+        input.actionUrl.includes('\\'))
+    ) {
+      throw new BadRequestException(
+        'Notification actionUrl must be an internal relative path.',
+      );
+    }
+
+    return this.notificationsRepository.createIdempotently({
       userId: input.userId,
       type: input.type,
       title: input.title,
       message: input.message,
       channel: input.channel,
       status,
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+      ...(input.data !== undefined
+        ? {
+            data: input.data === null ? undefined : input.data,
+          }
+        : {}),
+      ...(input.actionUrl !== undefined ? { actionUrl: input.actionUrl } : {}),
     });
   }
 
@@ -75,6 +93,28 @@ export class NotificationsService {
       throw new NotFoundException('Notification not found');
     }
 
+    if (
+      String(notification.channel) === String(NotificationChannel.IN_APP) &&
+      String(notification.status) === String(NotificationStatus.UNREAD)
+    ) {
+      await this.notificationsRepository.markAsRead(
+        notificationId,
+        userId,
+        new Date(),
+      );
+
+      const updated = await this.notificationsRepository.findByIdAndUserId(
+        notificationId,
+        userId,
+      );
+
+      if (!updated) {
+        throw new NotFoundException('Notification not found');
+      }
+
+      return updated;
+    }
+
     return notification;
   }
 
@@ -83,9 +123,16 @@ export class NotificationsService {
   }
 
   async markAsRead(notificationId: string, userId: string) {
-    const notification = await this.findOneByUserId(notificationId, userId);
+    const notification = await this.notificationsRepository.findByIdAndUserId(
+      notificationId,
+      userId,
+    );
 
-    if (String(notification.channel) !== String(NotificationChannel.IN_APP)) {
+    if (!notification) {
+      throw new NotFoundException('Notification not found');
+    }
+
+    if (notification.channel !== 'IN_APP') {
       throw new BadRequestException(
         'Only in-app notifications can be marked as read',
       );
@@ -99,7 +146,10 @@ export class NotificationsService {
       );
     }
 
-    return this.findOneByUserId(notificationId, userId);
+    return this.notificationsRepository.findByIdAndUserId(
+      notificationId,
+      userId,
+    );
   }
 
   async markAllAsRead(userId: string): Promise<{ updatedCount: number }> {

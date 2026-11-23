@@ -1,21 +1,41 @@
 import { InjectQueue } from '@nestjs/bullmq';
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Job, Queue } from 'bullmq';
+
 import {
   NOTIFICATION_DELIVERY_JOB,
   NOTIFICATION_JOB_ATTEMPTS,
   NOTIFICATION_JOB_BACKOFF_DELAY_MS,
   NOTIFICATION_JOB_RETENTION,
+  NOTIFICATION_RECOVERY_INTERVAL_MS,
+  NOTIFICATION_RECOVERY_JOB,
   NOTIFICATIONS_QUEUE,
 } from './notifications.constants';
-import { Job, Queue } from 'bullmq';
 import { NotificationDeliveryJob } from './types/notification-delivery-job.type';
 
 @Injectable()
-export class NotificationQueueService {
+export class NotificationQueueService implements OnModuleInit {
   constructor(
     @InjectQueue(NOTIFICATIONS_QUEUE)
     private readonly notificationQueue: Queue<NotificationDeliveryJob>,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.notificationQueue.upsertJobScheduler(
+      NOTIFICATION_RECOVERY_JOB,
+      {
+        every: NOTIFICATION_RECOVERY_INTERVAL_MS,
+      },
+      {
+        name: NOTIFICATION_RECOVERY_JOB,
+        data: {},
+        opts: {
+          removeOnComplete: true,
+          removeOnFail: true,
+        },
+      },
+    );
+  }
 
   async enqueueDelivery(notificationId: string): Promise<{ jobId: string }> {
     const job: Job<NotificationDeliveryJob> = await this.notificationQueue.add(
@@ -33,9 +53,7 @@ export class NotificationQueueService {
       },
     );
 
-    return {
-      jobId: String(job.id),
-    };
+    return { jobId: String(job.id) };
   }
 
   async getQueueCounts() {

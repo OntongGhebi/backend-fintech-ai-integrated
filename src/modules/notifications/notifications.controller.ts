@@ -33,12 +33,8 @@ export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get('preferences')
-  @ApiOperation({
-    summary: 'Get current user notification preferences',
-  })
-  @ApiOkResponse({
-    type: NotificationPreferencesResponseDto,
-  })
+  @ApiOperation({ summary: 'Get current user notification preferences' })
+  @ApiOkResponse({ type: NotificationPreferencesResponseDto })
   async getMyPreferences(
     @CurrentUser('id') userId: string,
   ): Promise<NotificationPreferencesResponseDto> {
@@ -49,12 +45,8 @@ export class NotificationsController {
   }
 
   @Patch('preferences')
-  @ApiOperation({
-    summary: 'Update current user notification preferences',
-  })
-  @ApiOkResponse({
-    type: NotificationPreferencesResponseDto,
-  })
+  @ApiOperation({ summary: 'Update current user notification preferences' })
+  @ApiOkResponse({ type: NotificationPreferencesResponseDto })
   async updateMyPreferences(
     @CurrentUser('id') userId: string,
     @Body() dto: UpdateNotificationPreferencesDto,
@@ -68,29 +60,19 @@ export class NotificationsController {
   }
 
   @Get('unread-count')
-  @ApiOperation({
-    summary: 'Get current user unread notification count',
-  })
-  @ApiOkResponse({
-    schema: {
-      example: { count: 3 },
-    },
-  })
+  @ApiOperation({ summary: 'Get current user unread notification count' })
+  @ApiOkResponse({ schema: { example: { count: 3 } } })
   async getUnreadCount(
     @CurrentUser('id') userId: string,
   ): Promise<{ count: number }> {
-    const count = await this.notificationsService.getUnreadCount(userId);
-
-    return { count };
+    return {
+      count: await this.notificationsService.getUnreadCount(userId),
+    };
   }
 
   @Get()
-  @ApiOperation({
-    summary: 'Get current user notifications',
-  })
-  @ApiOkResponse({
-    type: NotificationListResponseDto,
-  })
+  @ApiOperation({ summary: 'Get current user notifications' })
+  @ApiOkResponse({ type: NotificationListResponseDto })
   async findAll(
     @CurrentUser('id') userId: string,
     @Query() query: GetNotificationsQueryDto,
@@ -112,11 +94,7 @@ export class NotificationsController {
   @ApiOperation({
     summary: 'Mark all current user in-app notifications as read',
   })
-  @ApiOkResponse({
-    schema: {
-      example: { updatedCount: 5 },
-    },
-  })
+  @ApiOkResponse({ schema: { example: { updatedCount: 5 } } })
   async markAllAsRead(
     @CurrentUser('id') userId: string,
   ): Promise<{ updatedCount: number }> {
@@ -124,12 +102,8 @@ export class NotificationsController {
   }
 
   @Patch(':notificationId/read')
-  @ApiOperation({
-    summary: 'Mark a notification as read',
-  })
-  @ApiOkResponse({
-    type: NotificationResponseDto,
-  })
+  @ApiOperation({ summary: 'Mark a notification as read' })
+  @ApiOkResponse({ type: NotificationResponseDto })
   async markAsRead(
     @CurrentUser('id') userId: string,
     @Param('notificationId', new ParseUUIDPipe({ version: '4' }))
@@ -145,11 +119,10 @@ export class NotificationsController {
 
   @Get(':notificationId')
   @ApiOperation({
-    summary: 'Get a notification by ID',
+    summary:
+      'Get notification detail and automatically mark in-app notification as read',
   })
-  @ApiOkResponse({
-    type: NotificationResponseDto,
-  })
+  @ApiOkResponse({ type: NotificationResponseDto })
   async findOne(
     @CurrentUser('id') userId: string,
     @Param('notificationId', new ParseUUIDPipe({ version: '4' }))

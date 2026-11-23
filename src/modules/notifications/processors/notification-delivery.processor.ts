@@ -13,9 +13,12 @@ import { PrismaService } from 'src/database/prisma/prisma.service';
 import { EmailService } from 'src/integrations/email/email.service';
 import { TelegramService } from 'src/modules/telegram/services/telegram.service';
 
+import { NotificationQueueService } from '../notifications-queue.service';
 import {
   NOTIFICATION_DELIVERY_JOB,
   NOTIFICATION_JOB_ATTEMPTS,
+  NOTIFICATION_PROCESSING_LEASE_MS,
+  NOTIFICATION_RECOVERY_JOB,
   NOTIFICATIONS_QUEUE,
 } from '../notifications.constants';
 import { NotificationDeliveryJob } from '../types/notification-delivery-job.type';
@@ -29,21 +32,59 @@ export class NotificationDeliveryProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly telegramService: TelegramService,
+    private readonly notificationQueueService: NotificationQueueService,
   ) {
     super();
   }
 
   async process(job: Job<NotificationDeliveryJob>): Promise<void> {
+    if (job.name === NOTIFICATION_RECOVERY_JOB) {
+      await this.recoverPendingDeliveries();
+      return;
+    }
+
     if (job.name !== NOTIFICATION_DELIVERY_JOB) {
       throw new UnprocessableEntityException(
         `Unsupported notification job: ${job.name}`,
       );
     }
 
-    const { notificationId } = job.data;
+    const notificationId = job.data.notificationId;
 
     if (!notificationId) {
       throw new UnprocessableEntityException('Notification ID is required.');
+    }
+
+    const now = new Date();
+    const staleBefore = new Date(
+      now.getTime() - NOTIFICATION_PROCESSING_LEASE_MS,
+    );
+
+    const claim = await this.prisma.notification.updateMany({
+      where: {
+        id: notificationId,
+        channel: {
+          in: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+        },
+        OR: [
+          { status: NotificationStatus.PENDING },
+          {
+            status: NotificationStatus.PROCESSING,
+            processingStartedAt: { lt: staleBefore },
+          },
+        ],
+      },
+      data: {
+        status: NotificationStatus.PROCESSING,
+        processingStartedAt: now,
+      },
+    });
+
+    if (claim.count !== 1) {
+      this.logger.debug(
+        `Notification ${notificationId} is not claimable; another worker may be processing it or it has already been delivered.`,
+      );
+      return;
     }
 
     const notification = await this.prisma.notification.findUnique({
@@ -56,9 +97,7 @@ export class NotificationDeliveryProcessor extends WorkerHost {
                 isVerified: true,
                 unlinkedAt: null,
               },
-              orderBy: {
-                createdAt: 'asc',
-              },
+              orderBy: { createdAt: 'asc' },
               take: 1,
             },
           },
@@ -71,24 +110,21 @@ export class NotificationDeliveryProcessor extends WorkerHost {
       return;
     }
 
-    if (
-      (notification.channel as NotificationChannel) ===
-      NotificationChannel.IN_APP
-    ) {
-      this.logger.debug(
-        `Notification ${notificationId} requires no external delivery.`,
-      );
-      return;
-    }
+    const claimedAt = now;
 
-    if (
-      (notification.status as NotificationStatus) === NotificationStatus.SENT
-    ) {
-      this.logger.debug(
-        `Notification ${notificationId} was already delivered.`,
-      );
-      return;
-    }
+    const persistStatus = async (status: NotificationStatus) => {
+      await this.prisma.notification.updateMany({
+        where: {
+          id: notification.id,
+          status: NotificationStatus.PROCESSING,
+          processingStartedAt: claimedAt,
+        },
+        data: {
+          status,
+          processingStartedAt: null,
+        },
+      });
+    };
 
     const maxAttempts = Math.max(
       1,
@@ -128,21 +164,14 @@ export class NotificationDeliveryProcessor extends WorkerHost {
           );
       }
 
-      await this.prisma.notification.update({
-        where: { id: notification.id },
-        data: {
-          status: NotificationStatus.SENT,
-        },
-      });
+      await persistStatus(NotificationStatus.SENT);
 
       this.logger.log(
         `Notification ${notification.id} delivered through ${notification.channel}.`,
       );
     } catch (error) {
       const isPermanentError = error instanceof UnprocessableEntityException;
-
       const isFinalAttempt = job.attemptsMade + 1 >= maxAttempts;
-
       const shouldStopRetrying = isPermanentError || isFinalAttempt;
 
       this.logger.error(
@@ -155,22 +184,19 @@ export class NotificationDeliveryProcessor extends WorkerHost {
         error instanceof Error ? error.stack : String(error),
       );
 
-      if (shouldStopRetrying) {
-        try {
-          await this.prisma.notification.update({
-            where: { id: notification.id },
-            data: {
-              status: NotificationStatus.FAILED,
-            },
-          });
-        } catch (statusError) {
-          this.logger.error(
-            `Unable to persist FAILED status for ${notification.id}.`,
-            statusError instanceof Error
-              ? statusError.stack
-              : String(statusError),
-          );
-        }
+      try {
+        await persistStatus(
+          shouldStopRetrying
+            ? NotificationStatus.FAILED
+            : NotificationStatus.PENDING,
+        );
+      } catch (statusError) {
+        this.logger.error(
+          `Unable to persist delivery status for ${notification.id}.`,
+          statusError instanceof Error
+            ? statusError.stack
+            : String(statusError),
+        );
       }
 
       if (isPermanentError) {
@@ -186,6 +212,39 @@ export class NotificationDeliveryProcessor extends WorkerHost {
       }
 
       throw error;
+    }
+  }
+
+  private async recoverPendingDeliveries(): Promise<void> {
+    const staleBefore = new Date(Date.now() - NOTIFICATION_PROCESSING_LEASE_MS);
+
+    const recoverable = await this.prisma.notification.findMany({
+      where: {
+        channel: {
+          in: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+        },
+        OR: [
+          { status: NotificationStatus.PENDING },
+          {
+            status: NotificationStatus.PROCESSING,
+            processingStartedAt: { lt: staleBefore },
+          },
+        ],
+      },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+    });
+
+    for (const notification of recoverable) {
+      try {
+        await this.notificationQueueService.enqueueDelivery(notification.id);
+      } catch (error) {
+        this.logger.error(
+          `Unable to recover notification ${notification.id}.`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
     }
   }
 }

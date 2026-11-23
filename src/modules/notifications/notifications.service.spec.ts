@@ -17,7 +17,7 @@ describe('NotificationsService', () => {
   let service: NotificationsService;
 
   const repository = {
-    create: jest.fn(),
+    createIdempotently: jest.fn(),
     findManyByUserId: jest.fn(),
     countByUserId: jest.fn(),
     findByIdAndUserId: jest.fn(),
@@ -78,18 +78,18 @@ describe('NotificationsService', () => {
     it('should create an in-app notification with UNREAD status by default', async () => {
       const expected = createNotification();
 
-      repository.create.mockResolvedValue(expected);
+      repository.createIdempotently.mockResolvedValue(expected);
 
       const result = await service.create(baseInput);
 
-      expect(repository.create).toHaveBeenCalledWith({
+      expect(repository.createIdempotently).toHaveBeenCalledWith({
         ...baseInput,
         status: NotificationStatus.UNREAD,
       });
       expect(result).toEqual(expected);
     });
 
-    it('should default an email notification to FAILED until delivery', async () => {
+    it('should default an email notification to PENDING until delivery', async () => {
       const input: CreateNotificationInput = {
         ...baseInput,
         channel: NotificationChannel.EMAIL,
@@ -97,38 +97,38 @@ describe('NotificationsService', () => {
 
       const expected = createNotification({
         channel: NotificationChannel.EMAIL,
-        status: NotificationStatus.FAILED,
+        status: NotificationStatus.PENDING,
       });
 
-      repository.create.mockResolvedValue(expected);
+      repository.createIdempotently.mockResolvedValue(expected);
 
       const result = await service.create(input);
 
-      expect(repository.create).toHaveBeenCalledWith({
+      expect(repository.createIdempotently).toHaveBeenCalledWith({
         ...input,
-        status: NotificationStatus.FAILED,
+        status: NotificationStatus.PENDING,
       });
       expect(result).toEqual(expected);
     });
 
-    it('should default a Telegram notification to FAILED until delivery', async () => {
+    it('should default a Telegram notification to PENDING until delivery', async () => {
       const input: CreateNotificationInput = {
         ...baseInput,
         channel: NotificationChannel.TELEGRAM,
       };
 
-      repository.create.mockResolvedValue(
+      repository.createIdempotently.mockResolvedValue(
         createNotification({
           channel: NotificationChannel.TELEGRAM,
-          status: NotificationStatus.FAILED,
+          status: NotificationStatus.PENDING,
         }),
       );
 
       await service.create(input);
 
-      expect(repository.create).toHaveBeenCalledWith({
+      expect(repository.createIdempotently).toHaveBeenCalledWith({
         ...input,
-        status: NotificationStatus.FAILED,
+        status: NotificationStatus.PENDING,
       });
     });
 
@@ -142,11 +142,11 @@ describe('NotificationsService', () => {
         status: NotificationStatus.READ,
       });
 
-      repository.create.mockResolvedValue(expected);
+      repository.createIdempotently.mockResolvedValue(expected);
 
       await service.create(input);
 
-      expect(repository.create).toHaveBeenCalledWith({
+      expect(repository.createIdempotently).toHaveBeenCalledWith({
         ...input,
         status: NotificationStatus.READ,
       });
@@ -155,7 +155,7 @@ describe('NotificationsService', () => {
     it('should propagate repository errors', async () => {
       const error = new Error('Database unavailable');
 
-      repository.create.mockRejectedValue(error);
+      repository.createIdempotently.mockRejectedValue(error);
 
       await expect(service.create(baseInput)).rejects.toThrow(error);
     });

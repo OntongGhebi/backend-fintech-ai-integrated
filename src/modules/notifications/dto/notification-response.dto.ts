@@ -4,26 +4,16 @@ import { NotificationChannel } from 'src/database/enums/notification-channel.enu
 import { NotificationStatus } from 'src/database/enums/notification-status.enum';
 
 export class NotificationResponseDto {
-  @ApiProperty({
-    format: 'uuid',
-    example: '9c7d6e5f-4a3b-2c1d-0e9f-8a7b6c5d4e3f',
-  })
+  @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({
-    format: 'uuid',
-    example: '1f4e7a0b-3c2d-4e5f-8a9b-0c1d2e3f4a5b',
-  })
+  @ApiProperty({ format: 'uuid' })
   userId!: string;
 
-  @ApiProperty({
-    example: 'BUDGET_ALERT',
-  })
+  @ApiProperty({ example: 'BUDGET_ALERT' })
   type!: string;
 
-  @ApiProperty({
-    example: 'Budget hampir habis',
-  })
+  @ApiProperty({ example: 'Budget hampir habis' })
   title!: string;
 
   @ApiProperty({
@@ -31,30 +21,34 @@ export class NotificationResponseDto {
   })
   message!: string;
 
-  @ApiProperty({
-    enum: NotificationChannel,
-    example: NotificationChannel.IN_APP,
-  })
+  @ApiProperty({ enum: NotificationChannel })
   channel!: NotificationChannel;
 
-  @ApiProperty({
-    enum: NotificationStatus,
-    example: NotificationStatus.UNREAD,
-  })
+  @ApiProperty({ enum: NotificationStatus })
   status!: NotificationStatus;
+
+  @ApiPropertyOptional({
+    description: 'Informasi terstruktur untuk menampilkan detail notifikasi.',
+    type: Object,
+    nullable: true,
+    additionalProperties: true,
+  })
+  data!: Record<string, unknown> | null;
+
+  @ApiPropertyOptional({
+    description: 'Internal frontend route yang terkait dengan notifikasi.',
+    example: '/financial-well-being',
+    nullable: true,
+  })
+  actionUrl!: string | null;
 
   @ApiPropertyOptional({
     type: String,
     format: 'date-time',
     nullable: true,
-    example: null,
   })
   readAt!: Date | null;
 
-  @ApiProperty({
-    type: String,
-    format: 'date-time',
-    example: '2026-10-09T08:00:00.000Z',
-  })
+  @ApiProperty({ type: String, format: 'date-time' })
   createdAt!: Date;
 }
