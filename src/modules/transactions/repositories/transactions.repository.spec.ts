@@ -8,6 +8,7 @@ describe('TransactionsRepository — Telegram idempotency', () => {
 
   let prisma: {
     $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
     transaction: {
       create: jest.Mock;
       findUnique: jest.Mock;
@@ -64,6 +65,7 @@ describe('TransactionsRepository — Telegram idempotency', () => {
   beforeEach(() => {
     prisma = {
       $transaction: jest.fn(),
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'account-id' }]),
       transaction: {
         create: jest.fn(),
         findUnique: jest.fn(),
@@ -88,7 +90,7 @@ describe('TransactionsRepository — Telegram idempotency', () => {
       transactionData,
     });
 
-  it('creates a transaction and completes the confirmation atomically', async () => {
+  it('locks the account before creating a transaction and completing confirmation', async () => {
     prisma.telegramTransactionConfirmation.findUnique.mockResolvedValue(
       confirmation('CONFIRMED'),
     );
@@ -101,6 +103,7 @@ describe('TransactionsRepository — Telegram idempotency', () => {
 
     expect(result).toEqual(transaction);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
 
     expect(prisma.transaction.create).toHaveBeenCalledWith({
       data: {
@@ -205,8 +208,6 @@ describe('TransactionsRepository — Telegram idempotency', () => {
       'TELEGRAM_CONFIRMATION_STATE_CONFLICT',
     );
 
-    // The repository uses a Prisma interactive transaction. In a real
-    // database, rejection of the callback rolls back the created transaction.
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.transaction.create).toHaveBeenCalledTimes(1);
   });

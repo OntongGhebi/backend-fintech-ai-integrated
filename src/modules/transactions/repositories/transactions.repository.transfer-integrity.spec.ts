@@ -27,6 +27,7 @@ describe('TransactionsRepository — transfer update and void integrity', () => 
   const validTransferPair = [
     {
       id: sourceTransactionId,
+      accountId: '55555555-5555-4555-8555-555555555555',
       type: 'TRANSFER',
       status: 'ACTIVE',
       metadata: {
@@ -35,6 +36,7 @@ describe('TransactionsRepository — transfer update and void integrity', () => 
     },
     {
       id: destinationTransactionId,
+      accountId: '66666666-6666-4666-8666-666666666666',
       type: 'TRANSFER',
       status: 'ACTIVE',
       metadata: {
@@ -90,7 +92,7 @@ describe('TransactionsRepository — transfer update and void integrity', () => 
         count: 2,
       });
 
-      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
 
       expect(tx.transaction.findMany).toHaveBeenCalledWith({
         where: {
@@ -100,6 +102,7 @@ describe('TransactionsRepository — transfer update and void integrity', () => 
         },
         select: {
           id: true,
+          accountId: true,
           type: true,
           status: true,
           metadata: true,
@@ -309,7 +312,7 @@ describe('TransactionsRepository — transfer update and void integrity', () => 
         count: 2,
       });
 
-      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
 
       expect(tx.transaction.updateMany).toHaveBeenCalledWith({
         where: {

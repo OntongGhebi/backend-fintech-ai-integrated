@@ -1,9 +1,12 @@
 /* eslint-disable @typescript-eslint/no-base-to-string */
 import { BadRequestException, Injectable } from '@nestjs/common';
+
 import { Prisma } from '../../../../generated/prisma/client';
+
 import { PrismaService } from 'src/database/prisma/prisma.service';
 
 import { calculateAccountBalance } from '../../accounts/account-balance.util';
+
 import { GetTransactionsQueryDto } from '../dto/get-transaction-query.dto';
 
 type TransactionUpdateData = Parameters<
@@ -12,9 +15,14 @@ type TransactionUpdateData = Parameters<
 
 interface TransferPairRow {
   id: string;
+  accountId: string;
   type: string;
   status: string;
   metadata: Prisma.JsonValue | null;
+}
+
+interface TransactionLockRow {
+  id: string;
 }
 
 function getTransferDirection(
@@ -55,15 +63,65 @@ function isValidTransferPair(rows: TransferPairRow[]): boolean {
 export class TransactionsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Locks account rows in deterministic order.
+   *
+   * Every transaction write that can affect an account balance must use
+   * this lock so concurrent transaction creation, transfer, update, and
+   * void operations are serialized for the same account.
+   */
+  private async lockAccountRows(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    accountIds: Array<string | null | undefined>,
+  ): Promise<void> {
+    const uniqueAccountIds = [
+      ...new Set(
+        accountIds.filter(
+          (accountId): accountId is string =>
+            typeof accountId === 'string' && accountId.length > 0,
+        ),
+      ),
+    ].sort();
+
+    for (const accountId of uniqueAccountIds) {
+      await tx.$queryRaw<TransactionLockRow[]>`
+        SELECT id
+        FROM accounts
+        WHERE id = ${accountId}::uuid
+          AND "userId" = ${userId}::uuid
+          AND "deletedAt" IS NULL
+        FOR UPDATE
+      `;
+    }
+  }
+
   async create(
     data: Parameters<PrismaService['transaction']['create']>[0]['data'],
   ) {
-    return this.prisma.transaction.create({
-      data,
-      include: {
-        account: true,
-        category: true,
-      },
+    const uncheckedData = data as Prisma.TransactionUncheckedCreateInput;
+
+    if (
+      typeof uncheckedData.userId !== 'string' ||
+      typeof uncheckedData.accountId !== 'string'
+    ) {
+      throw new BadRequestException(
+        'Transaction account information is invalid',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAccountRows(tx, uncheckedData.userId, [
+        uncheckedData.accountId,
+      ]);
+
+      return tx.transaction.create({
+        data,
+        include: {
+          account: true,
+          category: true,
+        },
+      });
     });
   }
 
@@ -73,6 +131,23 @@ export class TransactionsRepository {
   }) {
     try {
       return await this.prisma.$transaction(async (tx) => {
+        const transactionData = params.transactionData;
+
+        if (
+          typeof transactionData.userId !== 'string' ||
+          typeof transactionData.accountId !== 'string'
+        ) {
+          throw new BadRequestException(
+            'Transaction account information is invalid',
+          );
+        }
+
+        // Acquire the account lock before inserting the transaction.
+        // This uses the same lock as manual and transfer transaction writes.
+        await this.lockAccountRows(tx, transactionData.userId, [
+          transactionData.accountId,
+        ]);
+
         const confirmation =
           await tx.telegramTransactionConfirmation.findUnique({
             where: { id: params.confirmationId },
@@ -86,17 +161,14 @@ export class TransactionsRepository {
             },
           });
 
-        if (
-          !confirmation ||
-          confirmation.userId !== params.transactionData.userId
-        ) {
+        if (!confirmation || confirmation.userId !== transactionData.userId) {
           throw new Error('TELEGRAM_CONFIRMATION_NOT_FOUND');
         }
 
         if (confirmation.status === 'COMPLETED') {
           if (
             confirmation.transaction &&
-            confirmation.transaction.userId === params.transactionData.userId
+            confirmation.transaction.userId === transactionData.userId
           ) {
             return confirmation.transaction;
           }
@@ -119,7 +191,7 @@ export class TransactionsRepository {
 
         const transaction = await tx.transaction.create({
           data: {
-            ...params.transactionData,
+            ...transactionData,
             telegramConfirmationId: params.confirmationId,
           },
           include: {
@@ -131,7 +203,7 @@ export class TransactionsRepository {
         const updated = await tx.telegramTransactionConfirmation.updateMany({
           where: {
             id: params.confirmationId,
-            userId: params.transactionData.userId,
+            userId: transactionData.userId,
             status: {
               in: ['CONFIRMED', 'PROCESSING'],
             },
@@ -264,8 +336,9 @@ export class TransactionsRepository {
   /**
    * Updates a normal transaction or both legs of a transfer atomically.
    *
-   * Transfer account/category changes are intentionally rejected because
-   * changing only one leg would break the transfer relationship.
+   * Account rows are locked before changing the transaction so balance
+   * calculations performed by concurrent transaction creation cannot
+   * observe an inconsistent write sequence.
    */
   async update(
     transactionId: string,
@@ -281,6 +354,7 @@ export class TransactionsRepository {
         },
         select: {
           id: true,
+          accountId: true,
           type: true,
           transferGroupId: true,
         },
@@ -291,7 +365,9 @@ export class TransactionsRepository {
       }
 
       if (current.type !== 'TRANSFER') {
-        await tx.$queryRaw<Array<{ id: string }>>`
+        // Lock the transaction row so concurrent update/void requests
+        // targeting the same transaction cannot both proceed.
+        await tx.$queryRaw<TransactionLockRow[]>`
           SELECT id
           FROM transactions
           WHERE id = ${transactionId}::uuid
@@ -299,6 +375,12 @@ export class TransactionsRepository {
             AND "deletedAt" IS NULL
           FOR UPDATE
         `;
+
+        // Lock both the current and target account when accountId changes.
+        await this.lockAccountRows(tx, userId, [
+          current.accountId,
+          typeof data.accountId === 'string' ? data.accountId : undefined,
+        ]);
 
         return tx.transaction.updateMany({
           where: {
@@ -326,9 +408,8 @@ export class TransactionsRepository {
         );
       }
 
-      // Lock both legs in a deterministic order to avoid opposite-order
-      // locking when two requests target different legs of the same transfer.
-      await tx.$queryRaw<Array<{ id: string }>>`
+      // Lock both transfer legs in a deterministic order.
+      await tx.$queryRaw<TransactionLockRow[]>`
         SELECT id
         FROM transactions
         WHERE "transferGroupId" = ${current.transferGroupId}::uuid
@@ -346,6 +427,7 @@ export class TransactionsRepository {
         },
         select: {
           id: true,
+          accountId: true,
           type: true,
           status: true,
           metadata: true,
@@ -357,6 +439,13 @@ export class TransactionsRepository {
           'Transfer pair is incomplete or inconsistent',
         );
       }
+
+      // Both accounts are locked before either transfer leg is changed.
+      await this.lockAccountRows(
+        tx,
+        userId,
+        pair.map((row) => row.accountId),
+      );
 
       const updated = await tx.transaction.updateMany({
         where: {
@@ -393,6 +482,7 @@ export class TransactionsRepository {
         },
         select: {
           id: true,
+          accountId: true,
           type: true,
           transferGroupId: true,
         },
@@ -403,7 +493,7 @@ export class TransactionsRepository {
       }
 
       if (current.type !== 'TRANSFER') {
-        await tx.$queryRaw<Array<{ id: string }>>`
+        await tx.$queryRaw<TransactionLockRow[]>`
           SELECT id
           FROM transactions
           WHERE id = ${transactionId}::uuid
@@ -411,6 +501,8 @@ export class TransactionsRepository {
             AND "deletedAt" IS NULL
           FOR UPDATE
         `;
+
+        await this.lockAccountRows(tx, userId, [current.accountId]);
 
         return tx.transaction.updateMany({
           where: {
@@ -434,7 +526,7 @@ export class TransactionsRepository {
         );
       }
 
-      await tx.$queryRaw<Array<{ id: string }>>`
+      await tx.$queryRaw<TransactionLockRow[]>`
         SELECT id
         FROM transactions
         WHERE "transferGroupId" = ${current.transferGroupId}::uuid
@@ -452,6 +544,7 @@ export class TransactionsRepository {
         },
         select: {
           id: true,
+          accountId: true,
           type: true,
           status: true,
           metadata: true,
@@ -463,6 +556,12 @@ export class TransactionsRepository {
           'Transfer pair is incomplete or inconsistent',
         );
       }
+
+      await this.lockAccountRows(
+        tx,
+        userId,
+        pair.map((row) => row.accountId),
+      );
 
       const updated = await tx.transaction.updateMany({
         where: {
@@ -511,9 +610,14 @@ export class TransactionsRepository {
       PrismaService['transaction']['create']
     >[0]['data'],
   ) {
-    const userId = sourceData.userId;
-    const sourceAccountId = sourceData.accountId;
-    const destinationAccountId = destinationData.accountId;
+    const uncheckedSourceData =
+      sourceData as Prisma.TransactionUncheckedCreateInput;
+    const uncheckedDestinationData =
+      destinationData as Prisma.TransactionUncheckedCreateInput;
+
+    const userId = uncheckedSourceData.userId;
+    const sourceAccountId = uncheckedSourceData.accountId;
+    const destinationAccountId = uncheckedDestinationData.accountId;
 
     if (
       typeof userId !== 'string' ||
@@ -523,7 +627,7 @@ export class TransactionsRepository {
       throw new BadRequestException('Invalid transfer account information');
     }
 
-    if (destinationData.userId !== userId) {
+    if (uncheckedDestinationData.userId !== userId) {
       throw new BadRequestException(
         'Transfer accounts must belong to the same user',
       );
@@ -536,14 +640,12 @@ export class TransactionsRepository {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT id
-        FROM accounts
-        WHERE id = ${sourceAccountId}::uuid
-          AND "userId" = ${userId}::uuid
-          AND "deletedAt" IS NULL
-        FOR UPDATE
-      `;
+      // Lock both accounts in sorted order. This is shared with ordinary
+      // transaction creation, update, and void operations.
+      await this.lockAccountRows(tx, userId, [
+        sourceAccountId,
+        destinationAccountId,
+      ]);
 
       const [sourceAccount, destinationAccount] = await Promise.all([
         tx.account.findFirst({
@@ -576,8 +678,9 @@ export class TransactionsRepository {
         throw new BadRequestException('Destination account is not available');
       }
 
-      if (typeof sourceData.telegramConfirmationId === 'string') {
-        const telegramConfirmationId = sourceData.telegramConfirmationId;
+      if (typeof uncheckedSourceData.telegramConfirmationId === 'string') {
+        const telegramConfirmationId =
+          uncheckedSourceData.telegramConfirmationId;
 
         const existingSource = await tx.transaction.findUnique({
           where: {
@@ -643,11 +746,19 @@ export class TransactionsRepository {
         sourceTransactions,
       );
 
-      const transferAmount = new Prisma.Decimal(String(sourceData.amount));
+      const transferAmount = new Prisma.Decimal(
+        uncheckedSourceData.amount.toString(),
+      );
 
       if (currentBalance.lte(0)) {
         throw new BadRequestException(
           'Source account has no available balance',
+        );
+      }
+
+      if (transferAmount.lte(0)) {
+        throw new BadRequestException(
+          'Transfer amount must be greater than zero',
         );
       }
 

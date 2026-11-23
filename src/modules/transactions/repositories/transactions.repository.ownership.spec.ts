@@ -23,6 +23,7 @@ describe('TransactionsRepository — Telegram confirmation ownership', () => {
 
   let repository: TransactionsRepository;
   let tx: {
+    $queryRaw: jest.Mock;
     telegramTransactionConfirmation: {
       findUnique: jest.Mock;
       updateMany: jest.Mock;
@@ -40,6 +41,7 @@ describe('TransactionsRepository — Telegram confirmation ownership', () => {
 
   beforeEach(() => {
     tx = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
       telegramTransactionConfirmation: {
         findUnique: jest.fn(),
         updateMany: jest.fn(),
