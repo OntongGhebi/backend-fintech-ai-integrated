@@ -6,9 +6,9 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { Response } from 'express';
+import type { Response } from 'express';
 
-import { RequestWithId } from '../middlewares/request-id.middleware';
+import type { RequestWithId } from '../middlewares/request-id.middleware';
 
 interface ErrorResponse {
   success: false;
@@ -21,9 +21,12 @@ interface ErrorResponse {
 }
 
 interface SafeExceptionResponse {
-  message?: string | string[];
-  error?: string;
+  message?: unknown;
+  error?: unknown;
 }
+
+const INTERNAL_ERROR_MESSAGE = 'Internal server error';
+const INTERNAL_ERROR_NAME = 'Internal Server Error';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -57,10 +60,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
     statusCode: number,
     request: RequestWithId,
   ): ErrorResponse {
-    const exceptionResponse = exception.getResponse();
+    if (this.isServerError(statusCode)) {
+      return this.buildInternalErrorResponse(request, statusCode);
+    }
+
+    const exceptionResponse: unknown = exception.getResponse();
 
     let message: string | string[] = 'An error occurred';
-    let error = HttpStatus[statusCode] ?? 'Error';
+    let error = this.getHttpStatusName(statusCode);
 
     if (typeof exceptionResponse === 'string') {
       message = exceptionResponse;
@@ -70,11 +77,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     ) {
       const safeResponse = exceptionResponse as SafeExceptionResponse;
 
-      if (safeResponse.message) {
+      if (this.isSafeMessage(safeResponse.message)) {
         message = safeResponse.message;
       }
 
-      if (safeResponse.error) {
+      if (typeof safeResponse.error === 'string') {
         error = safeResponse.error;
       }
     }
@@ -82,11 +89,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
     return this.createErrorResponse(statusCode, message, error, request);
   }
 
-  private buildInternalErrorResponse(request: RequestWithId): ErrorResponse {
+  private buildInternalErrorResponse(
+    request: RequestWithId,
+    statusCode = HttpStatus.INTERNAL_SERVER_ERROR,
+  ): ErrorResponse {
     return this.createErrorResponse(
-      HttpStatus.INTERNAL_SERVER_ERROR,
-      'Internal server error',
-      'Internal Server Error',
+      statusCode,
+      INTERNAL_ERROR_MESSAGE,
+      INTERNAL_ERROR_NAME,
       request,
     );
   }
@@ -108,6 +118,33 @@ export class HttpExceptionFilter implements ExceptionFilter {
     };
   }
 
+  private isServerError(statusCode: number): boolean {
+    return statusCode >= HttpStatus.INTERNAL_SERVER_ERROR && statusCode < 600;
+  }
+
+  private getHttpStatusName(statusCode: number): string {
+    const statusName = HttpStatus[statusCode];
+
+    return statusName
+      ? statusName
+          .split('_')
+          .map((word) => word[0] + word.slice(1).toLowerCase())
+          .join(' ')
+      : 'Error';
+  }
+
+  private isSafeMessage(value: unknown): value is string | string[] {
+    if (typeof value === 'string') {
+      return true;
+    }
+
+    return (
+      Array.isArray(value) &&
+      value.length > 0 &&
+      value.every((item: unknown) => typeof item === 'string')
+    );
+  }
+
   private logException(
     exception: unknown,
     errorResponse: ErrorResponse,
@@ -127,9 +164,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         `[${requestId}] ${method} ${path} ` +
         `${errorResponse.statusCode} - ${message}`;
 
-      if (
-        errorResponse.statusCode >= Number(HttpStatus.INTERNAL_SERVER_ERROR)
-      ) {
+      if (this.isServerError(errorResponse.statusCode)) {
         this.logger.error(logMessage, this.getStack(exception));
       } else {
         this.logger.warn(logMessage);

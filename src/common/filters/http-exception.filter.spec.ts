@@ -5,10 +5,10 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { Response } from 'express';
+import type { Response } from 'express';
 
+import type { RequestWithId } from '../middlewares/request-id.middleware';
 import { HttpExceptionFilter } from './http-exception.filter';
-import { RequestWithId } from '../middlewares/request-id.middleware';
 
 describe('HttpExceptionFilter', () => {
   let filter: HttpExceptionFilter;
@@ -47,7 +47,6 @@ describe('HttpExceptionFilter', () => {
     } as ArgumentsHost;
 
     warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-
     errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
   });
 
@@ -56,7 +55,7 @@ describe('HttpExceptionFilter', () => {
   });
 
   describe('HTTP exceptions', () => {
-    it('should preserve the status and message of a BadRequestException', () => {
+    it('preserves the status and message of a BadRequestException', () => {
       filter.catch(new BadRequestException('Invalid request'), host);
 
       expect(response.status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
@@ -77,7 +76,7 @@ describe('HttpExceptionFilter', () => {
       expect(errorSpy).not.toHaveBeenCalled();
     });
 
-    it('should preserve validation message arrays', () => {
+    it('preserves validation message arrays', () => {
       const exception = new HttpException(
         {
           message: ['email must be an email', 'password should not be empty'],
@@ -96,17 +95,99 @@ describe('HttpExceptionFilter', () => {
       );
     });
 
-    it('should log HTTP 5xx exceptions as errors', () => {
+    it('uses a safe fallback for malformed exception messages', () => {
+      const exception = new HttpException(
+        {
+          message: {
+            internal: 'sensitive implementation detail',
+          },
+          error: 'Bad Request',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+
+      filter.catch(exception, host);
+
+      const responseBody = response.json.mock.calls[0][0];
+
+      expect(responseBody.message).toBe('An error occurred');
+      expect(JSON.stringify(responseBody)).not.toContain(
+        'sensitive implementation detail',
+      );
+    });
+
+    it('does not expose non-string error metadata', () => {
+      const exception = new HttpException(
+        {
+          message: 'Invalid input',
+          error: {
+            internal: 'sensitive implementation detail',
+          },
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+
+      filter.catch(exception, host);
+
+      const responseBody = response.json.mock.calls[0][0];
+
+      expect(responseBody.message).toBe('Invalid input');
+      expect(responseBody.error).toBe('Bad Request');
+      expect(JSON.stringify(responseBody)).not.toContain(
+        'sensitive implementation detail',
+      );
+    });
+
+    it('sanitizes internal server error messages', () => {
+      const sensitiveMessage =
+        'Database connection failed: postgres://user:password@host';
+
       filter.catch(
-        new HttpException(
-          'Service unavailable',
-          HttpStatus.SERVICE_UNAVAILABLE,
-        ),
+        new HttpException(sensitiveMessage, HttpStatus.INTERNAL_SERVER_ERROR),
         host,
       );
 
       expect(response.status).toHaveBeenCalledWith(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+
+      const responseBody = response.json.mock.calls[0][0];
+
+      expect(responseBody).toEqual(
+        expect.objectContaining({
+          success: false,
+          statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+          message: 'Internal server error',
+          error: 'Internal Server Error',
+        }),
+      );
+
+      expect(JSON.stringify(responseBody)).not.toContain(
+        'Database connection failed',
+      );
+      expect(JSON.stringify(responseBody)).not.toContain('password');
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('sanitizes ServiceUnavailableException messages', () => {
+      const exception = new HttpException(
+        'Upstream provider secret response',
         HttpStatus.SERVICE_UNAVAILABLE,
+      );
+
+      filter.catch(exception, host);
+
+      const responseBody = response.json.mock.calls[0][0];
+
+      expect(response.status).toHaveBeenCalledWith(
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+      expect(responseBody.message).toBe('Internal server error');
+      expect(responseBody.error).toBe('Internal Server Error');
+      expect(JSON.stringify(responseBody)).not.toContain(
+        'Upstream provider secret response',
       );
 
       expect(errorSpy).toHaveBeenCalledTimes(1);
@@ -115,7 +196,7 @@ describe('HttpExceptionFilter', () => {
   });
 
   describe('unexpected exceptions', () => {
-    it('should return a sanitized 500 response for an Error', () => {
+    it('returns a sanitized 500 response for an Error', () => {
       const exception = new Error(
         'Database connection failed: postgres://user:password@host',
       );
@@ -143,7 +224,6 @@ describe('HttpExceptionFilter', () => {
       expect(JSON.stringify(responseBody)).not.toContain(
         'Database connection failed',
       );
-
       expect(JSON.stringify(responseBody)).not.toContain('password');
 
       expect(errorSpy).toHaveBeenCalledWith(
@@ -152,7 +232,7 @@ describe('HttpExceptionFilter', () => {
       );
     });
 
-    it('should sanitize non-Error thrown values', () => {
+    it('sanitizes non-Error thrown values', () => {
       filter.catch('Sensitive internal implementation detail', host);
 
       expect(response.status).toHaveBeenCalledWith(
@@ -171,7 +251,7 @@ describe('HttpExceptionFilter', () => {
   });
 
   describe('request metadata', () => {
-    it('should use fallback values when request metadata is missing', () => {
+    it('uses fallback values when request metadata is missing', () => {
       request = {};
 
       filter.catch(new Error('Unexpected error'), host);
@@ -184,7 +264,7 @@ describe('HttpExceptionFilter', () => {
       );
     });
 
-    it('should not expose query string values in the error path', () => {
+    it('does not expose query string values in the error path', () => {
       filter.catch(new BadRequestException('Invalid input'), host);
 
       const responseBody = response.json.mock.calls[0][0];
@@ -195,7 +275,7 @@ describe('HttpExceptionFilter', () => {
   });
 
   describe('response state', () => {
-    it('should not write a response when headers have already been sent', () => {
+    it('does not write a response when headers have already been sent', () => {
       response.headersSent = true;
 
       filter.catch(new Error('Unexpected error'), host);
