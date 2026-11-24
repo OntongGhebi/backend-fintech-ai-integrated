@@ -15,7 +15,8 @@ export class GetNotificationsQueryDto {
   @ApiPropertyOptional({
     enum: NotificationStatus,
     example: NotificationStatus.UNREAD,
-    description: 'Filter notifications by status.',
+    description:
+      'Filter notifications by delivery/read status. Supports all NotificationStatus values.',
   })
   @IsOptional()
   @IsEnum(NotificationStatus)
@@ -24,7 +25,7 @@ export class GetNotificationsQueryDto {
   @ApiPropertyOptional({
     enum: NotificationChannel,
     example: NotificationChannel.IN_APP,
-    description: 'Filter notifications by delivery channel.',
+    description: 'Filter notifications by channel: IN_APP, EMAIL, or TELEGRAM.',
   })
   @IsOptional()
   @IsEnum(NotificationChannel)
@@ -34,6 +35,7 @@ export class GetNotificationsQueryDto {
     example: NOTIFICATION_DEFAULT_PAGE,
     default: NOTIFICATION_DEFAULT_PAGE,
     minimum: 1,
+    description: '1-based page number. Defaults to 1 when omitted.',
   })
   @IsOptional()
   @Type(() => Number)
@@ -46,6 +48,8 @@ export class GetNotificationsQueryDto {
     default: NOTIFICATION_DEFAULT_LIMIT,
     minimum: 1,
     maximum: NOTIFICATION_MAX_LIMIT,
+    description:
+      'Number of notifications per page. Defaults to 20 and cannot exceed 100.',
   })
   @IsOptional()
   @Type(() => Number)
