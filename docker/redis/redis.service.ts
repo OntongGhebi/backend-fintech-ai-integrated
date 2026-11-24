@@ -39,8 +39,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.client.on('error', (error: Error) => {
-      // Avoid logging connection strings, credentials, or provider details.
-      this.logger.error(`Redis connection error: ${error.message}`);
+      // Never log raw Redis error messages because they may contain
+      // connection details, credentials, or provider information.
+      const errorName =
+        typeof error?.name === 'string' && error.name.trim()
+          ? error.name
+          : 'RedisError';
+
+      this.logger.error(`Redis connection error (${errorName})`);
     });
 
     this.client.on('connect', () => {

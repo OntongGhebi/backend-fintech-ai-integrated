@@ -1,93 +1,198 @@
 # Environment Configuration
 
-This document describes the environment variables used by the backend
-and the validation rules applied at application startup.
+Dokumen ini menjelaskan konfigurasi runtime backend Fintech AI Integrated.
 
-## Required application settings
+## 1. Required environment
 
-| Variable             | Purpose                            |
-| -------------------- | ---------------------------------- |
-| `DATABASE_URL`       | PostgreSQL connection string       |
-| `JWT_ACCESS_SECRET`  | Secret used to sign access tokens  |
-| `JWT_REFRESH_SECRET` | Secret used to sign refresh tokens |
+| Variable             | Keterangan                 |
+| -------------------- | -------------------------- |
+| `DATABASE_URL`       | PostgreSQL connection URL  |
+| `JWT_ACCESS_SECRET`  | Secret untuk access token  |
+| `JWT_REFRESH_SECRET` | Secret untuk refresh token |
 
-The application rejects missing or empty required values.
+Ketiga variabel tersebut wajib tersedia sebelum aplikasi dijalankan.
 
-## Application settings
+## 2. Application
 
-| Variable                 | Default / notes                             |
-| ------------------------ | ------------------------------------------- |
-| `NODE_ENV`               | `development`, `test`, or `production`      |
-| `PORT`                   | `3000`                                      |
-| `API_PREFIX`             | `api/v1`                                    |
-| `APP_TIMEZONE`           | `Asia/Jakarta`                              |
-| `FRONTEND_URL`           | Required as a valid HTTPS URL in production |
-| `JWT_ACCESS_EXPIRES_IN`  | `15m`                                       |
-| `JWT_REFRESH_EXPIRES_IN` | `7d`                                        |
+| Variable       | Default        | Keterangan                               |
+| -------------- | -------------- | ---------------------------------------- |
+| `NODE_ENV`     | `development`  | `development`, `test`, atau `production` |
+| `PORT`         | `3000`         | Port HTTP API, integer 1–65535           |
+| `API_PREFIX`   | `api/v1`       | Prefix endpoint API                      |
+| `APP_TIMEZONE` | `Asia/Jakarta` | IANA timezone                            |
+| `FRONTEND_URL` | —              | Origin frontend untuk CORS               |
 
-## Redis
+`FRONTEND_URL` hanya boleh berisi origin, tanpa path, query, fragment, atau credential.
 
-The backend uses Redis for queue-related and temporary data operations.
+Contoh development:
 
-Supported configuration:
+```dotenv
+FRONTEND_URL=http://localhost:5173
+```
 
-- `REDIS_URL`
-- `REDIS_HOST`
-- `REDIS_PORT`
-- `REDIS_PASSWORD`
-- `REDIS_DB`
+Contoh production:
 
-Production must explicitly configure either `REDIS_URL` or `REDIS_HOST`.
-Do not rely on the development default of `localhost` in a deployed environment.
+```dotenv
+FRONTEND_URL=https://app.example.com
+```
 
-Use a private connection and authentication where supported by the Redis
-service. Do not commit Redis credentials.
+Production wajib menggunakan HTTPS.
 
-## AI configuration
+## 3. Authentication
 
-AI integration remains disabled until a provider is intentionally configured.
+| Variable                 | Default | Keterangan                   |
+| ------------------------ | ------- | ---------------------------- |
+| `JWT_ACCESS_SECRET`      | —       | Access token signing secret  |
+| `JWT_ACCESS_EXPIRES_IN`  | `15m`   | Access token lifetime        |
+| `JWT_REFRESH_SECRET`     | —       | Refresh token signing secret |
+| `JWT_REFRESH_EXPIRES_IN` | `7d`    | Refresh token lifetime       |
 
-Recommended configuration while AI integration is deferred:
+Production requirements:
 
-- `AI_ENABLED=false`
-- `AI_PROVIDER=none`
-- `AI_API_KEY` empty
-- `AI_BASE_URL` empty
-- `AI_MODEL` empty
+- Kedua secret minimal 32 karakter.
+- Access dan refresh secret wajib berbeda.
+- Gunakan nilai acak yang dihasilkan secara kriptografis.
+- Jangan menggunakan secret CI atau development di production.
 
-When AI is enabled, configure all of the following:
+## 4. PostgreSQL
 
-- `AI_PROVIDER=openai-compatible`
-- `AI_API_KEY`
-- `AI_BASE_URL`
-- `AI_MODEL`
+```dotenv
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
+```
 
-`AI_TIMEOUT_MS` optionally controls the provider request timeout.
+Gunakan connection URL dari provider database.
 
-The provider must be supported by the application. Do not use a placeholder
-provider name as a substitute for an actual integration.
+Sebelum menjalankan migration:
 
-## Production security rules
+1. Pastikan target database benar.
+2. Periksa migration status.
+3. Review SQL migration.
+4. Pastikan backup dan recovery tersedia.
+5. Terapkan migration melalui prosedur release yang disetujui.
 
-When `NODE_ENV=production`:
+## 5. Redis and BullMQ
 
-- Access and refresh JWT secrets must each contain at least 32 characters.
-- The access and refresh JWT secrets must be different.
-- `FRONTEND_URL` must be a valid HTTPS URL.
-- Redis connection configuration must be explicit.
-- Real secrets must be supplied through the deployment environment or a
-  secrets manager, not committed to source control.
+| Variable         | Default      | Keterangan           |
+| ---------------- | ------------ | -------------------- |
+| `REDIS_URL`      | —            | Redis connection URL |
+| `REDIS_HOST`     | `localhost`  | Redis host           |
+| `REDIS_PORT`     | `6379`       | Redis port           |
+| `REDIS_PASSWORD` | —            | Redis password       |
+| `REDIS_DB`       | `0`          | Redis database index |
+| `BULLMQ_PREFIX`  | `fintech-ai` | BullMQ key prefix    |
 
-Generate independent JWT secrets using a cryptographically secure generator.
-Never reuse the CI-only example secrets in a real environment.
+`REDIS_URL` mendukung:
 
-## CI and local verification
+- `redis://`
+- `rediss://` untuk koneksi TLS
 
-CI may use dummy values to validate configuration and compile the application.
-These values must not be reused in development shared environments or production.
+Jika `REDIS_URL` tersedia, URL tersebut digunakan sebagai konfigurasi utama. Jika tidak, aplikasi menggunakan host, port, password, dan database index.
 
-Before a release, validate the environment against the actual target
-environment and confirm that database, Redis, email, Telegram, payment gateway,
-and other integrations have the required configuration for the features enabled.
+Production wajib mengatur Redis secara eksplisit.
 
-This validation document does not imply that an external deployment has occurred.
+Redis digunakan untuk:
+
+- BullMQ jobs.
+- Rate limiting.
+- Temporary application state.
+- Queue processing dan recovery.
+
+Redis merupakan dependency runtime wajib untuk konfigurasi aplikasi saat ini.
+
+## 6. Email
+
+```dotenv
+RESEND_API_KEY=
+EMAIL_FROM=
+```
+
+Email verification dan email delivery memerlukan konfigurasi provider yang valid.
+
+Jangan menganggap email berhasil dikirim hanya karena job berhasil dimasukkan ke queue.
+
+## 7. Midtrans
+
+```dotenv
+MIDTRANS_IS_PRODUCTION=false
+MIDTRANS_SERVER_KEY=
+MIDTRANS_CLIENT_KEY=
+```
+
+Gunakan sandbox credentials untuk development dan staging.
+
+Jangan menggunakan production credentials untuk pengujian lokal.
+
+## 8. Telegram
+
+```dotenv
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_SECRET=
+TELEGRAM_WEBHOOK_URL=
+```
+
+Konfigurasi hanya diperlukan ketika integrasi Telegram diaktifkan.
+
+Webhook harus menggunakan URL publik HTTPS pada environment yang mendukung webhook eksternal.
+
+## 9. AI
+
+AI integration tetap disabled secara default.
+
+```dotenv
+AI_ENABLED=false
+AI_PROVIDER=none
+AI_API_KEY=
+AI_BASE_URL=
+AI_MODEL=
+AI_TIMEOUT_MS=30000
+```
+
+Ketika AI diaktifkan, konfigurasi provider, API key, base URL, model, dan timeout wajib valid.
+
+Provider yang saat ini didukung:
+
+- `none`
+- `openai-compatible`
+
+Timeout harus berupa integer positif dan maksimal 300000 ms.
+
+## 10. Production validation
+
+Ketika `NODE_ENV=production`:
+
+- JWT secrets wajib memenuhi panjang minimum dan berbeda.
+- Frontend URL wajib HTTPS.
+- Redis URL atau Redis host harus ditentukan secara eksplisit.
+- Secret wajib berasal dari environment secret manager.
+- Jangan memasukkan `.env` production ke repository.
+
+## 11. Health endpoints
+
+| Endpoint               | Fungsi                        |
+| ---------------------- | ----------------------------- |
+| `/api/v1/health/live`  | Process liveness              |
+| `/api/v1/health/ready` | Database dan Redis readiness  |
+| `/api/v1/health`       | Backward-compatible readiness |
+
+Liveness tidak membuktikan bahwa dependency eksternal siap.
+
+Readiness saat ini memeriksa PostgreSQL dan Redis.
+
+## 12. Verification
+
+Jalankan dari direktori backend:
+
+```bash
+npx prisma validate --schema src/database/prisma/schema.prisma
+npm run build
+npm test -- --runInBand
+npm run test:e2e
+```
+
+Validasi environment saat startup juga harus berhasil pada target environment yang akan digunakan.
+
+## 13. Deployment boundary
+
+Dokumentasi ini tidak menyatakan bahwa aplikasi sudah di-deploy.
+
+Cloud deployment tetap ditunda sampai hosting, database, Redis, secrets, monitoring, backup, dan rollback telah diverifikasi.

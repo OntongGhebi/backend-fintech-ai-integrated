@@ -9,6 +9,9 @@ import {
 } from 'class-validator';
 
 const MIN_PRODUCTION_SECRET_LENGTH = 32;
+const MAX_PORT = 65535;
+const MAX_AI_TIMEOUT_MS = 300000;
+
 const SUPPORTED_AI_PROVIDERS = ['none', 'openai-compatible'] as const;
 
 class EnvironmentVariables {
@@ -106,6 +109,146 @@ function getNonEmptyString(
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function validateIntegerSetting(
+  config: Record<string, unknown>,
+  key: string,
+  minimum: number,
+  maximum?: number,
+): void {
+  const rawValue = config[key];
+
+  if (rawValue === undefined || rawValue === null || rawValue === '') {
+    return;
+  }
+
+  const value = Number(rawValue);
+
+  if (
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    (maximum !== undefined && value > maximum)
+  ) {
+    const range =
+      maximum === undefined
+        ? `at least ${minimum}`
+        : `between ${minimum} and ${maximum}`;
+
+    throw new Error(
+      `Environment validation failed: ${key} must be an integer ${range}.`,
+    );
+  }
+}
+
+function validateApplicationConfiguration(
+  config: Record<string, unknown>,
+): void {
+  validateIntegerSetting(config, 'PORT', 1, MAX_PORT);
+  validateIntegerSetting(config, 'REDIS_PORT', 1, MAX_PORT);
+  validateIntegerSetting(config, 'REDIS_DB', 0);
+  validateIntegerSetting(config, 'AI_TIMEOUT_MS', 1, MAX_AI_TIMEOUT_MS);
+
+  const apiPrefix = getNonEmptyString(config, 'API_PREFIX');
+
+  if (
+    apiPrefix &&
+    !/^[A-Za-z0-9][A-Za-z0-9._~-]*(\/[A-Za-z0-9][A-Za-z0-9._~-]*)*$/.test(
+      apiPrefix,
+    )
+  ) {
+    throw new Error(
+      'Environment validation failed: API_PREFIX must contain valid path segments without leading/trailing slashes, query strings, or fragments.',
+    );
+  }
+
+  const timezone = getNonEmptyString(config, 'APP_TIMEZONE');
+
+  if (timezone) {
+    try {
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+      });
+    } catch {
+      throw new Error(
+        'Environment validation failed: APP_TIMEZONE must be a valid IANA timezone.',
+      );
+    }
+  }
+
+  const frontendUrl = getNonEmptyString(config, 'FRONTEND_URL');
+
+  if (frontendUrl) {
+    let parsedFrontendUrl: URL;
+
+    try {
+      parsedFrontendUrl = new URL(frontendUrl);
+    } catch {
+      const expectedFormat =
+        config.NODE_ENV === 'production'
+          ? 'a valid HTTPS URL'
+          : 'a valid HTTP or HTTPS origin';
+      throw new Error(
+        `Environment validation failed: FRONTEND_URL must be ${expectedFormat}.`,
+      );
+    }
+
+    if (!['http:', 'https:'].includes(parsedFrontendUrl.protocol)) {
+      throw new Error(
+        'Environment validation failed: FRONTEND_URL must use HTTP or HTTPS.',
+      );
+    }
+
+    if (
+      parsedFrontendUrl.username ||
+      parsedFrontendUrl.password ||
+      (parsedFrontendUrl.pathname !== '' &&
+        parsedFrontendUrl.pathname !== '/') ||
+      parsedFrontendUrl.search ||
+      parsedFrontendUrl.hash
+    ) {
+      throw new Error(
+        'Environment validation failed: FRONTEND_URL must contain only the frontend origin without credentials, path, query, or fragment.',
+      );
+    }
+  }
+
+  const redisUrl = getNonEmptyString(config, 'REDIS_URL');
+
+  if (redisUrl) {
+    let parsedRedisUrl: URL;
+
+    try {
+      parsedRedisUrl = new URL(redisUrl);
+    } catch {
+      throw new Error(
+        'Environment validation failed: REDIS_URL must be a valid Redis connection URL.',
+      );
+    }
+
+    if (
+      !['redis:', 'rediss:'].includes(parsedRedisUrl.protocol) ||
+      !parsedRedisUrl.hostname
+    ) {
+      throw new Error(
+        'Environment validation failed: REDIS_URL must use redis:// or rediss:// and contain a hostname.',
+      );
+    }
+
+    if (parsedRedisUrl.port) {
+      const redisUrlPort = Number(parsedRedisUrl.port);
+
+      if (
+        !Number.isInteger(redisUrlPort) ||
+        redisUrlPort < 1 ||
+        redisUrlPort > MAX_PORT
+      ) {
+        throw new Error(
+          'Environment validation failed: REDIS_URL port must be between 1 and 65535.',
+        );
+      }
+    }
+  }
+}
+
 function validateProductionSecurity(config: Record<string, unknown>): void {
   if (config.NODE_ENV !== 'production') {
     return;
@@ -140,15 +283,7 @@ function validateProductionSecurity(config: Record<string, unknown>): void {
     );
   }
 
-  let parsedFrontendUrl: URL;
-
-  try {
-    parsedFrontendUrl = new URL(frontendUrl);
-  } catch {
-    throw new Error(
-      'Environment validation failed: FRONTEND_URL must be a valid HTTPS URL in production.',
-    );
-  }
+  const parsedFrontendUrl = new URL(frontendUrl);
 
   if (parsedFrontendUrl.protocol !== 'https:') {
     throw new Error(
@@ -238,6 +373,7 @@ export function validateEnvironment(
     );
   }
 
+  validateApplicationConfiguration(config);
   validateProductionSecurity(config);
   validateAiConfiguration(config);
 
