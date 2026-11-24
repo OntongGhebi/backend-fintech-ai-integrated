@@ -5,7 +5,8 @@ import { BudgetStatus } from 'src/database/enums/budget-status.enum';
 
 export class GetBudgetsQueryDto {
   @ApiPropertyOptional({
-    description: 'Filter budgets by budget status',
+    description:
+      'Filter budgets by lifecycle status. Omit this parameter to retrieve all non-archived budgets.',
     enum: BudgetStatus,
     example: BudgetStatus.ACTIVE,
   })
@@ -15,8 +16,9 @@ export class GetBudgetsQueryDto {
 
   @ApiPropertyOptional({
     description:
-      'Return the monthly allocation for this month. Must be YYYY-MM-01.',
+      'Select the monthly budget allocation to include in the response. Must be the first calendar day of the selected month in YYYY-MM-01 format. Omit to retrieve the available allocation history.',
     example: '2026-11-01',
+    pattern: '^\\d{4}-\\d{2}-01$',
   })
   @IsOptional()
   @IsDateString()
