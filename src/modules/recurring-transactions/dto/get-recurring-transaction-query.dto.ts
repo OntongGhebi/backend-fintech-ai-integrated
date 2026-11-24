@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
+
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsEnum, IsOptional } from 'class-validator';
@@ -17,7 +18,7 @@ export class GetRecurringTransactionsQueryDto {
   type?: TransactionType;
 
   @ApiPropertyOptional({
-    description: 'Filter recurring transactions by frequency.',
+    description: 'Filter recurring transactions by recurrence frequency.',
     enum: RecurringFrequency,
     example: RecurringFrequency.MONTHLY,
   })
@@ -26,13 +27,16 @@ export class GetRecurringTransactionsQueryDto {
   frequency?: RecurringFrequency;
 
   @ApiPropertyOptional({
-    description: 'Filter recurring transactions by active state.',
+    description:
+      'Filter recurring transactions by active state. Accepted query values are exactly "true" or "false".',
+    type: Boolean,
     example: true,
   })
   @IsOptional()
   @Transform(({ value }) => {
     if (value === 'true') return true;
     if (value === 'false') return false;
+
     return value;
   })
   @IsBoolean()
