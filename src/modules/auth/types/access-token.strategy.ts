@@ -32,6 +32,7 @@ export class AccessTokenStrategy extends PassportStrategy(
 
     return {
       id: payload.sub,
+      sid: payload.sid,
     };
   }
 }

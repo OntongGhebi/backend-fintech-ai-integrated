@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import type {
-  ThrottlerStorage,
-  ThrottlerStorageRecord,
-} from '@nestjs/throttler';
+import type { ThrottlerStorage } from '@nestjs/throttler';
 
 import { RedisService } from '../../../docker/redis/redis.service';
+
+interface RedisThrottlerStorageRecord {
+  totalHits: number;
+  timeToExpire: number;
+  isBlocked: boolean;
+  timeToBlockExpire: number;
+}
 
 const INCREMENT_RATE_LIMIT_SCRIPT = `
 local countKey = KEYS[1]
@@ -73,7 +77,7 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
     limit: number,
     blockDuration: number,
     throttlerName: string,
-  ): Promise<ThrottlerStorageRecord> {
+  ): Promise<RedisThrottlerStorageRecord> {
     const storageKey = `fintech:rate-limit:{${throttlerName}:${key}}`;
     const countKey = `${storageKey}:count`;
     const blockKey = `${storageKey}:block`;
