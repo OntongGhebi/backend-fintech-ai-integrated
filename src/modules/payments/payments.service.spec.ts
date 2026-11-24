@@ -7,7 +7,8 @@ describe('PaymentsService', () => {
   let service: PaymentsService;
   let repository: jest.Mocked<PaymentsRepository>;
 
-  const now = new Date('2026-10-12T00:00:00.000Z');
+  const createdAt = new Date('2026-10-12T00:00:00.000Z');
+  const updatedAt = new Date('2026-10-13T08:30:00.000Z');
 
   const payment = {
     id: '11111111-1111-4111-8111-111111111111',
@@ -18,11 +19,11 @@ describe('PaymentsService', () => {
     status: 'PAID',
     provider: 'manual',
     providerPaymentId: 'provider-payment-001',
-    paidAt: now,
+    paidAt: createdAt,
     failedAt: null,
     metadata: null,
-    createdAt: now,
-    updatedAt: now,
+    createdAt,
+    updatedAt,
     subscription: {
       id: '33333333-3333-4333-8333-333333333333',
       billingInterval: 'MONTHLY',
@@ -62,9 +63,14 @@ describe('PaymentsService', () => {
         page: 2,
         limit: 10,
       });
+
       expect(result.data).toHaveLength(1);
       expect(result.data[0].amount).toBe('99000.0000');
       expect(result.data[0].subscription.planCode).toBe('PREMIUM_MONTHLY');
+      expect(result.data[0].createdAt).toEqual(createdAt);
+      expect(result.data[0].updatedAt).toEqual(updatedAt);
+      expect(result.data[0].updatedAt).not.toEqual(result.data[0].createdAt);
+
       expect(result.page).toBe(2);
       expect(result.limit).toBe(10);
       expect(result.totalItems).toBe(21);
@@ -89,7 +95,7 @@ describe('PaymentsService', () => {
   });
 
   describe('findById', () => {
-    it('should return payment details', async () => {
+    it('should return payment details with correct timestamps', async () => {
       repository.findByIdAndUserId.mockResolvedValue(payment as never);
 
       const result = await service.findById(payment.id, payment.userId);
@@ -98,11 +104,14 @@ describe('PaymentsService', () => {
         payment.id,
         payment.userId,
       );
+
       expect(result.id).toBe(payment.id);
       expect(result.status).toBe('PAID');
       expect(result.amount).toBe('99000.0000');
       expect(result.providerPaymentId).toBe('provider-payment-001');
       expect(result.subscription.planName).toBe('Premium Monthly');
+      expect(result.createdAt).toEqual(createdAt);
+      expect(result.updatedAt).toEqual(updatedAt);
 
       // Metadata internal tidak boleh ikut diekspos.
       expect(result).not.toHaveProperty('metadata');

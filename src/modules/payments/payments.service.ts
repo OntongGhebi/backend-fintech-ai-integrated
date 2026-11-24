@@ -62,7 +62,7 @@ export class PaymentsService {
       paidAt: payment.paidAt,
       failedAt: payment.failedAt,
       createdAt: payment.createdAt,
-      updatedAt: payment.createdAt,
+      updatedAt: payment.updatedAt,
       subscription: {
         id: payment.subscription.id,
         planCode: payment.subscription.plan.code,
